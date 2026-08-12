@@ -101,12 +101,20 @@ export async function testGeminiKey(
   }
 }
 
+/** MTG frame treatments the scanner can distinguish (full-art variants etc.). */
+export const MTG_TREATMENTS = ['regular', 'borderless', 'extended', 'showcase', 'retro'] as const
+export type MtgTreatment = (typeof MTG_TREATMENTS)[number]
+
 export interface Identification {
   game: Game | 'other'
   name: string
   set_code: string | null
   collector_number: string | null
   confidence: number
+  /** True/false when the foil sheen is clearly visible/absent; null when unsure. */
+  foil: boolean | null
+  /** MTG only: the frame treatment in view, null when unsure or another game. */
+  treatment: MtgTreatment | null
 }
 
 export async function identifyCardPhoto(
@@ -130,8 +138,10 @@ Rules:
 - "game": ${GAMES.join(', ')} — or other (not a TCG card / unreadable). riftbound is the League of Legends TCG, starwars is Star Wars: Unlimited, onepiece is the One Piece Card Game, gundam is the Gundam Card Game.
 - "name": the exact printed card name, nothing else (for Lorcana include the version after " - ", e.g. "Elsa - Snow Queen").
 - "set_code": the set/expansion code if legible (e.g. "MH3", "PAL", "LOB", "OGN", "OP01"), else null.
-- "collector_number": the collector number if legible (e.g. "182/193", "0123"), digits/slash only, else null.
+- "collector_number": the collector number if legible (e.g. "182/193", "0123"), digits/slash only, else null. Read it carefully — it distinguishes alternate-art versions.
 - "confidence": 0 to 1, how sure you are of game+name.
+- "foil": true if the surface shows a foil/holographic rainbow sheen, false if plainly matte, null if unsure.
+- "treatment": Magic only — the frame: "regular", "borderless" (art fills the card edge to edge / full art), "extended" (art stretched into the side borders), "showcase" (special stylized frame), "retro" (old-style beveled frame). Null for other games or when unsure.
 Respond with JSON only.`,
             },
             { inline_data: { mime_type: 'image/jpeg', data: base64Jpeg } },
@@ -148,6 +158,8 @@ Respond with JSON only.`,
             set_code: { type: 'STRING', nullable: true },
             collector_number: { type: 'STRING', nullable: true },
             confidence: { type: 'NUMBER' },
+            foil: { type: 'BOOLEAN', nullable: true },
+            treatment: { type: 'STRING', enum: [...MTG_TREATMENTS], nullable: true },
           },
           required: ['game', 'name', 'confidence'],
         },
@@ -183,6 +195,8 @@ function sanitizeIdentification(raw: unknown): Identification | null {
     set_code: str(obj.set_code),
     collector_number: number,
     confidence: Math.max(0, Math.min(1, obj.confidence)),
+    foil: typeof obj.foil === 'boolean' ? obj.foil : null,
+    treatment: MTG_TREATMENTS.includes(obj.treatment as MtgTreatment) ? (obj.treatment as MtgTreatment) : null,
   }
 }
 

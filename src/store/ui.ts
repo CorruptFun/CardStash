@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import type { Card, CollectionItem, Game } from '../lib/types'
+import type { Card, CollectionItem, Finish, Game } from '../lib/types'
 
 export type ToastKind = 'info' | 'success' | 'error'
 
@@ -23,6 +23,8 @@ export interface SheetRequest {
   item?: CollectionItem
   /** Present when opened from inside a deck — the add bar targets that deck. */
   deckId?: string
+  /** Preselect this finish in the add bar (scanner saw a foil sheen). */
+  finish?: Finish
   origin?: 'scan' | 'search' | 'collection' | 'deck'
 }
 
