@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, PriceEntry, Printing } from './types'
-import { cardmarketSearchLink, ebaySoldLink, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, tcgplayerSearchLink } from './util'
 
 const API = 'https://db.ygoprodeck.com/api/v7'
 
@@ -23,16 +23,15 @@ function supertypeOf(type: string): string {
 function toCard(raw: any): Card {
   const entries: PriceEntry[] = []
   const priceRow = raw.card_prices?.[0]
-  const push = (value: string | undefined, source: PriceEntry['source'], currency: PriceEntry['currency'] = 'USD') => {
+  const push = (value: string | undefined, source: PriceEntry['source']) => {
     const num = value == null ? NaN : parseFloat(value)
     if (Number.isFinite(num) && num > 0)
-      entries.push({ source, kind: 'market', finish: 'nonfoil', currency, value: num })
+      entries.push({ source, kind: 'market', finish: 'nonfoil', currency: 'USD', value: num })
   }
   push(priceRow?.tcgplayer_price, 'tcgplayer')
   push(priceRow?.ebay_price, 'ebay')
   push(priceRow?.amazon_price, 'amazon')
   push(priceRow?.coolstuffinc_price, 'coolstuffinc')
-  push(priceRow?.cardmarket_price, 'cardmarket', 'EUR')
 
   const printings: Printing[] = (raw.card_sets ?? []).map((set: any) => ({
     setName: set.set_name,
@@ -70,7 +69,6 @@ function toCard(raw: any): Card {
     prices: mergePrices(entries),
     links: {
       tcgplayer: tcgplayerSearchLink(raw.name),
-      cardmarket: cardmarketSearchLink('yugioh', raw.name),
       ebaySold: ebaySoldLink({ name: raw.name, game: 'yugioh' }),
       source: `https://ygoprodeck.com/card/?search=${encodeURIComponent(raw.name)}`,
     },

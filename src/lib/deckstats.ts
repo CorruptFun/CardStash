@@ -1,5 +1,5 @@
-import { displayCurrency, priceCurrency, bestFor, pickValue } from './prices'
-import type { Card, Currency, DeckBoard, DeckCard, Game } from './types'
+import { pickValue } from './prices'
+import type { Card, DeckBoard, DeckCard, Game } from './types'
 
 export const BOARD_LABEL: Record<DeckBoard, string> = {
   main: 'Main deck',
@@ -42,50 +42,42 @@ export function addedToBoardToast(name: string, board: DeckBoard): string {
 
 const PREMIUM_FINISHES = ['foil', 'holo', 'etched', 'firstEd', 'reverse'] as const
 
-/** Deck rows price at the card's headline (NM nonfoil-ish) price. */
-export function deckRowUnitPrice(row: DeckCard, currency: Currency = displayCurrency()): number {
+/** Deck rows price at the card's headline (NM nonfoil-ish) USD price. */
+export function deckRowUnitPrice(row: DeckCard): number {
   const { prices } = row.card
   return (
-    (currency === 'USD' ? prices.best : (bestFor(prices, currency) ?? prices.best)) ??
-    pickValue(prices.entries, [...PREMIUM_FINISHES], currency) ??
-    0
+    pickValue(prices.entries, ['nonfoil']) ??
+    pickValue(prices.entries, [...PREMIUM_FINISHES]) ??
+    (prices.entries.length ? 0 : (prices.best ?? 0))
   )
-}
-
-export function deckRowCurrency(row: DeckCard, currency: Currency = displayCurrency()): Currency {
-  return priceCurrency(row.card.prices, 'best', currency)
 }
 
 export interface DeckStats {
   counts: Record<DeckBoard, number>
   total: number
   value: number
-  valueEur: number
   /** Main-board mana curve buckets 0..7+ (MTG, non-land). */
   curve: number[]
   colors: Record<string, number>
   types: { type: string; count: number }[]
   owned: number
-  missing: { qty: number; usd: number; eur: number }
+  missing: { qty: number; usd: number }
   warnings: string[]
 }
 
 export function deckStats(game: Game, rows: DeckCard[], ownedByName?: Map<string, number>): DeckStats {
-  const currency = displayCurrency()
   const counts: Record<DeckBoard, number> = { main: 0, side: 0, extra: 0 }
   const curve = new Array<number>(8).fill(0)
   const colors: Record<string, number> = {}
   const typeCounts = new Map<string, number>()
   let valueUsd = 0
-  let valueEur = 0
   let owned = 0
-  const missing = { qty: 0, usd: 0, eur: 0 }
+  const missing = { qty: 0, usd: 0 }
   const remaining = new Map(ownedByName ?? [])
 
   for (const row of rows) {
     counts[row.board] += row.qty
-    const rowValue = deckRowUnitPrice(row, currency) * row.qty
-    if (rowValue > 0) (deckRowCurrency(row, currency) === 'EUR' ? (valueEur += rowValue) : (valueUsd += rowValue))
+    valueUsd += deckRowUnitPrice(row) * row.qty
 
     const supertype = row.card.supertype ?? 'Other'
     typeCounts.set(supertype, (typeCounts.get(supertype) ?? 0) + row.qty)
@@ -109,8 +101,7 @@ export function deckStats(game: Game, rows: DeckCard[], ownedByName?: Map<string
       const short = row.qty - claimed
       if (short > 0) {
         missing.qty += short
-        const shortValue = deckRowUnitPrice(row, currency) * short
-        if (shortValue > 0) (deckRowCurrency(row, currency) === 'EUR' ? (missing.eur += shortValue) : (missing.usd += shortValue))
+        missing.usd += deckRowUnitPrice(row) * short
       }
     }
   }
@@ -120,12 +111,10 @@ export function deckStats(game: Game, rows: DeckCard[], ownedByName?: Map<string
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count)
   missing.usd = Math.round(missing.usd * 100) / 100
-  missing.eur = Math.round(missing.eur * 100) / 100
   return {
     counts,
     total,
     value: Math.round(valueUsd * 100) / 100,
-    valueEur: Math.round(valueEur * 100) / 100,
     curve,
     colors,
     types,
@@ -253,11 +242,6 @@ export function decklistText(rows: DeckCard[]): string {
     .filter(Boolean)
     .join('\n')
     .trim()
-}
-
-export interface DeckMoney {
-  usd: string
-  eur: string | null
 }
 
 /** Card the deck tile shows: the chosen cover, else the priciest card. */

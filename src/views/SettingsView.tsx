@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Modal, Seg, Toggle } from '../components/basics'
+import { Modal, Toggle } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, type Insights } from '../lib/analytics'
 import { clearAllData } from '../lib/db'
@@ -7,10 +7,9 @@ import { seedDemoData } from '../lib/demo'
 import { testGeminiKey } from '../lib/gemini'
 import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
-import type { Currency } from '../lib/types'
 import { useUi } from '../store/ui'
 
-const APP_VERSION = '0.5.0'
+const APP_VERSION = '0.5.1'
 const INSIGHT_DAYS = 30
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -85,25 +84,6 @@ export function SettingsView() {
           edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
           engine downloads ~12 MB once and is cached for offline use.
         </p>
-      </section>
-      <section className="setsec">
-        <h3>Display</h3>
-        <div className="setrow">
-          <div className="setrow__text">
-            <span>Currency</span>
-            <em>Prices favor this currency when both are available</em>
-          </div>
-          <Seg
-            ariaLabel="Currency"
-            size="sm"
-            options={[
-              { value: 'USD', label: '$ USD' },
-              { value: 'EUR', label: '€ EUR' },
-            ]}
-            value={config.currency}
-            onChange={(currency) => config.set({ currency: currency as Currency })}
-          />
-        </div>
       </section>
       <section className="setsec">
         <h3>AI & API keys</h3>
@@ -395,10 +375,11 @@ export function SettingsView() {
           <span className="setabout__ver">v{APP_VERSION}</span>
         </p>
         <p className="setsec__note">
-          Point at any card, know what it's worth. Card data & prices: Scryfall (Magic), pokemontcg.io (Pokémon),
-          YGOPRODeck (Yu-Gi-Oh!), Lorcast (Lorcana), and TCGplayer market data via TCGCSV (Riftbound, One Piece, Star
-          Wars: Unlimited, Digimon, Gundam). Prices are market estimates from those services, refreshed on demand —
-          always verify before big trades. Cardstock is unaffiliated with the publishers of any of these games.
+          Point at any card, know what it's worth. Card data & prices (USD, US market): Scryfall (Magic),
+          pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!), Lorcast (Lorcana), and TCGplayer market data via TCGCSV
+          (Riftbound, One Piece, Star Wars: Unlimited, Digimon, Gundam). Prices are market estimates from those
+          services, refreshed on demand — always verify before big trades. Cardstock is unaffiliated with the
+          publishers of any of these games.
         </p>
       </section>
       <Modal open={confirmErase} onClose={() => setConfirmErase(false)} title="Erase everything?">

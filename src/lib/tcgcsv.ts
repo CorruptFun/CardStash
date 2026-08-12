@@ -2,7 +2,7 @@ import { db } from './db'
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, CatalogCache, Finish, Game, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, normalizeName, similarity, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, normalizeName, similarity, tcgplayerSearchLink } from './util'
 
 /**
  * TCGCSV (tcgcsv.com) mirrors TCGplayer's catalog + daily prices as static
@@ -165,7 +165,6 @@ function toCard(game: Game, product: any, group: any, prices: PriceRow[], spec: 
     links: {
       market: product.url || undefined,
       tcgplayer: product.url || tcgplayerSearchLink(name),
-      cardmarket: cardmarketSearchLink(game, name),
       ebaySold: ebaySoldLink({ name, setName: group?.name, game }),
     },
   }

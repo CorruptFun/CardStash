@@ -1,4 +1,4 @@
-import type { Currency, Game } from './types'
+import type { Game } from './types'
 
 export function uid(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -11,12 +11,11 @@ export function ymd(at: number = Date.now()): string {
   return new Date(at).toISOString().slice(0, 10)
 }
 
-export function money(value: number | null | undefined, currency: Currency = 'USD'): string {
+export function money(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'
-  const symbol = currency === 'EUR' ? '€' : '$'
   const sign = value < 0 ? '-' : ''
   const abs = Math.abs(value)
-  return abs >= 1000 ? `${sign}${symbol}${Math.round(abs).toLocaleString('en-US')}` : `${sign}${symbol}${abs.toFixed(2)}`
+  return abs >= 1000 ? `${sign}$${Math.round(abs).toLocaleString('en-US')}` : `${sign}$${abs.toFixed(2)}`
 }
 
 export function dateTime(at: number): string {
@@ -88,22 +87,6 @@ export function ebaySoldLink(card: { name: string; setName?: string; game: Game 
 
 export function tcgplayerSearchLink(name: string): string {
   return `https://www.tcgplayer.com/search/all/product?q=${encodeURIComponent(name)}&view=grid`
-}
-
-const CARDMARKET_SECTION: Record<Game, string> = {
-  mtg: 'Magic',
-  pokemon: 'Pokemon',
-  yugioh: 'YuGiOh',
-  riftbound: 'Riftbound',
-  lorcana: 'Lorcana',
-  onepiece: 'OnePiece',
-  starwars: 'StarWarsUnlimited',
-  digimon: 'Digimon',
-  gundam: 'Gundam',
-}
-
-export function cardmarketSearchLink(game: Game, name: string): string {
-  return `https://www.cardmarket.com/en/${CARDMARKET_SECTION[game]}/Products/Search?searchString=${encodeURIComponent(name)}`
 }
 
 export function haptic(pattern: number | number[]): void {

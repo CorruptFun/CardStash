@@ -1,8 +1,6 @@
-import { settings } from './settings'
 import type {
   Card,
   Condition,
-  Currency,
   Finish,
   PriceEntry,
   Prices,
@@ -16,80 +14,39 @@ export interface Priceable {
   card: Card
 }
 
-export function displayCurrency(): Currency {
-  try {
-    return settings().currency === 'EUR' ? 'EUR' : 'USD'
-  } catch {
-    return 'USD'
-  }
+/**
+ * The app prices in USD only. Cards stored by older versions still carry EUR
+ * (Cardmarket) entries in IndexedDB, so every picker filters them out — a
+ * legacy €-value must never surface labeled as dollars.
+ */
+function usdOnly(entries: PriceEntry[]): PriceEntry[] {
+  return entries.filter((e) => (e.currency ?? 'USD') !== 'EUR')
 }
 
-/**
- * Pick the most trustworthy entry among `finishes`, favoring the display
- * currency: EUR display prefers Cardmarket trend; USD prefers TCGplayer market.
- */
-export function pickEntry(
-  entries: PriceEntry[],
-  finishes: Finish[],
-  currency: Currency = 'USD',
-): PriceEntry | null {
-  const pool = entries.filter((e) => finishes.includes(e.finish) && e.value > 0)
+/** Pick the most trustworthy USD entry among `finishes`. */
+export function pickEntry(entries: PriceEntry[], finishes: Finish[]): PriceEntry | null {
+  const pool = usdOnly(entries).filter((e) => finishes.includes(e.finish) && e.value > 0)
   if (!pool.length) return null
   const find = (fn: (e: PriceEntry) => boolean) => pool.find(fn) ?? null
-  if (currency === 'EUR') {
-    const eur =
-      find((e) => e.source === 'cardmarket' && e.kind === 'trend' && e.currency === 'EUR') ??
-      find((e) => e.currency === 'EUR' && e.kind === 'trend') ??
-      find((e) => e.currency === 'EUR' && e.kind === 'market') ??
-      find((e) => e.currency === 'EUR' && e.kind !== 'high') ??
-      find((e) => e.currency === 'EUR')
-    if (eur) return eur
-  }
   return (
-    find((e) => e.source === 'tcgplayer' && e.kind === 'market' && e.currency === 'USD') ??
-    find((e) => e.kind === 'market' && e.currency === 'USD') ??
-    find((e) => e.source === 'cardmarket' && e.kind === 'trend') ??
-    find((e) => e.currency === 'USD' && e.kind !== 'high') ??
-    find((e) => e.currency === 'USD') ??
+    find((e) => e.source === 'tcgplayer' && e.kind === 'market') ??
+    find((e) => e.kind === 'market') ??
+    find((e) => e.kind !== 'high') ??
     find(() => true)
   )
 }
 
-export function pickValue(
-  entries: PriceEntry[],
-  finishes: Finish[],
-  currency: Currency = 'USD',
-): number | null {
-  return pickEntry(entries, finishes, currency)?.value ?? null
+export function pickValue(entries: PriceEntry[], finishes: Finish[]): number | null {
+  return pickEntry(entries, finishes)?.value ?? null
 }
 
 const PLAIN: Finish[] = ['nonfoil']
 const PREMIUM: Finish[] = ['foil', 'holo', 'etched', 'firstEd', 'reverse']
 
-export function bestEntry(
-  prices: Prices,
-  kind: 'best' | 'foil' = 'best',
-  currency: Currency = displayCurrency(),
-): PriceEntry | null {
-  const premium = pickEntry(prices.entries, PREMIUM, currency)
+export function bestEntry(prices: Prices, kind: 'best' | 'foil' = 'best'): PriceEntry | null {
+  const premium = pickEntry(prices.entries, PREMIUM)
   if (kind === 'foil') return premium
-  return pickEntry(prices.entries, PLAIN, currency) ?? premium
-}
-
-export function priceCurrency(
-  prices: Prices,
-  kind: 'best' | 'foil' = 'best',
-  currency: Currency = displayCurrency(),
-): Currency {
-  return bestEntry(prices, kind, currency)?.currency ?? 'USD'
-}
-
-export function bestFor(prices: Prices, currency: Currency): number | null {
-  return currency === 'USD' ? prices.best : (bestEntry(prices, 'best', currency)?.value ?? prices.best)
-}
-
-export function bestFoilFor(prices: Prices, currency: Currency): number | null {
-  return currency === 'USD' ? prices.bestFoil : (pickEntry(prices.entries, PREMIUM, currency)?.value ?? prices.bestFoil)
+  return pickEntry(prices.entries, PLAIN) ?? premium
 }
 
 /** The finish the card's headline price refers to, clamped to `allowed`. */
@@ -122,49 +79,36 @@ export function conditionFactor(condition: Condition): number {
 }
 
 /** Per-copy value of an item: finish-specific price × condition factor. */
-export function itemUnitPrice(item: Priceable, currency = displayCurrency()): number | null {
-  const raw = itemRawUnitPrice(item, currency)
+export function itemUnitPrice(item: Priceable): number | null {
+  const raw = itemRawUnitPrice(item)
   if (raw == null) return null
   const factor = conditionFactor(item.condition)
   return factor === 1 ? raw : Math.round(raw * factor * 100) / 100
 }
 
-function itemRawUnitPrice(item: Priceable, currency = displayCurrency()): number | null {
+function itemRawUnitPrice(item: Priceable): number | null {
   const { prices } = item.card
-  return item.finish === 'nonfoil'
-    ? bestFor(prices, currency)
-    : (pickValue(prices.entries, [item.finish], currency) ??
-        bestFoilFor(prices, currency) ??
-        bestFor(prices, currency))
+  // Recomputed from entries (not the stored headline) so a legacy EUR-only
+  // card reads as unpriced instead of showing its euro figure as dollars.
+  const value =
+    item.finish === 'nonfoil'
+      ? (pickValue(prices.entries, PLAIN) ?? pickValue(prices.entries, PREMIUM))
+      : (pickValue(prices.entries, [item.finish]) ??
+        pickValue(prices.entries, PREMIUM) ??
+        pickValue(prices.entries, PLAIN))
+  if (value != null) return value
+  // Entry-less card objects (hand-rolled imports): trust the stored headline.
+  if (!prices.entries.length) return item.finish === 'nonfoil' ? prices.best : (prices.bestFoil ?? prices.best)
+  return null
 }
 
-export function itemCurrency(item: Priceable, currency = displayCurrency()): Currency {
-  const { prices } = item.card
-  return (
-    (item.finish === 'nonfoil'
-      ? bestEntry(prices, 'best', currency)
-      : (pickEntry(prices.entries, [item.finish], currency) ??
-          bestEntry(prices, 'foil', currency) ??
-          bestEntry(prices, 'best', currency)))?.currency ?? 'USD'
-  )
+export function itemValue(item: Priceable): number {
+  return (itemUnitPrice(item) ?? 0) * item.qty
 }
 
-export function itemValue(item: Priceable, currency = displayCurrency()): number {
-  return (itemUnitPrice(item, currency) ?? 0) * item.qty
-}
-
-export interface MoneyPair {
-  usd: number
-  eur: number
-}
-
-export function collectionValue(items: Priceable[]): MoneyPair {
-  const currency = displayCurrency()
-  const total: MoneyPair = { usd: 0, eur: 0 }
-  for (const item of items) {
-    const value = itemValue(item, currency)
-    if (value) (itemCurrency(item, currency) === 'EUR' ? (total.eur += value) : (total.usd += value))
-  }
+export function collectionValue(items: Priceable[]): number {
+  let total = 0
+  for (const item of items) total += itemValue(item)
   return total
 }
 
@@ -172,13 +116,10 @@ export function totalQty(items: { qty: number }[]): number {
   return items.reduce((sum, item) => sum + item.qty, 0)
 }
 
-export function valueByGame(items: (Priceable & { game: string })[]): Partial<Record<string, MoneyPair>> {
-  const currency = displayCurrency()
-  const totals: Partial<Record<string, MoneyPair>> = {}
+export function valueByGame(items: (Priceable & { game: string })[]): Partial<Record<string, number>> {
+  const totals: Partial<Record<string, number>> = {}
   for (const item of items) {
-    const pair = (totals[item.game] ??= { usd: 0, eur: 0 })
-    const value = itemValue(item, currency)
-    if (value) (itemCurrency(item, currency) === 'EUR' ? (pair.eur += value) : (pair.usd += value))
+    totals[item.game] = (totals[item.game] ?? 0) + itemValue(item)
   }
   return totals
 }
@@ -186,7 +127,6 @@ export function valueByGame(items: (Priceable & { game: string })[]): Partial<Re
 export interface CompRow {
   source: PriceEntry['source']
   finish: Finish
-  currency: Currency
   market?: number
   low?: number
   mid?: number
@@ -195,14 +135,14 @@ export interface CompRow {
   avg30?: number
 }
 
-/** Pivot raw entries into one row per source+finish+currency for the table. */
+/** Pivot USD entries into one row per source+finish for the comps table. */
 export function groupComps(entries: PriceEntry[]): CompRow[] {
   const rows = new Map<string, CompRow>()
-  for (const entry of entries) {
-    const key = `${entry.source}|${entry.finish}|${entry.currency}`
+  for (const entry of usdOnly(entries)) {
+    const key = `${entry.source}|${entry.finish}`
     let row = rows.get(key)
     if (!row) {
-      row = { source: entry.source, finish: entry.finish, currency: entry.currency }
+      row = { source: entry.source, finish: entry.finish }
       rows.set(key, row)
     }
     row[entry.kind] = entry.value
@@ -226,8 +166,7 @@ export function groupComps(entries: PriceEntry[]): CompRow[] {
   return [...rows.values()].sort(
     (a, b) =>
       (finishOrder[a.finish] ?? 9) - (finishOrder[b.finish] ?? 9) ||
-      (sourceOrder[a.source] ?? 9) - (sourceOrder[b.source] ?? 9) ||
-      a.currency.localeCompare(b.currency),
+      (sourceOrder[a.source] ?? 9) - (sourceOrder[b.source] ?? 9),
   )
 }
 

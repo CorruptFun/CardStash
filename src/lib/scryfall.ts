@@ -1,7 +1,7 @@
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, Finish, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.scryfall.com'
 
@@ -21,8 +21,6 @@ function toCard(raw: any): Card {
   push(prices.usd, 'nonfoil', 'USD', 'tcgplayer', 'market')
   push(prices.usd_foil, 'foil', 'USD', 'tcgplayer', 'market')
   push(prices.usd_etched, 'etched', 'USD', 'tcgplayer', 'market')
-  push(prices.eur, 'nonfoil', 'EUR', 'cardmarket', 'trend')
-  push(prices.eur_foil, 'foil', 'EUR', 'cardmarket', 'trend')
 
   const images = raw.image_uris ?? raw.card_faces?.[0]?.image_uris
   const face = raw.card_faces?.[0]
@@ -60,7 +58,6 @@ function toCard(raw: any): Card {
     links: {
       market: raw.purchase_uris?.tcgplayer,
       tcgplayer: raw.purchase_uris?.tcgplayer ?? tcgplayerSearchLink(raw.name),
-      cardmarket: raw.purchase_uris?.cardmarket ?? cardmarketSearchLink('mtg', raw.name),
       ebaySold: ebaySoldLink({ name: raw.name, setName: raw.set_name, game: 'mtg' }),
       source: raw.scryfall_uri,
     },

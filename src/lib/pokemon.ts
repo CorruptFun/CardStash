@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, Finish, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, normalizeName, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, normalizeName, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.pokemontcg.io/v2'
 
@@ -25,22 +25,10 @@ function toCard(raw: any): Card {
         entries.push({ source: 'tcgplayer', kind, finish, currency: 'USD', value })
     }
   }
-  // Cardmarket gives one price for "the" printing; guess which finish that is.
-  const variants = Object.keys(tcg)
-  const cardmarketFinish: Finish =
-    !variants.length || variants.some((v) => v === 'normal' || v === '1stEditionNormal')
-      ? 'nonfoil'
-      : (FINISH_BY_TCGPLAYER_KEY[variants[0]] ?? 'holo')
-  const cm = raw.cardmarket?.prices
-  if (cm?.trendPrice && cm.trendPrice > 0)
-    entries.push({ source: 'cardmarket', kind: 'trend', finish: cardmarketFinish, currency: 'EUR', value: cm.trendPrice })
-  if (cm?.avg30 && cm.avg30 > 0)
-    entries.push({ source: 'cardmarket', kind: 'avg30', finish: cardmarketFinish, currency: 'EUR', value: cm.avg30 })
-
   const typeLine = [raw.supertype, raw.subtypes?.join(' · ')].filter(Boolean).join(' — ')
   // The TCGplayer price variants double as the printing's finish list
   // (normal / holo / reverse holo / 1st edition).
-  const finishes = [...new Set(variants.map((v) => FINISH_BY_TCGPLAYER_KEY[v] ?? 'nonfoil'))]
+  const finishes = [...new Set(Object.keys(tcg).map((variant) => FINISH_BY_TCGPLAYER_KEY[variant] ?? 'nonfoil'))]
 
   return {
     id: `pokemon:${raw.id}`,
@@ -62,7 +50,6 @@ function toCard(raw: any): Card {
     links: {
       market: raw.tcgplayer?.url,
       tcgplayer: raw.tcgplayer?.url ?? tcgplayerSearchLink(`${raw.name} ${raw.set?.name ?? ''}`),
-      cardmarket: raw.cardmarket?.url ?? cardmarketSearchLink('pokemon', raw.name),
       ebaySold: ebaySoldLink({
         name: `${raw.name} ${raw.number ?? ''}`,
         setName: raw.set?.name,
