@@ -1,10 +1,10 @@
-import { matchLorcana, lorcanaById, searchLorcana } from './lorcast'
-import { matchMtg, mtgById, mtgCollection, searchMtg } from './scryfall'
-import { matchPokemon, pokemonById, searchPokemon } from './pokemon'
-import { catalogById, matchCatalog, searchCatalog } from './tcgcsv'
-import { matchYgo, searchYgo, ygoById } from './ygo'
+import { lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
+import { matchMtg, mtgById, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
+import { matchPokemon, pokemonById, pokemonPrintings, searchPokemon } from './pokemon'
+import { catalogById, catalogPrintings, matchCatalog, searchCatalog } from './tcgcsv'
+import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
 import type { Card, Game } from './types'
-import { similarity, sleep } from './util'
+import { normalizeName, similarity, sleep } from './util'
 
 export interface ApiKeys {
   pokemonKey?: string
@@ -175,9 +175,13 @@ export async function resolveImportRows(
 export async function bestMatchAcrossGames(
   name: string,
   games: Game[],
-  keys: ApiKeys = {},
+  keys: ApiKeys & { timeoutMs?: number } = {},
 ): Promise<{ card: Card; score: number } | null> {
-  const settled = await Promise.allSettled(games.map((game) => matchGame(game, name, null, null, keys)))
+  // A soft per-game budget: one slow API answers "no" for its game instead of
+  // holding every other game's answer hostage.
+  const withBudget = (match: Promise<Card | null>): Promise<Card | null> =>
+    keys.timeoutMs ? Promise.race([match, sleep(keys.timeoutMs).then(() => null)]) : match
+  const settled = await Promise.allSettled(games.map((game) => withBudget(matchGame(game, name, null, null, keys))))
   let best: { card: Card; score: number } | null = null
   for (const result of settled) {
     if (result.status !== 'fulfilled' || !result.value) continue
@@ -185,4 +189,48 @@ export async function bestMatchAcrossGames(
     if (!best || score > best.score) best = { card: result.value, score }
   }
   return best
+}
+
+/* --- printings / variants ------------------------------------------------ */
+
+const VARIANTS_TTL_MS = 10 * 60_000
+const variantsCache = new Map<string, { at: number; cards: Card[] }>()
+
+/**
+ * Every printing/variant of a card (same name across sets), newest-ish first,
+ * so the user can pick the exact edition — set, collector number, rarity —
+ * when the scanner's best guess isn't the copy in their hand.
+ */
+export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+  const cacheKey = `${card.game}|${normalizeName(card.name)}`
+  const cached = variantsCache.get(cacheKey)
+  if (cached && Date.now() - cached.at < VARIANTS_TTL_MS) return withCurrent(cached.cards, card)
+
+  let cards: Card[]
+  switch (card.game) {
+    case 'mtg':
+      cards = await mtgPrintings(card.name, signal)
+      break
+    case 'pokemon':
+      cards = await pokemonPrintings(card.name, keys.pokemonKey, signal)
+      break
+    case 'yugioh': {
+      // One YGO api id covers every reprint; the set list rides on the card.
+      const source = card.printings?.length ? card : ((await ygoById(card.apiId)) ?? card)
+      cards = ygoPrintingVariants(source)
+      break
+    }
+    case 'lorcana':
+      cards = await lorcanaPrintings(card.name, signal)
+      break
+    default:
+      cards = await catalogPrintings(card.game, card.name, signal)
+  }
+  variantsCache.set(cacheKey, { at: Date.now(), cards })
+  return withCurrent(cards, card)
+}
+
+/** Make sure the printing the sheet opened on is present in the list. */
+function withCurrent(cards: Card[], card: Card): Card[] {
+  return cards.some((c) => c.id === card.id) ? cards : [card, ...cards]
 }

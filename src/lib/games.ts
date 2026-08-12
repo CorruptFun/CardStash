@@ -75,6 +75,17 @@ export const SOURCE_LABEL: Record<PriceSource, string> = {
 
 export const CONDITIONS: Condition[] = ['M', 'NM', 'LP', 'MP', 'HP', 'DMG']
 
+/**
+ * Finishes offered for one specific printing: the printing's own finish list
+ * when its API declares one, otherwise the game-wide list. Never empty.
+ */
+export function finishOptions(card: { game: Game; finishes?: Finish[] }): Finish[] {
+  const base = GAME_FINISHES[card.game]
+  if (!card.finishes?.length) return base
+  const available = base.filter((finish) => card.finishes!.includes(finish))
+  return available.length ? available : base
+}
+
 /** Finishes a game's cards are commonly graded/priced in, for pickers. */
 export const GAME_FINISHES: Record<Game, Finish[]> = {
   mtg: ['nonfoil', 'foil', 'etched'],

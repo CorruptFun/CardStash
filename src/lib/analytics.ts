@@ -11,6 +11,7 @@ import { uid } from './util'
 export const EVENT_TYPES = [
   'scan_attempt',
   'card_added',
+  'variant_selected',
   'import_completed',
   'search',
   'deck_created',

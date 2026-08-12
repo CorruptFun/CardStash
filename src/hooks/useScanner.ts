@@ -29,13 +29,27 @@ function apiFailurePolicy(outcome: Extract<IdentifyOutcome, { ok: false }>, cons
   const waitMs = Math.min(RETRY_MAX_GAP_MS, RETRY_MIN_GAP_MS * 2 ** Math.max(0, consecutive - 1))
   const seconds = Math.round(waitMs / 1000)
   if (outcome.status === 400 || outcome.status === 401 || outcome.status === 403) {
-    return { waitMs, autoRetry: false, detail: 'Gemini key rejected — check it in Settings' }
+    // With OCR enabled the scanner already switched engines (identify skips
+    // the rejected key from now on) — keep scanning instead of freezing.
+    return settings().ocrFallback
+      ? {
+          waitMs: RETRY_MIN_GAP_MS,
+          autoRetry: true,
+          detail: 'Gemini key not authorized — scanning on-device instead. Fix the key in Settings.',
+        }
+      : {
+          waitMs,
+          autoRetry: false,
+          detail: 'Gemini key not authorized — replace it (aistudio.google.com/apikey) or enable OCR fallback in Settings',
+        }
   }
   if (outcome.status === 429) {
     return {
       waitMs,
       autoRetry: true,
-      detail: `Gemini quota reached — retrying in ${seconds}s, or switch to OCR in Settings`,
+      detail: settings().ocrFallback
+        ? `Gemini quota reached — tried on-device OCR too (retrying in ${seconds}s)`
+        : `Gemini quota reached — retrying in ${seconds}s, or switch to OCR in Settings`,
     }
   }
   const message = outcome.message.replace(/[.\s]+$/, '')

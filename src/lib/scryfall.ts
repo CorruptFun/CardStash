@@ -1,6 +1,6 @@
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
-import type { Card, PriceEntry } from './types'
+import type { Card, Finish, PriceEntry } from './types'
 import { cardmarketSearchLink, ebaySoldLink, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.scryfall.com'
@@ -33,6 +33,10 @@ function toCard(raw: any): Card {
       .filter(Boolean)
       .join('\n//\n')
 
+  const finishes = Array.isArray(raw.finishes)
+    ? (raw.finishes.filter((f: unknown) => f === 'nonfoil' || f === 'foil' || f === 'etched') as Finish[])
+    : []
+
   return {
     id: `mtg:${raw.id}`,
     game: 'mtg',
@@ -42,6 +46,8 @@ function toCard(raw: any): Card {
     setName: raw.set_name,
     number: raw.collector_number,
     rarity: raw.rarity,
+    releasedAt: typeof raw.released_at === 'string' ? raw.released_at : undefined,
+    finishes: finishes.length ? finishes : undefined,
     imageSmall: images?.small ?? images?.normal,
     imageLarge: images?.large ?? images?.normal,
     typeLine: raw.type_line ?? face?.type_line,
@@ -125,5 +131,18 @@ export async function mtgById(id: string): Promise<Card | null> {
     return toCard(await fetchJson(`${API}/cards/${id}`))
   } catch {
     return null
+  }
+}
+
+/** Every paper printing of a card, newest first (one page ≈ 175 printings). */
+export async function mtgPrintings(name: string, signal?: AbortSignal): Promise<Card[]> {
+  const query = `!"${name.replace(/"/g, '')}" game:paper`
+  const url = `${API}/cards/search?q=${encodeURIComponent(query)}&unique=prints&order=released&dir=desc`
+  try {
+    const res = await fetchJson(url, { signal })
+    return (res.data ?? []).map(toCard)
+  } catch (err: any) {
+    if (err.message?.includes('404')) return []
+    throw err
   }
 }

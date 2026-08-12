@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import { GAMES, FINISH_LABEL } from './games'
+import { ygoPrintingVariants } from './ygo'
 import type {
   Card,
   CatalogCache,
@@ -77,7 +78,12 @@ export interface AddOptions {
   note?: string
 }
 
-/** Add copies to the collection, merging into an existing finish+condition row. */
+/** Same printing = same set + collector number (YGO reprints share one card id). */
+function samePrinting(a: { setCode?: string; number?: string }, b: { setCode?: string; number?: string }): boolean {
+  return (a.setCode ?? '') === (b.setCode ?? '') && (a.number ?? '') === (b.number ?? '')
+}
+
+/** Add copies to the collection, merging into an existing printing+finish+condition row. */
 export async function addToCollection(card: Card, opts: AddOptions = {}): Promise<CollectionItem> {
   const finish = opts.finish ?? 'nonfoil'
   const condition = opts.condition ?? 'NM'
@@ -86,7 +92,7 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
     const existing = await db.collection
       .where('cardId')
       .equals(card.id)
-      .and((item) => item.finish === finish && item.condition === condition)
+      .and((item) => item.finish === finish && item.condition === condition && samePrinting(item, card))
       .first()
     if (existing) {
       const purchasePrice =
@@ -103,7 +109,9 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
       game: card.game,
       name: card.name,
       setCode: card.setCode,
+      setName: card.setName,
       number: card.number,
+      rarity: card.rarity,
       finish,
       condition,
       qty,
@@ -148,7 +156,13 @@ export async function updateItem(
     const collision = await db.collection
       .where('cardId')
       .equals(item.cardId)
-      .and((other) => other.id !== id && other.finish === edited.finish && other.condition === edited.condition)
+      .and(
+        (other) =>
+          other.id !== id &&
+          other.finish === edited.finish &&
+          other.condition === edited.condition &&
+          samePrinting(other, edited),
+      )
       .first()
     if (!collision) {
       await db.collection.put(edited)
@@ -209,11 +223,30 @@ export async function pruneHistory(keepDays = 400): Promise<number> {
   return db.history.where('date').below(cutoff).delete()
 }
 
+/**
+ * Reshape a freshly fetched card to a row's chosen printing. Games where a
+ * printing is its own api id always match; YGO rows re-pick their set variant
+ * so a refresh doesn't revert them to the default printing.
+ */
+function cardForItem(card: Card, item: CollectionItem): Card {
+  if (samePrinting(item, card)) return card
+  const variant = card.printings?.length ? ygoPrintingVariants(card).find((v) => samePrinting(item, v)) : undefined
+  return (
+    variant ?? {
+      ...card,
+      setCode: item.setCode,
+      setName: item.setName ?? card.setName,
+      number: item.number,
+      rarity: item.rarity ?? card.rarity,
+    }
+  )
+}
+
 /** Push a freshly fetched card into every collection/deck row that shows it. */
 export async function applyCardUpdate(card: Card): Promise<void> {
   await db.transaction('rw', db.collection, db.deckCards, async () => {
     const items = await db.collection.where('cardId').equals(card.id).toArray()
-    for (const item of items) await db.collection.update(item.id, { card, name: card.name })
+    for (const item of items) await db.collection.update(item.id, { card: cardForItem(card, item), name: card.name })
     const deckRows = await db.deckCards.where('cardId').equals(card.id).toArray()
     for (const row of deckRows) await db.deckCards.update(row.id, { card })
   })

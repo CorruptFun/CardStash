@@ -3,7 +3,7 @@ import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
 import { GeminiError, identifyCardPhoto } from './gemini'
 import { LIGHT_MATCH_GAMES } from './games'
-import { readCardNames } from './ocr'
+import { OCR_BANDS, readCardNames } from './ocr'
 import { settings } from './settings'
 import type { Card, Game } from './types'
 import { hammingDistance } from './vision'
@@ -39,6 +39,12 @@ function cacheStore(hash: string, card: Card | null): void {
 
 export function clearScanCache(): void {
   cache.length = 0
+  resetGeminiRejection()
+}
+
+/** Forget that Gemini rejected the key (key edited/re-tested, cache reset). */
+export function resetGeminiRejection(): void {
+  rejectedKey = null
 }
 
 export class ScannerConfigError extends Error {}
@@ -52,6 +58,8 @@ export type IdentifyOutcome =
       status?: number
       readName?: string
       readGame?: Game
+      /** True when the Gemini call itself failed (as opposed to the card-data lookup). */
+      geminiFailed?: boolean
     }
 
 export interface IdentificationMeta {
@@ -91,8 +99,18 @@ export async function identifyFrame(
   }
 
   let outcome: IdentifyOutcome
-  if (config.geminiKey) {
+  const skipGemini = rejectedKey === config.geminiKey && config.ocrFallback
+  if (config.geminiKey && !skipGemini) {
     outcome = await identifyViaGemini(capture, gameHint, config.geminiKey, config.geminiModel, opts.signal)
+    if (!outcome.ok && outcome.geminiFailed) {
+      if (isKeyProblem(outcome.status)) rejectedKey = config.geminiKey
+      // Gemini is down, over quota, or the key is bad — don't waste the frame:
+      // run the on-device engine in the same attempt when it's enabled.
+      if (config.ocrFallback) {
+        const fallback = await identifyViaOcr(capture.canvas, gameHint)
+        if (fallback.ok) outcome = fallback
+      }
+    }
   } else if (config.ocrFallback) {
     outcome = await identifyViaOcr(capture.canvas, gameHint)
   } else {
@@ -102,6 +120,21 @@ export async function identifyFrame(
   if (outcome.ok) cacheStore(hash, outcome.card)
   else if (outcome.reason === 'no-card' || outcome.reason === 'not-found') cacheStore(hash, null)
   return outcome
+}
+
+/* Once Gemini rejects a key (bad/unauthorized), skip the doomed upload on
+ * every following frame and go straight to OCR (when it's enabled). Editing
+ * the key, re-testing it in Settings, or resetting the scan cache re-arms it. */
+let rejectedKey: string | null = null
+
+function isKeyProblem(status?: number): boolean {
+  return status === 400 || status === 401 || status === 403
+}
+
+/** True when scans are currently running on-device because Gemini rejected the key. */
+export function usingOcrBecauseKeyRejected(): boolean {
+  const config = settings()
+  return !!config.geminiKey && rejectedKey === config.geminiKey && config.ocrFallback
 }
 
 async function identifyViaGemini(
@@ -125,6 +158,7 @@ async function identifyViaGemini(
       reason: 'api',
       status: err instanceof GeminiError ? err.status : undefined,
       message: `Gemini: ${message.slice(0, 140)}`,
+      geminiFailed: true,
     }
   }
   if (!identified || identified.game === 'other' || !(typeof identified.confidence === 'number' && identified.confidence >= 0.35)) {
@@ -171,32 +205,49 @@ async function identifyViaGemini(
 }
 
 const OCR_MATCH_THRESHOLD = 0.62
+/** Per-game budget for a name lookup: one slow card API mustn't stall the frame. */
+const OCR_MATCH_TIMEOUT_MS = 6_000
+/** Names tried per band — the card name is almost always the first clean line. */
+const OCR_NAMES_PER_BAND = 3
 
 async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
-  let names: string[]
-  try {
-    names = await readCardNames(canvas)
-  } catch {
-    return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
-  }
   // No hint: only sweep games with a cheap by-name API. Catalog-backed games
   // (Riftbound & co.) are reachable by picking them in the scan game filter.
   const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
   const config = settings()
-  for (const name of names) {
-    const best = await bestMatchAcrossGames(name, games, { pokemonKey: config.pokemonKey }).catch(() => null)
-    if (best && best.score >= OCR_MATCH_THRESHOLD) {
-      return {
-        ok: true,
-        card: best.card,
-        identification: { game: best.card.game, name, confidence: best.score, via: 'ocr' },
+  const tried = new Set<string>()
+  let firstRead: string | undefined
+  // Bands are OCR'd one at a time so a hit in the cheap top band skips the
+  // rest of the work entirely.
+  for (const share of OCR_BANDS) {
+    let names: string[]
+    try {
+      names = await readCardNames(canvas, share)
+    } catch {
+      if (tried.size || firstRead) break
+      return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
+    }
+    const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
+    for (const name of fresh) tried.add(name.toLowerCase())
+    firstRead ??= fresh[0]
+    for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
+      const best = await bestMatchAcrossGames(name, games, {
+        pokemonKey: config.pokemonKey,
+        timeoutMs: OCR_MATCH_TIMEOUT_MS,
+      }).catch(() => null)
+      if (best && best.score >= OCR_MATCH_THRESHOLD) {
+        return {
+          ok: true,
+          card: best.card,
+          identification: { game: best.card.game, name, confidence: best.score, via: 'ocr' },
+        }
       }
     }
   }
   return {
     ok: false,
     reason: 'ocr-miss',
-    message: names.length ? `Read “${names[0]}” but couldn’t match it` : 'Couldn’t read the card name — more light helps',
-    readName: names[0],
+    message: firstRead ? `Read “${firstRead}” but couldn’t match it` : 'Couldn’t read the card name — more light helps',
+    readName: firstRead,
   }
 }

@@ -5,7 +5,7 @@ import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
 import { track } from '../lib/analytics'
-import { refreshCard } from '../lib/cardsearch'
+import { printingVariants, refreshCard } from '../lib/cardsearch'
 import {
   addCardToDeck,
   addToCollection,
@@ -18,7 +18,7 @@ import {
   updateItem,
 } from '../lib/db'
 import { addedToBoardToast, boardForCard } from '../lib/deckstats'
-import { CONDITIONS, FINISH_LABEL, GAME_FINISHES, GAME_LABEL, SOURCE_LABEL } from '../lib/games'
+import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, SOURCE_LABEL } from '../lib/games'
 import { cardTrend } from '../lib/portfolio'
 import {
   collectionValue,
@@ -38,8 +38,13 @@ import type { Card, CollectionItem, Condition, Currency, Deck, Finish, Game, Pri
 import { dateTime, haptic, money } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
-const PRINTINGS_PREVIEW = 12
+const VARIANTS_PREVIEW = 8
 const PRICE_STALE_MS = 6 * 3_600_000
+
+/** One printing's identity — YGO variants share a card id but differ in set/rarity. */
+function printingKey(card: Card): string {
+  return `${card.id}|${card.setCode ?? ''}|${card.number ?? ''}|${card.rarity ?? ''}`
+}
 
 export function CardSheetHost() {
   const sheet = useUi((s) => s.sheet)
@@ -112,7 +117,7 @@ function CardSheet() {
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const [card, setCard] = useState(sheet.card)
-  const [finish, setFinish] = useState<Finish>(sheet.item?.finish ?? headlineFinish(sheet.card.prices, GAME_FINISHES[sheet.card.game]))
+  const [finish, setFinish] = useState<Finish>(sheet.item?.finish ?? headlineFinish(sheet.card.prices, finishOptions(sheet.card)))
   const [condition, setCondition] = useState<Condition>(sheet.item?.condition ?? 'NM')
   const [qty, setQty] = useState(1)
   const [paid, setPaid] = useState('')
@@ -120,6 +125,7 @@ function CardSheet() {
   const [didAdd, setDidAdd] = useState(false)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
   const [allPrintings, setAllPrintings] = useState(false)
+  const [variants, setVariants] = useState<Card[] | null>(null)
 
   const best = card.prices.best
   const bestFoil = card.prices.bestFoil
@@ -148,6 +154,33 @@ function CardSheet() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /* Every printing of this card (sets, promos, rarities) for the picker. */
+  useEffect(() => {
+    let cancelled = false
+    printingVariants(sheet.card, { pokemonKey }).then(
+      (cards) => {
+        if (!cancelled) setVariants(cards)
+      },
+      () => {
+        if (!cancelled) setVariants(null)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* Switch the whole sheet to another printing: image, set, rarity, prices. */
+  const pickVariant = (variant: Card) => {
+    if (printingKey(variant) === printingKey(card)) return
+    setCard(variant)
+    const options = finishOptions(variant)
+    if (!options.includes(finish)) setFinish(headlineFinish(variant.prices, options))
+    track('variant_selected', { game: variant.game })
+    haptic(6)
+  }
 
   const comps = useMemo(() => groupComps(card.prices.entries), [card.prices.entries])
   const sortedCopies = useMemo(() => sortCopies(copies ?? []), [copies])
@@ -233,6 +266,12 @@ function CardSheet() {
   const headline = best ?? bestFoil
   const range = useMemo(() => priceRange(comps, displayFinish, currency), [comps, displayFinish, currency])
   const addPrice = addLabelPrice(card, finish, condition)
+  /* Finishes this printing exists in — plus the current pick, so the control
+   * never strands the user (their physical copy beats incomplete API data). */
+  const addFinishOptions = useMemo(() => {
+    const options = finishOptions(card)
+    return options.includes(finish) ? options : [...options, finish]
+  }, [card, finish])
 
   return (
     <div className="cardsheet">
@@ -247,6 +286,7 @@ function CardSheet() {
           <p className="cardsheet__set">
             {card.setName ?? card.setCode}
             {card.number ? ` · #${card.number}` : ''}
+            {card.releasedAt ? ` · ${card.releasedAt.slice(0, 4)}` : ''}
           </p>
           {card.manaCost ? <ManaCost cost={card.manaCost} /> : card.typeLine && <p className="cardsheet__type">{card.typeLine}</p>}
           {(copiesCount > 0 || memberDecks.length > 0) && (
@@ -384,23 +424,54 @@ function CardSheet() {
           </div>
         </section>
       )}
-      {card.printings && card.printings.length > 1 && (
+      {(variants?.length ?? 0) > 1 && (
         <section className="sheetsec">
           <h3>
-            <Icon name="cards" size={15} /> Printings
+            <Icon name="cards" size={15} /> Printings & variants
+            <em className="sheetsec__count">{variants!.length}</em>
           </h3>
-          <div className="printings">
-            {(allPrintings ? card.printings : card.printings.slice(0, PRINTINGS_PREVIEW)).map((printing, i) => (
-              <div key={i} className="printings__row">
-                <span className="printings__set">{printing.setName}</span>
-                <span className="dim">{printing.setCode}</span>
-                <span className="dim">{printing.rarity}</span>
-                <span className="num strong">{printing.price ? money(printing.price) : '—'}</span>
-              </div>
-            ))}
-            {card.printings.length > PRINTINGS_PREVIEW && (
-              <button className="printings__more" onClick={() => setAllPrintings(!allPrintings)}>
-                {allPrintings ? 'Show fewer' : `Show all ${card.printings.length} printings`}
+          <p className="printpick__hint">Not the copy in your hand? Pick its edition — set, number, rarity and prices follow.</p>
+          <div className="printpick">
+            {(allPrintings ? variants! : variants!.slice(0, VARIANTS_PREVIEW)).map((variant, i) => {
+              const selected = printingKey(variant) === printingKey(card)
+              const price = variant.prices.best ?? variant.prices.bestFoil
+              return (
+                <button
+                  key={`${printingKey(variant)}|${i}`}
+                  className={`printpick__row ${selected ? 'printpick__row--on' : ''}`}
+                  onClick={() => pickVariant(variant)}
+                  aria-pressed={selected}
+                >
+                  <CardImg card={variant} className="printpick__thumb" />
+                  <span className="printpick__body">
+                    <span className="printpick__set">{variant.setName ?? variant.setCode ?? 'Unknown set'}</span>
+                    <span className="printpick__meta">
+                      {[
+                        variant.setCode,
+                        variant.number ? `#${variant.number}` : null,
+                        variant.rarity,
+                        variant.releasedAt?.slice(0, 4),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                  <span className="printpick__side">
+                    <span className="printpick__price">
+                      {money(price, priceCurrency(variant.prices, variant.prices.best == null ? 'foil' : 'best'))}
+                    </span>
+                    {selected && (
+                      <span className="printpick__on">
+                        <Icon name="check" size={12} /> selected
+                      </span>
+                    )}
+                  </span>
+                </button>
+              )
+            })}
+            {variants!.length > VARIANTS_PREVIEW && (
+              <button className="printpick__more" onClick={() => setAllPrintings(!allPrintings)}>
+                {allPrintings ? 'Show fewer' : `Show all ${variants!.length} printings`}
                 <Icon name="chevronDown" size={14} className={allPrintings ? 'flip' : ''} />
               </button>
             )}
@@ -418,7 +489,7 @@ function CardSheet() {
             <Seg
               ariaLabel="Finish"
               size="sm"
-              options={GAME_FINISHES[card.game].map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
+              options={addFinishOptions.map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
               value={finish}
               onChange={setFinish}
             />

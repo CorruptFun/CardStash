@@ -5,7 +5,7 @@ import { clearAnalytics, insights, type Insights } from '../lib/analytics'
 import { clearAllData } from '../lib/db'
 import { seedDemoData } from '../lib/demo'
 import { testGeminiKey } from '../lib/gemini'
-import { clearScanCache } from '../lib/identify'
+import { clearScanCache, resetGeminiRejection } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
 import type { Currency } from '../lib/types'
 import { useUi } from '../store/ui'
@@ -55,8 +55,13 @@ export function SettingsView() {
     setTestingKey(true)
     const result = await testGeminiKey(config.geminiKey, config.geminiModel)
     setTestingKey(false)
-    if (result.ok) toast(`Key works — answered by ${result.model}`, 'success')
-    else toast(`Key test failed: ${result.error}`, 'error')
+    if (result.ok) {
+      // The scanner may have benched this key after a rejection — re-arm it.
+      resetGeminiRejection()
+      toast(`Key works — answered by ${result.model}`, 'success')
+    } else {
+      toast(`Key test failed: ${result.error}`, 'error')
+    }
   }
 
   return (
@@ -83,7 +88,7 @@ export function SettingsView() {
         <div className="setrow">
           <div className="setrow__text">
             <span>OCR fallback</span>
-            <em>Identify cards on-device when no Gemini key is set (downloads ~12 MB once)</em>
+            <em>Identify cards on-device when there's no Gemini key — or the key stops working (downloads ~12 MB once)</em>
           </div>
           <Toggle on={config.ocrFallback} onChange={(ocrFallback) => config.set({ ocrFallback })} label="OCR fallback" />
         </div>

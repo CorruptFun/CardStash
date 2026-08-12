@@ -68,6 +68,10 @@ export interface Card {
   setName?: string
   number?: string
   rarity?: string
+  /** Set/printing release date, YYYY-MM-DD (when the API provides one). */
+  releasedAt?: string
+  /** Finishes this exact printing exists in (when the API says); pickers fall back to the game's list. */
+  finishes?: Finish[]
   imageSmall?: string
   imageLarge?: string
   typeLine?: string
@@ -82,14 +86,16 @@ export interface Card {
   links: CardLinks
 }
 
-/** One row of the collection: copies of a card in a given finish+condition. */
+/** One row of the collection: copies of one printing of a card in a given finish+condition. */
 export interface CollectionItem {
   id: string
   cardId: string
   game: Game
   name: string
   setCode?: string
+  setName?: string
   number?: string
+  rarity?: string
   finish: Finish
   condition: Condition
   qty: number
