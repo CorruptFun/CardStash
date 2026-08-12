@@ -1,5 +1,5 @@
 import { linkAbort } from './fetchJson'
-import { GAME_FULL_NAME, GAMES } from './games'
+import { GAME_FULL_NAME } from './games'
 import type { Card, Game } from './types'
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -98,105 +98,6 @@ export async function testGeminiKey(
     return { ok: true, model: lastServedModel ?? model }
   } catch (err: any) {
     return { ok: false, error: err.message?.slice(0, 200) ?? 'Unknown error' }
-  }
-}
-
-/** MTG frame treatments the scanner can distinguish (full-art variants etc.). */
-export const MTG_TREATMENTS = ['regular', 'borderless', 'extended', 'showcase', 'retro'] as const
-export type MtgTreatment = (typeof MTG_TREATMENTS)[number]
-
-export interface Identification {
-  game: Game | 'other'
-  name: string
-  set_code: string | null
-  collector_number: string | null
-  confidence: number
-  /** True/false when the foil sheen is clearly visible/absent; null when unsure. */
-  foil: boolean | null
-  /** MTG only: the frame treatment in view, null when unsure or another game. */
-  treatment: MtgTreatment | null
-}
-
-export async function identifyCardPhoto(
-  base64Jpeg: string,
-  apiKey: string,
-  model: string,
-  gameHint?: Game,
-  signal?: AbortSignal,
-): Promise<Identification | null> {
-  const hint = gameHint != null ? `The user says this is a ${GAME_FULL_NAME[gameHint]} card.` : ''
-  const res = await callWithFallback(
-    model,
-    apiKey,
-    {
-      contents: [
-        {
-          parts: [
-            {
-              text: `Identify the trading card in this photo. ${hint}
-Rules:
-- "game": ${GAMES.join(', ')} — or other (not a TCG card / unreadable). riftbound is the League of Legends TCG, starwars is Star Wars: Unlimited, onepiece is the One Piece Card Game, gundam is the Gundam Card Game.
-- "name": the exact printed card name, nothing else (for Lorcana include the version after " - ", e.g. "Elsa - Snow Queen").
-- "set_code": the set/expansion code if legible (e.g. "MH3", "PAL", "LOB", "OGN", "OP01"), else null.
-- "collector_number": the collector number if legible (e.g. "182/193", "0123"), digits/slash only, else null. Read it carefully — it distinguishes alternate-art versions.
-- "confidence": 0 to 1, how sure you are of game+name.
-- "foil": true if the surface shows a foil/holographic rainbow sheen, false if plainly matte, null if unsure.
-- "treatment": Magic only — the frame: "regular", "borderless" (art fills the card edge to edge / full art), "extended" (art stretched into the side borders), "showcase" (special stylized frame), "retro" (old-style beveled frame). Null for other games or when unsure.
-Respond with JSON only.`,
-            },
-            { inline_data: { mime_type: 'image/jpeg', data: base64Jpeg } },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            game: { type: 'STRING', enum: [...GAMES, 'other'] },
-            name: { type: 'STRING' },
-            set_code: { type: 'STRING', nullable: true },
-            collector_number: { type: 'STRING', nullable: true },
-            confidence: { type: 'NUMBER' },
-            foil: { type: 'BOOLEAN', nullable: true },
-            treatment: { type: 'STRING', enum: [...MTG_TREATMENTS], nullable: true },
-          },
-          required: ['game', 'name', 'confidence'],
-        },
-        temperature: 0.1,
-        maxOutputTokens: 1024,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    },
-    20_000,
-    signal,
-  )
-  const text = responseText(res)
-  if (!text) return null
-  try {
-    return sanitizeIdentification(JSON.parse(text))
-  } catch {
-    return null
-  }
-}
-
-const KNOWN_GAMES = new Set<string>([...GAMES, 'other'])
-
-function sanitizeIdentification(raw: unknown): Identification | null {
-  if (!raw || typeof raw !== 'object') return null
-  const obj = raw as Record<string, unknown>
-  const name = typeof obj.name === 'string' ? obj.name.trim() : ''
-  if (!name || typeof obj.confidence !== 'number' || !Number.isFinite(obj.confidence)) return null
-  const str = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null)
-  const number = str(obj.collector_number)?.split('/')[0].replace(/^0+(?=\d)/, '') ?? null
-  return {
-    game: typeof obj.game === 'string' && KNOWN_GAMES.has(obj.game) ? (obj.game as Identification['game']) : 'other',
-    name,
-    set_code: str(obj.set_code),
-    collector_number: number,
-    confidence: Math.max(0, Math.min(1, obj.confidence)),
-    foil: typeof obj.foil === 'boolean' ? obj.foil : null,
-    treatment: MTG_TREATMENTS.includes(obj.treatment as MtgTreatment) ? (obj.treatment as MtgTreatment) : null,
   }
 }
 

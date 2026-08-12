@@ -6,7 +6,7 @@ import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/u
 import { track } from '../lib/analytics'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
-import { usingOcrBecauseKeyRejected, type IdentifyOutcome } from '../lib/identify'
+import type { IdentifyOutcome } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { headlineFinish, itemCurrency, itemUnitPrice, priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
@@ -162,7 +162,6 @@ export function ScanView({ active }: { active: boolean }) {
   const collectRef = useRef<CollectQueue | null>(null)
   collectRef.current ??= new CollectQueue()
   const [started, setStarted] = useState(false)
-  const warnedKeyRef = useRef(false)
   /** Manual finish pick on the chip, per identified card. */
   const [finishPick, setFinishPick] = useState<{ id: string; finish: Finish } | null>(null)
 
@@ -171,12 +170,8 @@ export function ScanView({ active }: { active: boolean }) {
       guarded(() => recordScan(hit.card), 'Save scan')
       haptic(config.haptics ? [14, 60, 14] : 0)
       if (config.collectMode) collectRef.current!.hit(hit.card, scanFinish(hit))
-      if (usingOcrBecauseKeyRejected() && !warnedKeyRef.current) {
-        warnedKeyRef.current = true
-        toast('Gemini rejected your API key, so scans run on-device for now — fix the key in Settings when you can.', 'info')
-      }
     },
-    [config.collectMode, config.haptics, toast],
+    [config.collectMode, config.haptics],
   )
   const scanner = useScanner(onHit)
   const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
@@ -189,8 +184,8 @@ export function ScanView({ active }: { active: boolean }) {
   }, [visible, started, scanner.status])
 
   useEffect(() => {
-    if (config.ocrFallback && started && visible && (!config.geminiKey || usingOcrBecauseKeyRejected())) warmOcr()
-  }, [config.geminiKey, config.ocrFallback, started, visible])
+    if (started && visible) warmOcr()
+  }, [started, visible])
 
   const searchInstead = () => {
     const miss = scanner.miss
@@ -284,9 +279,7 @@ export function ScanView({ active }: { active: boolean }) {
             <Icon name="scan" size={18} /> Start scanning
           </button>
           <p className="scan__gatehint">
-            {config.geminiKey
-              ? 'Gemini vision is on'
-              : 'No API key needed — on-device recognition reads the card, its collector number and foil sheen'}
+            Everything runs on this device — the card name, its collector number, even foil sheen. No account, no API.
           </p>
         </div>
       )}

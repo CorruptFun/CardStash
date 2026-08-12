@@ -32,10 +32,12 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   (`prices.ts`), the card APIs (`scryfall.ts`, `pokemon.ts`, `ygo.ts`,
   `lorcast.ts` for Lorcana, `tcgcsv.ts` — a day-cached TCGplayer catalog for
   Riftbound/One Piece/Star Wars/Digimon/Gundam — unified in `cardsearch.ts`),
-  Gemini vision + AI deck builder (`gemini.ts`),
-  OCR fallback (`ocr.ts`), scan pipeline (`identify.ts`, `vision.ts`,
-  `camera.ts`), portfolio math (`portfolio.ts`), deck math (`deckstats.ts`),
-  CSV import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
+  the AI deck builder (`gemini.ts` — the app's ONLY Gemini use; scanning must
+  stay fully on-device), on-device OCR + collector-line reading (`ocr.ts`,
+  `corner.ts`), scan pipeline (`identify.ts`, `vision.ts` — includes the foil
+  sheen detector, `camera.ts`), portfolio math (`portfolio.ts`), deck math
+  (`deckstats.ts`), CSV import/export (`importexport.ts`), local diagnostics
+  (`analytics.ts`).
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
 - `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
   `builderSeeds` (cards handed to the AI builder to design around).
