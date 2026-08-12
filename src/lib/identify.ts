@@ -2,7 +2,7 @@ import { blobToBase64, type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
 import { GeminiError, identifyCardPhoto } from './gemini'
-import { GAMES } from './games'
+import { LIGHT_MATCH_GAMES } from './games'
 import { readCardNames } from './ocr'
 import { settings } from './settings'
 import type { Card, Game } from './types'
@@ -179,7 +179,9 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   } catch {
     return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
   }
-  const games = gameHint ? [gameHint] : GAMES
+  // No hint: only sweep games with a cheap by-name API. Catalog-backed games
+  // (Riftbound & co.) are reachable by picking them in the scan game filter.
+  const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
   const config = settings()
   for (const name of names) {
     const best = await bestMatchAcrossGames(name, games, { pokemonKey: config.pokemonKey }).catch(() => null)

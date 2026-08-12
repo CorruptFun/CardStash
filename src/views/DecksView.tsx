@@ -173,7 +173,13 @@ function NewDeckModal({
     <Modal open={open} onClose={onClose} title="New deck">
       <div className="form">
         <input className="input" placeholder="Deck name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <Seg ariaLabel="Game" options={GAMES.map((g) => ({ value: g, label: GAME_LABEL[g] }))} value={game} onChange={setGame} />
+        <select className="select" value={game} onChange={(e) => setGame(e.target.value as Game)} aria-label="Game">
+          {GAMES.map((g) => (
+            <option key={g} value={g}>
+              {GAME_LABEL[g]}
+            </option>
+          ))}
+        </select>
         <input
           className="input"
           placeholder={game === 'mtg' ? 'Format (Standard, Modern, Commander…)' : 'Format (optional)'}

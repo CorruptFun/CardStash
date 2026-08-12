@@ -180,6 +180,7 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
           </span>
           <Seg
             ariaLabelledBy="builder-game"
+            scroll
             options={GAMES.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
             value={game}
             onChange={pickGame}
@@ -210,7 +211,15 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
             className="input"
             value={format}
             onChange={(e) => setFormat(e.target.value)}
-            placeholder={game === 'mtg' ? 'Standard, Modern, Commander…' : game === 'pokemon' ? 'Standard, Expanded' : 'Advanced'}
+            placeholder={
+              game === 'mtg'
+                ? 'Standard, Modern, Commander…'
+                : game === 'pokemon'
+                  ? 'Standard, Expanded'
+                  : game === 'yugioh'
+                    ? 'Advanced'
+                    : 'Constructed (optional)'
+            }
           />
           <label className="fieldlabel" htmlFor="builder-style">
             What do you want to play?

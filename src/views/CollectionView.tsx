@@ -19,7 +19,7 @@ import {
   updateDeck,
 } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
-import { GAME_SHORT, FINISH_LABEL } from '../lib/games'
+import { GAMES, GAME_SHORT, FINISH_LABEL } from '../lib/games'
 import { collectionToCsv, parseCollectionCsv, type CsvImportRow } from '../lib/importexport'
 import { valueWindow } from '../lib/portfolio'
 import {
@@ -147,6 +147,11 @@ export function CollectionView() {
   const total = useMemo(() => collectionValue(all), [all])
   const count = useMemo(() => totalQty(all), [all])
   const byGame = useMemo(() => valueByGame(all), [all])
+  // Only games actually collected get a filter chip — nine zero rows is noise.
+  const ownedGames = useMemo(() => GAMES.filter((game) => byGame[game] != null), [byGame])
+  useEffect(() => {
+    if (gameFilter !== 'all' && items && !ownedGames.includes(gameFilter)) setGameFilter('all')
+  }, [gameFilter, items, ownedGames])
   const spares = useMemo(() => sparesSummary(all, units), [all, units])
   const priced = useMemo(() => pricedBadge(all), [all])
   const window = useMemo(() => valueWindow(all, points), [all, points])
@@ -445,7 +450,7 @@ export function CollectionView() {
           </span>
         </div>
         <div className="collhead__games">
-          {(['all', 'mtg', 'pokemon', 'yugioh'] as const).map((key) => {
+          {(['all' as const, ...ownedGames]).map((key) => {
             const pair = key === 'all' ? total : (byGame[key] ?? ZERO)
             return (
               <button key={key} className={`gamefilter ${gameFilter === key ? 'gamefilter--on' : ''}`} onClick={() => setGameFilter(key)}>
@@ -679,7 +684,8 @@ function DataMenu({
       </div>
       <p className="datamenu__note">
         Everything lives on this device. Magic prices come from Scryfall, Pokémon from pokemontcg.io, Yu-Gi-Oh! from
-        YGOPRODeck.
+        YGOPRODeck, Lorcana from Lorcast, and Riftbound, One Piece, Star Wars: Unlimited, Digimon &amp; Gundam from
+        TCGplayer market data via TCGCSV.
       </p>
     </Modal>
   )

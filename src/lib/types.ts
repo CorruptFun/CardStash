@@ -1,4 +1,13 @@
-export type Game = 'mtg' | 'pokemon' | 'yugioh'
+export type Game =
+  | 'mtg'
+  | 'pokemon'
+  | 'yugioh'
+  | 'riftbound'
+  | 'lorcana'
+  | 'onepiece'
+  | 'starwars'
+  | 'digimon'
+  | 'gundam'
 
 export type Finish = 'nonfoil' | 'foil' | 'etched' | 'holo' | 'reverse' | 'firstEd'
 
@@ -126,4 +135,12 @@ export interface ScanRecord {
   cardId: string
   at: number
   card: Card
+}
+
+/** Cached TCGplayer catalog (via TCGCSV) for games with no search API. */
+export interface CatalogCache {
+  game: Game
+  /** When the catalog was fetched — stale after ~a day (prices are daily). */
+  at: number
+  cards: Card[]
 }

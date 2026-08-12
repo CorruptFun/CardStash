@@ -1,5 +1,7 @@
+import { matchLorcana, lorcanaById, searchLorcana } from './lorcast'
 import { matchMtg, mtgById, mtgCollection, searchMtg } from './scryfall'
 import { matchPokemon, pokemonById, searchPokemon } from './pokemon'
+import { catalogById, matchCatalog, searchCatalog } from './tcgcsv'
 import { matchYgo, searchYgo, ygoById } from './ygo'
 import type { Card, Game } from './types'
 import { similarity, sleep } from './util'
@@ -17,6 +19,11 @@ export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal
       return searchPokemon(query, keys.pokemonKey, signal)
     case 'yugioh':
       return searchYgo(query, signal)
+    case 'lorcana':
+      return searchLorcana(query, signal)
+    default:
+      // Riftbound, One Piece, Star Wars: Unlimited, Digimon, Gundam — TCGCSV.
+      return searchCatalog(game, query, signal)
   }
 }
 
@@ -34,6 +41,10 @@ export function matchGame(
       return matchPokemon(name, setCode, number, keys.pokemonKey)
     case 'yugioh':
       return matchYgo(name)
+    case 'lorcana':
+      return matchLorcana(name, setCode, number)
+    default:
+      return matchCatalog(game, name, setCode, number)
   }
 }
 
@@ -45,6 +56,10 @@ export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise
       return pokemonById(apiId, keys.pokemonKey)
     case 'yugioh':
       return ygoById(apiId)
+    case 'lorcana':
+      return lorcanaById(apiId)
+    default:
+      return catalogById(game, apiId)
   }
 }
 

@@ -22,6 +22,12 @@
   --game-mtg: #e57a55;
   --game-pkm: #6aa8e5;
   --game-ygo: #b083d0;
+  --game-rft: #3fbfae;
+  --game-lor: #d4a94a;
+  --game-op: #e0606b;
+  --game-swu: #d9c04b;
+  --game-dgm: #eb8f4a;
+  --game-gcg: #6f97dd;
   --holo: linear-gradient(
     112deg,
     #4fc7dd 0%,
@@ -187,7 +193,10 @@ button {
 .screen {
   height: 100%;
   overflow-y: auto;
-  padding: 0 var(--s4) calc(var(--nav-h) + var(--sab) + var(--s6));
+  /* The status-bar inset lives IN the shorthand: `.safe-top` alone loses the
+     cascade to this later same-specificity `padding`, which is exactly how
+     screens ended up under the clock on notched phones. Keep top = sat + s3. */
+  padding: calc(var(--sat) + var(--s3)) var(--s4) calc(var(--nav-h) + var(--sab) + var(--s6));
   max-width: 680px;
   margin: 0 auto;
   scrollbar-width: thin;
@@ -671,6 +680,7 @@ button {
   position: relative;
   width: min(100%, 460px);
   max-height: min(82vh, 640px);
+  max-height: min(82dvh, 640px);
   overflow-y: auto;
   background: var(--ink-050);
   border: 1px solid var(--rule-strong);
@@ -727,6 +737,7 @@ button {
   bottom: 0;
   width: min(100%, 640px);
   max-height: 82vh;
+  max-height: 82dvh;
   display: flex;
   flex-direction: column;
   background: var(--ink-050);
@@ -739,6 +750,7 @@ button {
 }
 .sheet--tall {
   height: 82vh;
+  height: 82dvh;
 }
 @keyframes sheet-in {
   0% {
@@ -1105,7 +1117,8 @@ button {
   left: 50%;
   top: 44%;
   transform: translate(-50%, -50%);
-  width: min(62vw, 300px);
+  /* The vh term keeps the frame on screen in landscape (63:88 card ratio). */
+  width: min(62vw, 300px, 32vh);
   aspect-ratio: 63 / 88;
   pointer-events: none;
   animation: breathe 2.8s ease-in-out infinite;
@@ -1180,7 +1193,7 @@ button {
 .chipslot {
   position: absolute;
   left: 50%;
-  top: calc(44% - min(31vw, 150px) * 88 / 63 - 14px);
+  top: calc(44% - min(31vw, 150px, 16vh) * 88 / 63 - 14px);
   transform: translate(-50%, -100%);
   z-index: 8;
   max-width: min(92vw, 400px);
@@ -1484,6 +1497,24 @@ button {
 }
 .gamechip--yugioh {
   color: var(--game-ygo);
+}
+.gamechip--riftbound {
+  color: var(--game-rft);
+}
+.gamechip--lorcana {
+  color: var(--game-lor);
+}
+.gamechip--onepiece {
+  color: var(--game-op);
+}
+.gamechip--starwars {
+  color: var(--game-swu);
+}
+.gamechip--digimon {
+  color: var(--game-dgm);
+}
+.gamechip--gundam {
+  color: var(--game-gcg);
 }
 .raritychip {
   padding: 2px 6px;
@@ -2576,6 +2607,7 @@ button {
   flex-direction: column;
   margin-top: var(--s3);
   max-height: 46vh;
+  max-height: 46dvh;
   overflow-y: auto;
 }
 .addlist__hint {
@@ -4076,4 +4108,51 @@ button {
 .seedchip__x:hover {
   background: var(--ink-150);
   color: var(--paper);
+}
+
+/* --- Per-device adaptation (v0.5) --------------------------------------- */
+
+/* Long option lists (nine games now): the seg sideways-scrolls instead of
+   squeezing labels into unreadable slivers. */
+.seg--scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.seg--scroll::-webkit-scrollbar {
+  display: none;
+}
+.seg--scroll .seg__opt {
+  flex: 0 0 auto;
+}
+
+/* Camera overlays clear the notch / punch-hole in landscape. */
+.scan__top {
+  padding-left: calc(var(--s3) + var(--sal));
+  padding-right: calc(var(--s3) + var(--sar));
+}
+.tray {
+  padding-left: calc(var(--s3) + var(--sal));
+  padding-right: calc(var(--s3) + var(--sar));
+}
+.modal-root {
+  padding: calc(var(--s5) + var(--sat)) calc(var(--s5) + var(--sar)) calc(var(--s5) + var(--sab))
+    calc(var(--s5) + var(--sal));
+}
+
+/* Tablets / desktop: use the room instead of a phone column. */
+@media (min-width: 900px) {
+  .screen,
+  .deckfab__inner {
+    max-width: 840px;
+  }
+  .cardgrid {
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: var(--s4) var(--s3);
+  }
+  .nav {
+    grid-auto-columns: minmax(0, 116px);
+    justify-content: center;
+  }
 }

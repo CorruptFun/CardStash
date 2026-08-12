@@ -5,7 +5,7 @@ import { CardImg, Seg } from '../components/basics'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
-import { GAME_SHORT } from '../lib/games'
+import { GAMES, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { priceCurrency } from '../lib/prices'
@@ -173,11 +173,10 @@ export function ScanView({ active }: { active: boolean }) {
           <Seg
             ariaLabel="Game filter"
             size="sm"
+            scroll
             options={[
-              { value: 'auto', label: 'Auto' },
-              { value: 'mtg', label: GAME_SHORT.mtg },
-              { value: 'pokemon', label: GAME_SHORT.pokemon },
-              { value: 'yugioh', label: GAME_SHORT.yugioh },
+              { value: 'auto' as const, label: 'Auto' },
+              ...GAMES.map((game) => ({ value: game, label: GAME_SHORT[game] })),
             ]}
             value={config.gameFilter}
             onChange={(gameFilter) => config.set({ gameFilter })}
@@ -216,7 +215,7 @@ export function ScanView({ active }: { active: boolean }) {
           </div>
           <span className="wordmark scan__wordmark">Cardstock</span>
           <h2>Point. Price. Collect.</h2>
-          <p>Hover the camera over any Magic, Pokémon or Yu-Gi-Oh card and its price pops up live.</p>
+          <p>Hover the camera over any card — Magic, Pokémon, Yu-Gi-Oh, Riftbound, Lorcana and more — and its price pops up live.</p>
           <button
             className="btn btn--primary btn--big"
             onClick={() => {

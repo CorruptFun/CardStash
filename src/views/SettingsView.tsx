@@ -10,7 +10,7 @@ import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
 import type { Currency } from '../lib/types'
 import { useUi } from '../store/ui'
 
-const APP_VERSION = '0.4.0'
+const APP_VERSION = '0.5.0'
 const INSIGHT_DAYS = 30
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -398,8 +398,9 @@ export function SettingsView() {
         </p>
         <p className="setsec__note">
           Point at any card, know what it's worth. Card data & prices: Scryfall (Magic), pokemontcg.io (Pokémon),
-          YGOPRODeck (Yu-Gi-Oh!). Prices are market estimates from those services, refreshed on demand — always verify
-          before big trades. Cardstock is unaffiliated with Wizards of the Coast, The Pokémon Company, or Konami.
+          YGOPRODeck (Yu-Gi-Oh!), Lorcast (Lorcana), and TCGplayer market data via TCGCSV (Riftbound, One Piece, Star
+          Wars: Unlimited, Digimon, Gundam). Prices are market estimates from those services, refreshed on demand —
+          always verify before big trades. Cardstock is unaffiliated with the publishers of any of these games.
         </p>
       </section>
       <Modal open={confirmErase} onClose={() => setConfirmErase(false)} title="Erase everything?">
