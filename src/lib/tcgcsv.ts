@@ -1,4 +1,4 @@
-import { db } from './db'
+import { db, kvGet, kvPut } from './db'
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, CatalogCache, Finish, Game, PriceEntry } from './types'
@@ -317,4 +317,183 @@ export async function catalogPrintings(game: Game, name: string, signal?: AbortS
     .filter((card) => normalizeName(card.name) === target)
     .sort((a, b) => (b.releasedAt ?? '').localeCompare(a.releasedAt ?? '') || (a.setName ?? '').localeCompare(b.setName ?? ''))
     .slice(0, 60)
+}
+
+/* --- sealed products (every game) ---------------------------------------- */
+
+/**
+ * Sealed products — booster packs, boxes, bundles — exist on TCGplayer for
+ * ALL games, including the ones whose singles come from dedicated APIs. This
+ * section resolves any game to its TCGplayer category, day-caches the group
+ * (set) list, and serves one group's products split into singles vs sealed.
+ */
+
+const GAME_CATEGORY: Record<Game, RegExp> = {
+  mtg: /^magic/i,
+  pokemon: /^pokemon/i,
+  yugioh: /^yu-?gi-?oh/i,
+  lorcana: /lorcana/i,
+  riftbound: /riftbound/i,
+  onepiece: /one\s*piece/i,
+  starwars: /star\s*wars:?\s*unlimited/i,
+  digimon: /digimon/i,
+  gundam: /gundam/i,
+}
+
+export function tcgplayerCategoryId(game: Game, signal?: AbortSignal): Promise<number> {
+  return categoryId({ category: GAME_CATEGORY[game], premiumFinish: 'foil' }, signal)
+}
+
+export interface TcgGroup {
+  groupId: number
+  name: string
+  abbreviation?: string
+  publishedOn?: string
+}
+
+const groupsMemory = new Map<Game, { at: number; groups: TcgGroup[] }>()
+const groupsLoading = new Map<Game, Promise<TcgGroup[]>>()
+
+/** All sets (TCGplayer groups) of a game — the index pack scans match against. */
+export async function tcgplayerGroups(game: Game, signal?: AbortSignal): Promise<TcgGroup[]> {
+  const inMemory = groupsMemory.get(game)
+  if (inMemory && Date.now() - inMemory.at < CATALOG_TTL_MS) return inMemory.groups
+  const inFlight = groupsLoading.get(game)
+  if (inFlight) return inFlight
+  const load = (async () => {
+    const key = `tcg-groups:${game}`
+    const cached = await kvGet<TcgGroup[]>(key, CATALOG_TTL_MS)
+    if (cached?.length) {
+      groupsMemory.set(game, { at: Date.now(), groups: cached })
+      return cached
+    }
+    const category = await tcgplayerCategoryId(game, signal)
+    const rows = await results(`${API}/${category}/groups`, signal)
+    const groups: TcgGroup[] = rows
+      .map((row) => ({
+        groupId: Number(row?.groupId),
+        name: String(row?.name ?? ''),
+        abbreviation: row?.abbreviation || undefined,
+        publishedOn: typeof row?.publishedOn === 'string' ? row.publishedOn.slice(0, 10) : undefined,
+      }))
+      .filter((group) => Number.isFinite(group.groupId) && group.name)
+    if (groups.length) {
+      groupsMemory.set(game, { at: Date.now(), groups })
+      kvPut(key, groups)
+    }
+    return groups
+  })().finally(() => groupsLoading.delete(game))
+  groupsLoading.set(game, load)
+  return load
+}
+
+/** Accessories share the shelf with sealed product — never offer sleeves as "packs". */
+const NOT_SEALED =
+  /sleeve|playmat|play mat|binder|portfolio|deck box|deck case|storage|album|toploader|top loader|card case|dice|counter|figure|plush|pin badge|life pad|art print|poster|lanyard|keychain/i
+
+/** Rough product kind read off the name, for labels and ranking. */
+export function sealedKind(name: string): string {
+  const n = name.toLowerCase()
+  if (/\bcase\b/.test(n)) return 'Case'
+  if (/booster box|booster display|display box/.test(n)) return 'Booster box'
+  if (/elite trainer/.test(n)) return 'Elite Trainer Box'
+  if (/bundle|fat pack/.test(n)) return 'Bundle'
+  if (/booster|blister/.test(n)) return 'Booster pack'
+  if (/starter deck|structure deck|commander deck|precon|deck\b/.test(n)) return 'Deck'
+  if (/\btin\b/.test(n)) return 'Tin'
+  if (/collection|\bbox\b/.test(n)) return 'Box'
+  return 'Sealed'
+}
+
+function toSealedCard(game: Game, product: any, group: TcgGroup, prices: PriceRow[], categoryId: number): Card {
+  const name: string = product.name ?? product.cleanName ?? 'Unknown product'
+  const kind = sealedKind(name)
+  return {
+    id: `${game}:tp-${product.productId}`,
+    game,
+    apiId: `tp-${product.productId}`,
+    name,
+    setCode: group.abbreviation || undefined,
+    setName: group.name || undefined,
+    releasedAt: group.publishedOn,
+    typeLine: kind,
+    supertype: 'Sealed',
+    imageSmall: product.imageUrl || undefined,
+    imageLarge: largeImage(product.imageUrl) ?? undefined,
+    sealed: { categoryId, groupId: group.groupId, kind },
+    prices: mergePrices(priceEntries(prices, 'foil')),
+    links: {
+      market: product.url || undefined,
+      tcgplayer: product.url || tcgplayerSearchLink(name),
+      ebaySold: ebaySoldLink({ name, setName: group.name, game }),
+    },
+  }
+}
+
+export interface GroupContents {
+  group: TcgGroup
+  /** Cards that could be pulled from this set, as listed on TCGplayer. */
+  singles: Card[]
+  /** Sealed products of the set: packs, boxes, bundles, decks, tins. */
+  sealed: Card[]
+}
+
+const GROUP_TTL_MS = 30 * 60_000
+const groupMemory = new Map<string, { at: number; contents: GroupContents }>()
+const groupLoading = new Map<string, Promise<GroupContents>>()
+
+/** One set's products + today's prices, split into singles and sealed. */
+export async function groupContents(game: Game, group: TcgGroup, signal?: AbortSignal): Promise<GroupContents> {
+  const key = `${game}:${group.groupId}`
+  const inMemory = groupMemory.get(key)
+  if (inMemory && Date.now() - inMemory.at < GROUP_TTL_MS) return inMemory.contents
+  const inFlight = groupLoading.get(key)
+  if (inFlight) return inFlight
+  const load = (async () => {
+    const category = await tcgplayerCategoryId(game, signal)
+    const [products, priceRows] = await Promise.all([
+      results(`${API}/${category}/${group.groupId}/products`, signal),
+      results(`${API}/${category}/${group.groupId}/prices`, signal).catch(() => []),
+    ])
+    const pricesByProduct = new Map<number, PriceRow[]>()
+    for (const row of priceRows) {
+      const list = pricesByProduct.get(row.productId) ?? []
+      list.push(row)
+      pricesByProduct.set(row.productId, list)
+    }
+    const spec: CatalogSpec = {
+      category: GAME_CATEGORY[game],
+      premiumFinish: game === 'pokemon' ? 'holo' : 'foil',
+    }
+    const singles: Card[] = []
+    const sealed: Card[] = []
+    for (const product of products) {
+      const rows = pricesByProduct.get(product.productId) ?? []
+      if (isSingle(product)) singles.push(toCard(game, product, group, rows, spec))
+      else if (!NOT_SEALED.test(String(product.name ?? ''))) sealed.push(toSealedCard(game, product, group, rows, category))
+    }
+    const contents: GroupContents = { group, singles, sealed }
+    groupMemory.set(key, { at: Date.now(), contents })
+    return contents
+  })().finally(() => groupLoading.delete(key))
+  groupLoading.set(key, load)
+  return load
+}
+
+/** Re-fetch a stored sealed product for fresh prices. */
+export async function sealedRefresh(card: Card): Promise<Card | null> {
+  const info = card.sealed
+  if (!info) return null
+  const group: TcgGroup = {
+    groupId: info.groupId,
+    name: card.setName ?? '',
+    abbreviation: card.setCode,
+    publishedOn: card.releasedAt,
+  }
+  try {
+    const contents = await groupContents(card.game, group)
+    return contents.sealed.find((product) => product.id === card.id) ?? null
+  } catch {
+    return null
+  }
 }

@@ -63,6 +63,16 @@ export interface CardLinks {
   source?: string
 }
 
+/** Marks a Card as a sealed product; carries what a price refresh needs. */
+export interface SealedInfo {
+  /** TCGplayer category id (the game). */
+  categoryId: number
+  /** TCGplayer group id (the set the product belongs to). */
+  groupId: number
+  /** Product kind guess from the name: booster box, pack, bundle, … */
+  kind?: string
+}
+
 /** A card as normalized from any of the three game APIs. */
 export interface Card {
   /** `${game}:${apiId}` — stable across sessions. */
@@ -88,6 +98,8 @@ export interface Card {
   colors?: string[]
   supertype?: string
   printings?: Printing[]
+  /** Present when this is a sealed product (booster pack/box/bundle), not a single. */
+  sealed?: SealedInfo
   prices: Prices
   links: CardLinks
 }
@@ -105,6 +117,12 @@ export interface CollectionItem {
   finish: Finish
   condition: Condition
   qty: number
+  /**
+   * Sealed products only: false while still sealed, true once cracked.
+   * Opened rows stop counting at the sealed market price — the pulls get
+   * scanned in as singles instead.
+   */
+  opened?: boolean
   /** Cost basis per copy, USD. */
   purchasePrice?: number
   note?: string
@@ -155,4 +173,11 @@ export interface CatalogCache {
   /** When the catalog was fetched — stale after ~a day (prices are daily). */
   at: number
   cards: Card[]
+}
+
+/** Small keyed cache row (TCGplayer group lists etc.); readers check `at` for TTL. */
+export interface KvCacheRow {
+  key: string
+  at: number
+  data: unknown
 }

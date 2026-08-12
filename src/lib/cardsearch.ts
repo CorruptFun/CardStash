@@ -1,7 +1,8 @@
 import { lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
 import { matchMtg, mtgById, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
 import { matchPokemon, pokemonById, pokemonPrintings, searchPokemon } from './pokemon'
-import { catalogById, catalogPrintings, matchCatalog, searchCatalog } from './tcgcsv'
+import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
+import { sealedVariants } from './sealed'
 import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
 import type { Card, Game } from './types'
 import { normalizeName, similarity, sleep } from './util'
@@ -49,6 +50,9 @@ export function matchGame(
 }
 
 export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise<Card | null> {
+  // Sealed product ids (`tp-…`) can't be resolved without their group — those
+  // refresh through refreshCard, which has the full card.
+  if (apiId.startsWith('tp-')) return Promise.resolve(null)
   switch (game) {
     case 'mtg':
       return mtgById(apiId)
@@ -65,6 +69,7 @@ export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise
 
 /** Re-fetch a card from its source API for fresh prices. */
 export function refreshCard(card: Card, keys: ApiKeys = {}): Promise<Card | null> {
+  if (card.sealed) return sealedRefresh(card)
   return cardById(card.game, card.apiId, keys)
 }
 
@@ -85,8 +90,10 @@ export async function refreshCards(
 ): Promise<RefreshStats> {
   const gapMs = opts.gapMs ?? 110
   const stats: RefreshStats = { ok: 0, failed: 0 }
-  const mtg = cards.filter((c) => c.game === 'mtg' && c.apiId)
-  const rest = cards.filter((c) => !(c.game === 'mtg' && c.apiId))
+  // Sealed products refresh one-by-one via their TCGplayer group, never
+  // through the Scryfall batch endpoint.
+  const mtg = cards.filter((c) => c.game === 'mtg' && c.apiId && !c.sealed)
+  const rest = cards.filter((c) => !(c.game === 'mtg' && c.apiId && !c.sealed))
   let calls = 0
   for (let i = 0; i < mtg.length; i += MTG_BATCH) {
     if (opts.signal?.aborted) return stats
@@ -202,6 +209,8 @@ const variantsCache = new Map<string, { at: number; cards: Card[] }>()
  * when the scanner's best guess isn't the copy in their hand.
  */
 export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+  // Sealed: the "variants" are the set's other products (pack ↔ box ↔ bundle).
+  if (card.sealed) return withCurrent(await sealedVariants(card, signal), card)
   const cacheKey = `${card.game}|${normalizeName(card.name)}`
   const cached = variantsCache.get(cacheKey)
   if (cached && Date.now() - cached.at < VARIANTS_TTL_MS) return withCurrent(cached.cards, card)

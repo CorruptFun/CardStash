@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { track } from '../lib/analytics'
 import { captureFrame, startCamera, type CameraSession, type Region } from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
-import { identifyFrame, type IdentifyOutcome } from '../lib/identify'
+import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { stopOcr } from '../lib/ocr'
 import { analyzeFrame, frameHash } from '../lib/vision'
 
@@ -86,6 +86,11 @@ function reticleRegion(videoWidth: number, videoHeight: number): Region {
   }
 }
 
+/** Packs/boxes aren't card-shaped — capture a wide centered window instead. */
+function sealedRegion(): Region {
+  return { x: 0.04, y: 0.1, w: 0.92, h: 0.74 }
+}
+
 interface FailureState {
   consecutive: number
   waitMs: number
@@ -121,8 +126,10 @@ export interface ScannerState {
 
 export const ACTIVE_SCAN_STATUSES: ScannerStatus[] = ['searching', 'locking', 'thinking', 'found', 'nomatch']
 
-export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) => void) {
+export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) => void, mode: ScanMode = 'card') {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const sessionRef = useRef<CameraSession | null>(null)
   const rafRef = useRef(0)
   const jobRef = useRef<ScanJob | null>(null)
@@ -273,10 +280,12 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       setBusy(true)
       lastAttemptRef.current = performance.now()
       patch({ status: 'thinking', miss: null, detail: null })
-      const capture = captureFrame(video, reticleRegion(video.videoWidth, video.videoHeight))
+      const mode = modeRef.current
+      const region = mode === 'sealed' ? sealedRegion() : reticleRegion(video.videoWidth, video.videoHeight)
+      const capture = captureFrame(video, region)
       const hash = frameHash(capture.canvas)
       const startedAt = performance.now()
-      await job.run(() => identifyFrame(capture, hash, { ignoreMisses: manual }), {
+      await job.run(() => identifyFrame(capture, hash, { ignoreMisses: manual, mode }), {
         outcome: (outcome) => {
           track('scan_attempt', {
             engine: outcome.ok ? outcome.identification.via : outcome.reason === 'cached-miss' ? 'cache' : 'ocr',
@@ -284,6 +293,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
             ...(outcome.ok ? {} : { reason: outcome.reason }),
             ...(outcome.ok && outcome.identification.foil != null ? { foil: outcome.identification.foil } : {}),
             ...(outcome.ok && outcome.identification.number != null ? { edition: true } : {}),
+            mode,
             ms: Math.round(performance.now() - startedAt),
             manual,
           })

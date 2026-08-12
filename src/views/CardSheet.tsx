@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CardImg, ManaCost, Seg, Stepper } from '../components/basics'
+import { CardImg, ManaCost, Seg, Stepper, Toggle } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
@@ -20,6 +20,7 @@ import {
 import { addedToBoardToast, boardForCard } from '../lib/deckstats'
 import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, SOURCE_LABEL } from '../lib/games'
 import { cardTrend } from '../lib/portfolio'
+import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
   collectionValue,
   groupComps,
@@ -37,6 +38,7 @@ import { dateTime, haptic, money } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
 const VARIANTS_PREVIEW = 8
+const PULLS_PREVIEW = 10
 const PRICE_STALE_MS = 6 * 3_600_000
 
 /** One printing's identity — YGO variants share a card id but differ in set/rarity. */
@@ -126,6 +128,10 @@ function CardSheet() {
   const [deckPickOpen, setDeckPickOpen] = useState(false)
   const [allPrintings, setAllPrintings] = useState(false)
   const [variants, setVariants] = useState<Card[] | null>(null)
+  const sealed = !!card.sealed
+  /** Sealed only: everything that could be pulled from this product's set. */
+  const [pulls, setPulls] = useState<{ cards: Card[]; setName: string } | 'error' | null>(null)
+  const [allPulls, setAllPulls] = useState(false)
 
   const best = card.prices.best
   const bestFoil = card.prices.bestFoil
@@ -181,6 +187,24 @@ function CardSheet() {
     haptic(6)
   }
 
+  /* Sealed: what could be inside — every card in the product's set. */
+  useEffect(() => {
+    if (!sheet.card.sealed) return
+    let cancelled = false
+    sealedSetContents(sheet.card).then(
+      (contents) => {
+        if (!cancelled) setPulls(contents ? { cards: contents.cards, setName: contents.group.name } : 'error')
+      },
+      () => {
+        if (!cancelled) setPulls('error')
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const comps = useMemo(() => groupComps(card.prices.entries), [card.prices.entries])
   const sortedCopies = useMemo(() => sortCopies(copies ?? []), [copies])
   const copiesValue = useMemo(() => collectionValue(sortedCopies), [sortedCopies])
@@ -217,13 +241,19 @@ function CardSheet() {
       toast(`Added ${qty}× ${card.name} to ${targetDeck?.name ?? 'the deck'}`, 'success')
     } else {
       const item = await guarded(
-        () => addToCollection(card, { finish, condition, qty, purchasePrice: paidValue ?? undefined }),
+        () =>
+          addToCollection(
+            card,
+            sealed
+              ? { qty, purchasePrice: paidValue ?? undefined, opened: false }
+              : { finish, condition, qty, purchasePrice: paidValue ?? undefined },
+          ),
         'Add',
       )
       if (!item) return
       track('card_added', { game: card.game, source: sheet.origin ?? 'search' })
       haptic(12)
-      toast(`Added ${qty}× ${card.name}`, 'success', {
+      toast(sealed ? `Added ${qty}× ${card.name} (sealed)` : `Added ${qty}× ${card.name}`, 'success', {
         label: 'Undo',
         fn: () => {
           guarded(async () => (await removeCopies(item.id, qty), true), 'Undo')
@@ -279,7 +309,11 @@ function CardSheet() {
         <div className="cardsheet__title">
           <div className="cardsheet__gamerow">
             <span className={`gamechip gamechip--${card.game}`}>{GAME_LABEL[card.game]}</span>
-            {card.rarity && <span className="raritychip">{card.rarity}</span>}
+            {sealed ? (
+              <span className="raritychip">{card.sealed?.kind ?? 'Sealed'}</span>
+            ) : (
+              card.rarity && <span className="raritychip">{card.rarity}</span>
+            )}
           </div>
           <h2>{card.name}</h2>
           <p className="cardsheet__set">
@@ -306,7 +340,7 @@ function CardSheet() {
       </header>
       <section className="pricehero">
         <div className="pricehero__main">
-          <span className="pricehero__label">{FINISH_LABEL[displayFinish]}</span>
+          <span className="pricehero__label">{sealed ? 'Sealed' : FINISH_LABEL[displayFinish]}</span>
           <div className="pricehero__figure">
             <span className="pricehero__value">{money(headline)}</span>
             {trend && (
@@ -420,10 +454,14 @@ function CardSheet() {
       {(variants?.length ?? 0) > 1 && (
         <section className="sheetsec">
           <h3>
-            <Icon name="cards" size={15} /> Printings & variants
+            <Icon name="cards" size={15} /> {sealed ? 'Products from this set' : 'Printings & variants'}
             <em className="sheetsec__count">{variants!.length}</em>
           </h3>
-          <p className="printpick__hint">Not the copy in your hand? Pick its edition — set, number, rarity and prices follow.</p>
+          <p className="printpick__hint">
+            {sealed
+              ? 'Scanned a box but holding a pack? Pick the exact product.'
+              : 'Not the copy in your hand? Pick its edition — set, number, rarity and prices follow.'}
+          </p>
           <div className="printpick">
             {(allPrintings ? variants! : variants!.slice(0, VARIANTS_PREVIEW)).map((variant, i) => {
               const selected = printingKey(variant) === printingKey(card)
@@ -437,14 +475,19 @@ function CardSheet() {
                 >
                   <CardImg card={variant} className="printpick__thumb" />
                   <span className="printpick__body">
-                    <span className="printpick__set">{variant.setName ?? variant.setCode ?? 'Unknown set'}</span>
+                    <span className="printpick__set">
+                      {sealed ? variant.name : (variant.setName ?? variant.setCode ?? 'Unknown set')}
+                    </span>
                     <span className="printpick__meta">
-                      {[
-                        variant.setCode,
-                        variant.number ? `#${variant.number}` : null,
-                        variant.rarity,
-                        variant.releasedAt?.slice(0, 4),
-                      ]
+                      {(sealed
+                        ? [variant.sealed?.kind, variant.releasedAt?.slice(0, 4)]
+                        : [
+                            variant.setCode,
+                            variant.number ? `#${variant.number}` : null,
+                            variant.rarity,
+                            variant.releasedAt?.slice(0, 4),
+                          ]
+                      )
                         .filter(Boolean)
                         .join(' · ')}
                     </span>
@@ -462,10 +505,52 @@ function CardSheet() {
             })}
             {variants!.length > VARIANTS_PREVIEW && (
               <button className="printpick__more" onClick={() => setAllPrintings(!allPrintings)}>
-                {allPrintings ? 'Show fewer' : `Show all ${variants!.length} printings`}
+                {allPrintings ? 'Show fewer' : `Show all ${variants!.length} ${sealed ? 'products' : 'printings'}`}
                 <Icon name="chevronDown" size={14} className={allPrintings ? 'flip' : ''} />
               </button>
             )}
+          </div>
+        </section>
+      )}
+      {sealed && (
+        <section className="sheetsec">
+          <h3>
+            <Icon name="search" size={15} /> What could be inside
+            {pulls && pulls !== 'error' && <em className="sheetsec__count">{pulls.cards.length} cards</em>}
+          </h3>
+          {pulls === null && <p className="printpick__hint">Loading the set list…</p>}
+          {pulls === 'error' && <p className="printpick__hint">Couldn’t load the set list — check the link below.</p>}
+          {pulls && pulls !== 'error' && (
+            <>
+              <p className="printpick__hint">
+                Every card in {pulls.setName || 'this set'} — the priciest pulls first.
+              </p>
+              <div className="printpick">
+                {(allPulls ? pulls.cards : pulls.cards.slice(0, PULLS_PREVIEW)).map((single) => (
+                  <div key={single.id} className="printpick__row printpick__row--static">
+                    <CardImg card={single} className="printpick__thumb" />
+                    <span className="printpick__body">
+                      <span className="printpick__set">{single.name}</span>
+                      <span className="printpick__meta">
+                        {[single.number ? `#${single.number}` : null, single.rarity].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="printpick__price">{money(single.prices.best ?? single.prices.bestFoil)}</span>
+                  </div>
+                ))}
+                {pulls.cards.length > PULLS_PREVIEW && (
+                  <button className="printpick__more" onClick={() => setAllPulls(!allPulls)}>
+                    {allPulls ? 'Show fewer' : `Show all ${pulls.cards.length} cards`}
+                    <Icon name="chevronDown" size={14} className={allPulls ? 'flip' : ''} />
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          <div className="compslinks">
+            <a className="btn btn--ghost" href={setListLink(card)} target="_blank" rel="noreferrer">
+              <Icon name="external" size={15} /> Full set list
+            </a>
           </div>
         </section>
       )}
@@ -477,21 +562,25 @@ function CardSheet() {
       <section className="addbar">
         {!sheet.deckId && (
           <div className="addbar__opts">
-            <Seg
-              ariaLabel="Finish"
-              size="sm"
-              options={addFinishOptions.map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
-              value={finish}
-              onChange={setFinish}
-            />
+            {!sealed && (
+              <Seg
+                ariaLabel="Finish"
+                size="sm"
+                options={addFinishOptions.map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
+                value={finish}
+                onChange={setFinish}
+              />
+            )}
             <div className="addbar__row2">
-              <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
-                {CONDITIONS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              {!sealed && (
+                <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
+                  {CONDITIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
               <Stepper value={qty} onChange={setQty} min={1} />
               <input
                 className="input addbar__paid"
@@ -503,6 +592,7 @@ function CardSheet() {
                 aria-label="Paid per card"
               />
             </div>
+            {sealed && <span className="addbar__paidecho">Adds as sealed — mark it Opened later under “Your copies”.</span>}
             {paid.trim().length > 0 && (
               <span className={`addbar__paidecho ${paidOk ? '' : 'addbar__paidecho--bad'}`}>
                 {paidOk ? `Cost basis ${costBasisEcho(paidValue)} each` : 'Enter an amount like 12.50'}
@@ -525,7 +615,7 @@ function CardSheet() {
                 : `Add ${qty > 1 ? `${qty}× ` : ''}· ${money(addPrice)}`}
             </span>
           </button>
-          {!sheet.deckId && (
+          {!sheet.deckId && !sealed && (
             <button className="btn btn--ghost" onClick={() => setDeckPickOpen(true)}>
               <Icon name="decks" size={16} /> Deck
             </button>
@@ -551,9 +641,11 @@ function CardSheet() {
 
 function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const toast = useUi((s) => s.toast)
+  const sealed = row.opened != null || !!row.card.sealed
   const [editing, setEditing] = useState(false)
   const [finish, setFinish] = useState<Finish>(row.finish)
   const [condition, setCondition] = useState<Condition>(row.condition)
+  const [opened, setOpened] = useState(row.opened ?? false)
   const [paid, setPaid] = useState(row.purchasePrice != null ? String(row.purchasePrice) : '')
   const [note, setNote] = useState(row.note ?? '')
   const [saving, setSaving] = useState(false)
@@ -565,6 +657,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
     if (!editing) {
       setFinish(row.finish)
       setCondition(row.condition)
+      setOpened(row.opened ?? false)
       setPaid(row.purchasePrice != null ? String(row.purchasePrice) : '')
       setNote(row.note ?? '')
     }
@@ -576,8 +669,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
     const result = await guarded(
       () =>
         updateItem(row.id, {
-          finish,
-          condition,
+          ...(sealed ? { opened } : { finish, condition }),
           purchasePrice: hasPaid ? (paidValue ?? row.purchasePrice) : undefined,
           note: note.trim() || undefined,
         }),
@@ -598,10 +690,16 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
     <div className={`copyrow ${editing ? 'copyrow--open' : ''}`}>
       <div className="copyrow__main">
         <span className="copyrow__id">
-          <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
-          <span className="copyrow__cond">{row.condition}</span>
+          {sealed ? (
+            <span className="copyrow__finish">{row.opened ? 'Opened' : 'Sealed'}</span>
+          ) : (
+            <>
+              <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
+              <span className="copyrow__cond">{row.condition}</span>
+            </>
+          )}
         </span>
-        <span className="copyrow__unit">{money(unit)}</span>
+        <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>
         <Stepper
           value={row.qty}
           onChange={(qty) => {
@@ -612,28 +710,40 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
           className={`iconbtn ${editing ? 'iconbtn--on' : ''}`}
           onClick={toggleEdit}
           aria-expanded={editing}
-          aria-label={`Edit ${FINISH_LABEL[row.finish]} ${row.condition} copies`}
+          aria-label={sealed ? 'Edit sealed copies' : `Edit ${FINISH_LABEL[row.finish]} ${row.condition} copies`}
         >
           <Icon name="pencil" size={16} />
         </button>
       </div>
       {editing && (
         <div className="copyedit">
-          <Seg
-            ariaLabel="Finish"
-            size="sm"
-            options={GAME_FINISHES[game].map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
-            value={finish}
-            onChange={setFinish}
-          />
+          {sealed ? (
+            <div className="copyedit__opened">
+              <span className="copyedit__openedtext">
+                <strong>Opened</strong>
+                <em>Opened packs stop counting at the sealed price — scan the pulls in as singles</em>
+              </span>
+              <Toggle on={opened} onChange={setOpened} label="Opened" />
+            </div>
+          ) : (
+            <Seg
+              ariaLabel="Finish"
+              size="sm"
+              options={GAME_FINISHES[game].map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
+              value={finish}
+              onChange={setFinish}
+            />
+          )}
           <div className="copyedit__row">
-            <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
-              {CONDITIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            {!sealed && (
+              <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
+                {CONDITIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               className="input"
               type="text"
@@ -679,6 +789,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
 
 function mergeToast(before: CollectionItem, after: CollectionItem): string {
   if (after.id === before.id) return 'Copy updated'
+  if (after.opened != null) return `Merged into your ${after.opened ? 'opened' : 'sealed'} copies`
   const finish = after.finish === 'nonfoil' ? '' : ` ${FINISH_LABEL[after.finish].toLowerCase()}`
   return `Merged into your ${after.condition}${finish} copies`
 }
