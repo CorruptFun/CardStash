@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
-import type { Card, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, similarity, tcgplayerSearchLink } from './util'
+import type { Card, Finish, PriceEntry } from './types'
+import { cardmarketSearchLink, ebaySoldLink, normalizeName, similarity, tcgplayerSearchLink } from './util'
 
 /**
  * Lorcast (lorcast.com) — the Scryfall-alike for Disney Lorcana. Free, no
@@ -32,6 +32,9 @@ function toCard(raw: any): Card {
   const classifications: string[] = Array.isArray(raw.classifications) ? raw.classifications : []
   const inks: string[] = Array.isArray(raw.inks) ? raw.inks : raw.ink ? [String(raw.ink)] : []
   const images = raw.image_uris?.digital ?? raw.image_uris ?? {}
+  // Which prices exist tells us which finishes exist (Enchanted = foil-only).
+  const finishes: Finish[] = [...(usd ? (['nonfoil'] as const) : []), ...(usdFoil ? (['foil'] as const) : [])]
+  const releasedAt = raw.set?.released_at ?? raw.released_at
 
   return {
     id: `lorcana:${raw.id}`,
@@ -42,6 +45,8 @@ function toCard(raw: any): Card {
     setName: raw.set?.name,
     number: raw.collector_number != null ? String(raw.collector_number) : undefined,
     rarity: typeof raw.rarity === 'string' ? raw.rarity.replace(/_/g, ' ') : undefined,
+    releasedAt: typeof releasedAt === 'string' ? releasedAt.slice(0, 10) : undefined,
+    finishes: finishes.length ? finishes : undefined,
     imageSmall: images.small ?? images.normal,
     imageLarge: images.large ?? images.normal ?? images.small,
     typeLine: [types.join(' · '), classifications.join(' · ')].filter(Boolean).join(' — ') || undefined,
@@ -87,6 +92,16 @@ export async function matchLorcana(name: string, setCode?: string | null, number
     if (!best || score > best.score) best = { raw, score }
   }
   return best ? toCard(best.raw) : null
+}
+
+/** Every printing of an exact card name (base set, promos, Enchanted). */
+export async function lorcanaPrintings(name: string, signal?: AbortSignal): Promise<Card[]> {
+  const rows = await runSearch(name, signal).catch(() => [])
+  const target = normalizeName(name)
+  return rows
+    .filter((raw: any) => normalizeName(fullName(raw)) === target)
+    .slice(0, 60)
+    .map(toCard)
 }
 
 export async function lorcanaById(id: string): Promise<Card | null> {

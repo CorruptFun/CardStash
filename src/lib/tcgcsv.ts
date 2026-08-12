@@ -141,6 +141,10 @@ function toCard(game: Game, product: any, group: any, prices: PriceRow[], spec: 
     extValue(product, 'Cost', 'Energy Cost', 'Play Cost') ? `Cost ${extValue(product, 'Cost', 'Energy Cost', 'Play Cost')}` : null,
     extValue(product, 'Power', 'DP') ? `Power ${extValue(product, 'Power', 'DP')}` : null,
   ].filter(Boolean)
+  const finishes = [
+    ...new Set(prices.map((row) => (/foil|premium/i.test(row.subTypeName ?? '') ? spec.premiumFinish : 'nonfoil'))),
+  ]
+  const releasedAt = typeof group?.publishedOn === 'string' ? group.publishedOn.slice(0, 10) : undefined
   return {
     id: `${game}:${product.productId}`,
     game,
@@ -150,6 +154,8 @@ function toCard(game: Game, product: any, group: any, prices: PriceRow[], spec: 
     setName: group?.name || undefined,
     number: extValue(product, 'Number', 'Card Number') ?? undefined,
     rarity: extValue(product, 'Rarity'),
+    releasedAt,
+    finishes: finishes.length ? finishes : undefined,
     imageSmall: product.imageUrl || undefined,
     imageLarge: largeImage(product.imageUrl) ?? undefined,
     typeLine: cardType ? [cardType, statBits.join(' · ')].filter(Boolean).join(' — ') : undefined,
@@ -301,4 +307,15 @@ export async function catalogById(game: Game, apiId: string): Promise<Card | nul
   } catch {
     return null
   }
+}
+
+/** Every catalog product with this exact name — reprints across sets. */
+export async function catalogPrintings(game: Game, name: string, signal?: AbortSignal): Promise<Card[]> {
+  const cards = await catalog(game, signal)
+  const target = normalizeName(name)
+  if (!target) return []
+  return cards
+    .filter((card) => normalizeName(card.name) === target)
+    .sort((a, b) => (b.releasedAt ?? '').localeCompare(a.releasedAt ?? '') || (a.setName ?? '').localeCompare(b.setName ?? ''))
+    .slice(0, 60)
 }

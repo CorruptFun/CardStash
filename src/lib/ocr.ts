@@ -31,7 +31,11 @@ async function getWorker(): Promise<any> {
   workerPromise ??= (async () => {
     if (!window.Tesseract) await loadScript(TESSERACT_CDN)
     if (!window.Tesseract) throw new Error('Tesseract failed to initialize')
-    return window.Tesseract.createWorker('eng', 1)
+    const worker = await window.Tesseract.createWorker('eng', 1)
+    // The input is a pre-cropped band, not a page: single-block segmentation
+    // (PSM 6) skips Tesseract's layout analysis, a large share of its runtime.
+    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+    return worker
   })().catch((err) => {
     workerPromise = null
     throw err
@@ -44,40 +48,74 @@ export function warmOcr(): void {
 }
 
 /**
- * OCR the top bands of a card crop (name line lives up there) and return
+ * Horizontal bands of a card crop that can hold the name line, cheapest
+ * first. The scan loop OCRs them one at a time and stops on the first match.
+ */
+export const OCR_BANDS = [0.26, 0.46] as const
+
+/** OCR runtime scales with pixel count; the name line survives this width fine. */
+const OCR_WIDTH = 640
+
+/** Crop the top `share` of the card, downscaled to grayscale with stretched contrast. */
+function prepBand(canvas: HTMLCanvasElement, share: number): HTMLCanvasElement {
+  const scale = Math.min(1, OCR_WIDTH / Math.max(1, canvas.width))
+  const srcHeight = Math.max(24, Math.round(canvas.height * share))
+  const band = document.createElement('canvas')
+  band.width = Math.max(1, Math.round(canvas.width * scale))
+  band.height = Math.max(16, Math.round(srcHeight * scale))
+  const ctx = band.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(canvas, 0, 0, canvas.width, srcHeight, 0, 0, band.width, band.height)
+  try {
+    const image = ctx.getImageData(0, 0, band.width, band.height)
+    normalizeContrast(image)
+    ctx.putImageData(image, 0, 0)
+  } catch {
+    /* preprocessing is an accuracy boost, not a requirement */
+  }
+  return band
+}
+
+/** Grayscale + percentile contrast stretch (clips glare/shadow outliers). */
+function normalizeContrast(image: ImageData): void {
+  const { data } = image
+  const pixels = data.length / 4
+  const luma = new Uint8ClampedArray(pixels)
+  const histogram = new Uint32Array(256)
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+    luma[p] = y
+    histogram[y]++
+  }
+  const clip = pixels * 0.02
+  let lo = 0
+  for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
+  let hi = 255
+  for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
+  const span = Math.max(1, hi - lo)
+  for (let p = 0, i = 0; p < pixels; p++, i += 4) {
+    const value = Math.max(0, Math.min(255, Math.round(((luma[p] - lo) * 255) / span)))
+    data[i] = data[i + 1] = data[i + 2] = value
+  }
+}
+
+/**
+ * OCR one top band of a card crop (the name line lives up there) and return
  * plausible name candidates, best first.
  */
-export async function readCardNames(canvas: HTMLCanvasElement): Promise<string[]> {
+export async function readCardNames(canvas: HTMLCanvasElement, share: number): Promise<string[]> {
   const worker = await getWorker()
-  const bands = [0.24, 0.42].map((share) => {
-    const band = document.createElement('canvas')
-    const height = Math.max(24, Math.round(canvas.height * share))
-    band.width = canvas.width
-    band.height = height
-    band.getContext('2d')!.drawImage(canvas, 0, 0, canvas.width, height, 0, 0, band.width, height)
-    return band
-  })
-  const texts: string[] = []
-  for (const band of bands) {
-    try {
-      const { data } = await worker.recognize(band)
-      if (data.text) texts.push(data.text)
-    } catch {
-      /* one band failing is fine */
-    }
-  }
+  const band = prepBand(canvas, share)
+  const { data } = await worker.recognize(band)
   const seen = new Set<string>()
   const candidates: string[] = []
-  for (const text of texts) {
-    for (const line of text.split('\n')) {
-      const cleaned = cleanOcrLine(line)
-      if (cleaned && !seen.has(cleaned.toLowerCase())) {
-        seen.add(cleaned.toLowerCase())
-        candidates.push(cleaned)
-      }
+  for (const line of String(data?.text ?? '').split('\n')) {
+    const cleaned = cleanOcrLine(line)
+    if (cleaned && !seen.has(cleaned.toLowerCase())) {
+      seen.add(cleaned.toLowerCase())
+      candidates.push(cleaned)
     }
   }
-  return candidates.slice(0, 6)
+  return candidates.slice(0, 4)
 }
 
 function cleanOcrLine(line: string): string | null {

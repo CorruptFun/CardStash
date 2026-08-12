@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, Finish, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, tcgplayerSearchLink } from './util'
+import { cardmarketSearchLink, ebaySoldLink, normalizeName, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.pokemontcg.io/v2'
 
@@ -38,6 +38,9 @@ function toCard(raw: any): Card {
     entries.push({ source: 'cardmarket', kind: 'avg30', finish: cardmarketFinish, currency: 'EUR', value: cm.avg30 })
 
   const typeLine = [raw.supertype, raw.subtypes?.join(' · ')].filter(Boolean).join(' — ')
+  // The TCGplayer price variants double as the printing's finish list
+  // (normal / holo / reverse holo / 1st edition).
+  const finishes = [...new Set(variants.map((v) => FINISH_BY_TCGPLAYER_KEY[v] ?? 'nonfoil'))]
 
   return {
     id: `pokemon:${raw.id}`,
@@ -48,6 +51,8 @@ function toCard(raw: any): Card {
     setName: raw.set?.name,
     number: raw.number,
     rarity: raw.rarity,
+    releasedAt: typeof raw.set?.releaseDate === 'string' ? raw.set.releaseDate.replace(/\//g, '-') : undefined,
+    finishes: finishes.length ? finishes : undefined,
     imageSmall: raw.images?.small,
     imageLarge: raw.images?.large,
     typeLine: typeLine || undefined,
@@ -150,4 +155,15 @@ export async function pokemonById(id: string, apiKey?: string): Promise<Card | n
   } catch {
     return null
   }
+}
+
+/** Every printing of a card name across sets, newest set first. */
+export async function pokemonPrintings(name: string, apiKey?: string, signal?: AbortSignal): Promise<Card[]> {
+  const clean = stripQuotes(name)
+  if (!clean) return []
+  const rows = await runQueries([`name:"${clean}"`], 60, apiKey, signal).catch(() => [])
+  // The phrase query also matches supersets ("Pikachu" → "Pikachu V") — keep
+  // exact names only, those are the true reprints.
+  const target = normalizeName(name)
+  return rows.filter((raw: any) => normalizeName(String(raw.name ?? '')) === target).map(toCard)
 }

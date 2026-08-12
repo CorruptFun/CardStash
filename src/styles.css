@@ -1722,37 +1722,92 @@ button {
   padding: 9px 8px;
   color: var(--paper);
 }
-.printings {
+.sheetsec__count {
+  margin-left: auto;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  color: var(--paper-3);
+}
+.printpick__hint {
+  margin: -2px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--paper-3);
+}
+.printpick {
   display: flex;
   flex-direction: column;
+  gap: var(--s1);
 }
-.printings__row {
+.printpick__row {
   display: grid;
-  grid-template-columns: 1.6fr 0.9fr 1fr 0.6fr;
-  gap: var(--s2);
-  padding: 7px 2px;
-  font-size: 12.5px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: var(--s3);
   align-items: center;
-  border-bottom: 1px solid var(--rule);
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  text-align: left;
+  color: var(--text);
+  transition:
+    background var(--t-1) var(--ease-out),
+    border-color var(--t-1) var(--ease-out);
 }
-.printings__row:last-child {
-  border-bottom: 0;
+.printpick__row:hover {
+  background: var(--ink-100);
 }
-.printings__set {
+.printpick__row--on {
+  background: var(--signal-fill);
+  border-color: var(--signal-rule);
+}
+.printpick__thumb {
+  width: 34px;
+  aspect-ratio: 63 / 88;
+}
+.printpick__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.printpick__set {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
   font-weight: 520;
 }
-.printings .dim {
+.printpick__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-num);
-  font-size: 11px;
+  font-size: 10.5px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--paper-3);
 }
-.printings .num {
-  font-size: 12px;
+.printpick__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.printpick__price {
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  font-weight: 560;
+}
+.printpick__on {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--signal);
 }
 .oracle {
   padding: 2px 0 2px var(--s3);
@@ -2994,7 +3049,7 @@ button {
 .compsscroll::-webkit-scrollbar {
   display: none;
 }
-.printings__more {
+.printpick__more {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3006,10 +3061,10 @@ button {
   border-top: 1px solid var(--rule);
   transition: color var(--t-1) var(--ease-out);
 }
-.printings__more:hover {
+.printpick__more:hover {
   color: var(--paper);
 }
-.printings__more svg {
+.printpick__more svg {
   transition: transform var(--t-2) var(--ease-out);
 }
 .searchhead .seg {

@@ -5,10 +5,10 @@ import { CardImg, Seg } from '../components/basics'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
-import { GAMES, GAME_SHORT } from '../lib/games'
-import type { IdentifyOutcome } from '../lib/identify'
+import { finishOptions, GAMES, GAME_SHORT } from '../lib/games'
+import { usingOcrBecauseKeyRejected, type IdentifyOutcome } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
-import { priceCurrency } from '../lib/prices'
+import { headlineFinish, priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
 import type { Card } from '../lib/types'
 import { haptic, money } from '../lib/util'
@@ -36,7 +36,9 @@ class CollectQueue {
 
   private async add(card: Card): Promise<void> {
     this.recent = { cardId: card.id, at: Date.now() }
-    const item = await guarded(() => addToCollection(card), 'Add')
+    // Foil-only printings should land as foil, not "Normal".
+    const finish = headlineFinish(card.prices, finishOptions(card))
+    const item = await guarded(() => addToCollection(card, { finish }), 'Add')
     if (!item) return
     track('card_added', { game: card.game, source: 'scan' })
     const price = card.prices.best ?? card.prices.bestFoil
@@ -121,14 +123,19 @@ export function ScanView({ active }: { active: boolean }) {
   const collectRef = useRef<CollectQueue | null>(null)
   collectRef.current ??= new CollectQueue()
   const [started, setStarted] = useState(false)
+  const warnedKeyRef = useRef(false)
 
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
       guarded(() => recordScan(hit.card), 'Save scan')
       haptic(config.haptics ? [14, 60, 14] : 0)
       if (config.collectMode) collectRef.current!.hit(hit.card)
+      if (usingOcrBecauseKeyRejected() && !warnedKeyRef.current) {
+        warnedKeyRef.current = true
+        toast('Gemini rejected your API key, so scans run on-device for now — fix the key in Settings when you can.', 'info')
+      }
     },
-    [config.collectMode, config.haptics],
+    [config.collectMode, config.haptics, toast],
   )
   const scanner = useScanner(onHit)
   const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
@@ -141,7 +148,7 @@ export function ScanView({ active }: { active: boolean }) {
   }, [visible, started, scanner.status])
 
   useEffect(() => {
-    if (!config.geminiKey && config.ocrFallback && started && visible) warmOcr()
+    if (config.ocrFallback && started && visible && (!config.geminiKey || usingOcrBecauseKeyRejected())) warmOcr()
   }, [config.geminiKey, config.ocrFallback, started, visible])
 
   const searchInstead = () => {

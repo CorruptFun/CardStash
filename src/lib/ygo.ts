@@ -131,3 +131,31 @@ export async function ygoById(id: string): Promise<Card | null> {
     return null
   }
 }
+
+/**
+ * One selectable Card per printing. YGOPRODeck keys everything on a single
+ * card id, so variants share the id but carry their own set/rarity — and the
+ * printing's set price replaces the generic headline (rarity moves YGO prices
+ * by orders of magnitude).
+ */
+export function ygoPrintingVariants(card: Card): Card[] {
+  const printings = card.printings ?? []
+  if (!printings.length) return [card]
+  return printings.map((printing) => {
+    const entries =
+      printing.price != null && printing.price > 0
+        ? [
+            { source: 'tcgplayer', kind: 'market', finish: 'nonfoil', currency: 'USD', value: printing.price } as PriceEntry,
+            ...card.prices.entries.filter((e) => !(e.source === 'tcgplayer' && e.kind === 'market' && e.finish === 'nonfoil')),
+          ]
+        : card.prices.entries
+    return {
+      ...card,
+      setCode: printing.setCode?.split('-')[0],
+      setName: printing.setName,
+      number: printing.setCode,
+      rarity: printing.rarity,
+      prices: mergePrices(entries, card.prices.updatedAt),
+    }
+  })
+}
