@@ -6,7 +6,6 @@ import { searchGame } from '../lib/cardsearch'
 import { recordPricePoint } from '../lib/db'
 import { isAbort } from '../lib/fetchJson'
 import { GAME_LABEL, GAMES } from '../lib/games'
-import { priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
 import type { Card, Game } from '../lib/types'
 import { money } from '../lib/util'
@@ -153,9 +152,7 @@ export function SearchView() {
             {results.map((card) => (
               <button key={card.id} className="cardcell" onClick={() => openSheet({ card, origin: 'search' })}>
                 <CardImg card={card} />
-                <span className="cardcell__price">
-                  {money(card.prices.best ?? card.prices.bestFoil, priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best'))}
-                </span>
+                <span className="cardcell__price">{money(card.prices.best ?? card.prices.bestFoil)}</span>
                 <span className="cardcell__name">{card.name}</span>
                 <span className="cardcell__set">{card.setCode}</span>
               </button>

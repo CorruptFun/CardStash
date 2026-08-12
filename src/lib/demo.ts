@@ -8,15 +8,13 @@ import { tcgplayerSearchLink, uid, ymd } from './util'
 type DemoSpec = Omit<Card, 'prices' | 'links'> & {
   usd?: number
   usdFoil?: number
-  eur?: number
 }
 
 function demoCard(spec: DemoSpec): Card {
-  const { usd, usdFoil, eur, ...card } = spec
+  const { usd, usdFoil, ...card } = spec
   const entries: PriceEntry[] = []
   if (usd) entries.push({ source: 'tcgplayer', kind: 'market', finish: 'nonfoil', currency: 'USD', value: usd })
   if (usdFoil) entries.push({ source: 'tcgplayer', kind: 'market', finish: 'foil', currency: 'USD', value: usdFoil })
-  if (eur) entries.push({ source: 'cardmarket', kind: 'trend', finish: 'nonfoil', currency: 'EUR', value: eur })
   return {
     ...card,
     prices: mergePrices(entries),
@@ -48,7 +46,6 @@ const MTG_DEMO: Card[] = [
     supertype: 'Instant',
     usd: 1.85,
     usdFoil: 4.2,
-    eur: 1.4,
     imageSmall: scry('f29ba16f-c8fb-42fe-aabf-87089cb214a7', 'small'),
     imageLarge: scry('f29ba16f-c8fb-42fe-aabf-87089cb214a7', 'large'),
   }),
@@ -69,7 +66,6 @@ const MTG_DEMO: Card[] = [
     supertype: 'Creature',
     usd: 38.5,
     usdFoil: 55,
-    eur: 34.1,
     imageSmall: scry('a1b48479-b249-4a51-a8a5-8f4c76a1e433', 'small'),
     imageLarge: scry('a1b48479-b249-4a51-a8a5-8f4c76a1e433', 'large'),
   }),
@@ -90,7 +86,6 @@ const MTG_DEMO: Card[] = [
     supertype: 'Creature',
     usd: 52,
     usdFoil: 68.9,
-    eur: 47.3,
     imageSmall: scry('d67be074-cdd4-41d9-ac89-0a0456c4e4b2', 'small'),
     imageLarge: scry('d67be074-cdd4-41d9-ac89-0a0456c4e4b2', 'large'),
   }),
@@ -110,7 +105,6 @@ const MTG_DEMO: Card[] = [
     colors: ['B'],
     supertype: 'Creature',
     usd: 21.4,
-    eur: 19.8,
     imageSmall: scry('703e7ecf-3d73-40c1-8cfe-0758ba817101', 'small'),
     imageLarge: scry('703e7ecf-3d73-40c1-8cfe-0758ba817101', 'large'),
   }),
@@ -152,7 +146,6 @@ const POKEMON_DEMO: Card[] = [
     supertype: 'Pokémon',
     usd: 42.7,
     usdFoil: 42.7,
-    eur: 38.2,
     imageSmall: pkmImg('sv3-125', 'small'),
     imageLarge: pkmImg('sv3-125', 'large'),
   }),
@@ -168,7 +161,6 @@ const POKEMON_DEMO: Card[] = [
     typeLine: 'Pokémon — Basic',
     supertype: 'Pokémon',
     usd: 0.9,
-    eur: 0.7,
     imageSmall: pkmImg('sv3pt5-25', 'small'),
     imageLarge: pkmImg('sv3pt5-25', 'large'),
   }),
@@ -186,7 +178,6 @@ const POKEMON_DEMO: Card[] = [
       'Each player shuffles their hand into their deck, then draws a card for each of their remaining prize cards.',
     supertype: 'Trainer',
     usd: 16.8,
-    eur: 14.9,
     imageSmall: pkmImg('sv2-185', 'small'),
     imageLarge: pkmImg('sv2-185', 'large'),
   }),
@@ -209,7 +200,6 @@ const YGO_DEMO: Card[] = [
     subtext: 'The ultimate wizard in terms of attack and defense.',
     supertype: 'Monster',
     usd: 7.4,
-    eur: 6.2,
     imageSmall: ygoSmall('46986414'),
     imageLarge: ygoLarge('46986414'),
   }),
@@ -227,7 +217,6 @@ const YGO_DEMO: Card[] = [
       'When a card or effect is activated that includes any of these effects (Quick Effect): You can discard this card; negate that effect.',
     supertype: 'Monster',
     usd: 3.9,
-    eur: 3.1,
     imageSmall: ygoSmall('14558127'),
     imageLarge: ygoLarge('14558127'),
   }),

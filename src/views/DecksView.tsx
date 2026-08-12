@@ -21,7 +21,6 @@ import {
   addedToBoardToast,
   boardForCard,
   deckCoverCard,
-  deckRowCurrency,
   deckRowUnitPrice,
   deckStats,
   groupBoards,
@@ -30,24 +29,16 @@ import {
 } from '../lib/deckstats'
 import { isAbort } from '../lib/fetchJson'
 import { GAME_LABEL, GAME_SHORT, GAMES } from '../lib/games'
-import { priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
 import type { Card, Deck, DeckBoard, Game } from '../lib/types'
 import { money } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
-function deckMoney(stats: DeckStats): { usd: string; eur: string | null } {
-  return { usd: money(stats.value), eur: stats.valueEur > 0 ? `+ ${money(stats.valueEur, 'EUR')}` : null }
-}
-
-function ownedLine(stats: DeckStats): { count: string; toGet: string | null; money: string[] } {
-  const parts: string[] = []
-  if (stats.missing.usd > 0) parts.push(money(stats.missing.usd))
-  if (stats.missing.eur > 0) parts.push(money(stats.missing.eur, 'EUR'))
+function ownedLine(stats: DeckStats): { count: string; toGet: string | null; cost: string | null } {
   return {
     count: `${stats.owned}/${stats.total}`,
     toGet: stats.missing.qty > 0 ? `${stats.missing.qty} to get` : null,
-    money: parts,
+    cost: stats.missing.usd > 0 ? money(stats.missing.usd) : null,
   }
 }
 
@@ -112,7 +103,6 @@ function DeckList({ navigate }: { navigate: (hash: string) => void }) {
         {(decks ?? []).map((deck) => {
           const rows = byDeck.get(deck.id) ?? []
           const stats = deckStats(deck.game, rows)
-          const value = deckMoney(stats)
           const cover = deckCoverCard(rows, deck.coverCardId)
           return (
             <button key={deck.id} className="decktile" onClick={() => navigate(`#/decks/${deck.id}`)}>
@@ -133,8 +123,7 @@ function DeckList({ navigate }: { navigate: (hash: string) => void }) {
                 </p>
                 <p className="decktile__meta">
                   <span>{stats.total} cards</span>
-                  <span className="decktile__val">{value.usd}</span>
-                  {value.eur && <span className="decktile__val decktile__eur">{value.eur}</span>}
+                  <span className="decktile__val">{money(stats.value)}</span>
                 </p>
               </div>
               <Icon name="chevronRight" size={18} className="decktile__go" />
@@ -215,7 +204,6 @@ function DeckDetail({ deckId, navigate }: { deckId: string; navigate: (hash: str
 
   const stats = deckStats(deck.game, rows ?? [], owned)
   const boards = groupBoards(rows ?? [])
-  const value = deckMoney(stats)
   const ownership = ownedLine(stats)
 
   const copyList = async () => {
@@ -251,8 +239,7 @@ function DeckDetail({ deckId, navigate }: { deckId: string; navigate: (hash: str
             <span>{GAME_SHORT[deck.game]}</span>
             {deck.format && <span>{deck.format}</span>}
             <span>{stats.total} cards</span>
-            <span className="deckhead__val">{value.usd}</span>
-            {value.eur && <span className="deckhead__val deckhead__eur">{value.eur}</span>}
+            <span className="deckhead__val">{money(stats.value)}</span>
           </p>
         </div>
         <button
@@ -281,12 +268,9 @@ function DeckDetail({ deckId, navigate }: { deckId: string; navigate: (hash: str
             <span className="ownedline__count">
               {ownership.count}
               {ownership.toGet && ` · ${ownership.toGet}`}
-              {ownership.money.map((part) => (
-                <b key={part} className="ownedline__cost">
-                  {' '}
-                  · {part}
-                </b>
-              ))}
+              {ownership.cost && (
+                <b className="ownedline__cost"> · {ownership.cost}</b>
+              )}
             </span>
           </div>
           <div className="ownedline__track">
@@ -369,7 +353,7 @@ function DeckDetail({ deckId, navigate }: { deckId: string; navigate: (hash: str
                           ) : (
                             <em className="deckrow__missing">need {row.qty}</em>
                           )}{' '}
-                          · {money(deckRowUnitPrice(row), deckRowCurrency(row))}
+                          · {money(deckRowUnitPrice(row))}
                         </span>
                       </div>
                       {row.card.manaCost && <ManaCost cost={row.card.manaCost} className="deckrow__mana" />}
@@ -581,12 +565,7 @@ function AddCardsModal({ open, onClose, deck }: { open: boolean; onClose: () => 
                     <span>{card.name}</span>
                     <em>{card.setCode}</em>
                   </div>
-                  <span className="addlist__price num">
-                    {money(
-                      card.prices.best ?? card.prices.bestFoil,
-                      priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best'),
-                    )}
-                  </span>
+                  <span className="addlist__price num">{money(card.prices.best ?? card.prices.bestFoil)}</span>
                   <button
                     className="iconbtn iconbtn--accent"
                     onClick={() => {
@@ -631,12 +610,7 @@ function AddCardsModal({ open, onClose, deck }: { open: boolean; onClose: () => 
                   <span>{item.name}</span>
                   <em>×{item.qty} owned</em>
                 </div>
-                <span className="addlist__price num">
-                  {money(
-                    item.card.prices.best ?? item.card.prices.bestFoil,
-                    priceCurrency(item.card.prices, item.card.prices.best == null ? 'foil' : 'best'),
-                  )}
-                </span>
+                <span className="addlist__price num">{money(item.card.prices.best ?? item.card.prices.bestFoil)}</span>
                 <button
                   className="iconbtn iconbtn--accent"
                   onClick={() => {

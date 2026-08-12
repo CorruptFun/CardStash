@@ -1,10 +1,11 @@
-import { conditionFactor, itemCurrency, itemUnitPrice } from './prices'
+import { conditionFactor, itemUnitPrice } from './prices'
 import type { Card, CollectionItem, PricePoint } from './types'
 import { ymd } from './util'
 
 /**
  * Collection-value time series and movers, reconstructed from per-card price
- * history. USD-priced rows only — mixing currencies into one line would lie.
+ * history. USD throughout; history points recorded as EUR by old app
+ * versions are skipped — mixing currencies into one line would lie.
  */
 
 const DAY_MS = 86_400_000
@@ -16,12 +17,11 @@ export function valueSeries(
   today = ymd(),
 ): { date: string; value: number }[] {
   const dates = dateRange(today, days)
-  const usdItems = usdOnly(items)
-  if (!dates.length || !usdItems.length) return []
+  if (!dates.length || !items.length) return []
   const byCard = groupPoints(points)
   const totals = new Array<number>(dates.length).fill(0)
   const seriesCache = new Map<string, number[]>()
-  for (const item of usdItems) {
+  for (const item of items) {
     if (item.qty <= 0) continue
     const premium = isPremium(item)
     const key = `${item.cardId}|${premium ? 'foil' : 'best'}`
@@ -82,7 +82,7 @@ export function costBasis(items: CollectionItem[]): CostBasis {
   for (const item of items) {
     if (item.qty <= 0) continue
     const unit = itemUnitPrice(item)
-    const usable = item.purchasePrice != null && item.purchasePrice > 0 && unit != null && itemCurrency(item) === 'USD'
+    const usable = item.purchasePrice != null && item.purchasePrice > 0 && unit != null
     if (!usable) {
       uncovered += item.qty
       continue
@@ -111,13 +111,12 @@ export function movers(
   today = ymd(),
 ): { gainers: Mover[]; losers: Mover[] } {
   const dates = dateRange(today, days)
-  const usdItems = usdOnly(items)
-  if (!dates.length || !usdItems.length) return { gainers: [], losers: [] }
+  if (!dates.length || !items.length) return { gainers: [], losers: [] }
   const first = dates[0]
   const last = dates[dates.length - 1]
   const byCard = groupPoints(points)
   const rows: Mover[] = []
-  for (const [cardId, cardItems] of groupItems(usdItems)) {
+  for (const [cardId, cardItems] of groupItems(items)) {
     const window = (byCard.get(cardId) ?? []).filter((p) => p.date >= first && p.date <= last)
     if (window.length < 2) continue
     let delta = 0
@@ -155,11 +154,7 @@ function snapshotDays(items: CollectionItem[], points: PricePoint[], days: numbe
   if (!dates.length || !items.length) return 0
   const first = dates[0]
   const last = dates[dates.length - 1]
-  const owned = new Set(
-    usdOnly(items)
-      .filter((item) => item.qty > 0)
-      .map((item) => item.cardId),
-  )
+  const owned = new Set(items.filter((item) => item.qty > 0).map((item) => item.cardId))
   const seen = new Set<string>()
   for (const point of points) {
     if (!owned.has(point.cardId) || point.date < first || point.date > last) continue
@@ -202,10 +197,6 @@ function groupItems(items: CollectionItem[]): Map<string, CollectionItem[]> {
 
 function positive(value: number | null | undefined): number | null {
   return value != null && Number.isFinite(value) && value > 0 ? value : null
-}
-
-function usdOnly(items: CollectionItem[]): CollectionItem[] {
-  return items.filter((item) => itemCurrency(item) === 'USD')
 }
 
 function isPremium(item: CollectionItem): boolean {
