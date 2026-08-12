@@ -35,9 +35,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   the AI deck builder (`gemini.ts` — the app's ONLY Gemini use; scanning must
   stay fully on-device), on-device OCR + collector-line reading (`ocr.ts`,
   `corner.ts`), scan pipeline (`identify.ts`, `vision.ts` — includes the foil
-  sheen detector, `camera.ts`), portfolio math (`portfolio.ts`), deck math
-  (`deckstats.ts`), CSV import/export (`importexport.ts`), local diagnostics
-  (`analytics.ts`).
+  sheen detector, `camera.ts`), sealed-product scanning (`sealed.ts`, backed
+  by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
+  an `opened` flag and stop counting at the sealed price once opened),
+  portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
+  import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
 - `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
   `builderSeeds` (cards handed to the AI builder to design around).

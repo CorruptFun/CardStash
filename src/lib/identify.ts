@@ -2,14 +2,17 @@ import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { OCR_BANDS, readCardNames, readRegionText } from './ocr'
+import { OCR_BANDS, readCardNames, readRegionText, readSealedLines } from './ocr'
 import { matchPokemon } from './pokemon'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
+import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import type { Card, Game } from './types'
 import { detectFoil, hammingDistance } from './vision'
 import { similarity } from './util'
 import { ygoPrintingVariants } from './ygo'
+
+export type ScanMode = 'card' | 'sealed'
 
 /*
  * Identification is fully on-device: Tesseract reads the name band and the
@@ -22,6 +25,7 @@ import { ygoPrintingVariants } from './ygo'
 
 interface CacheEntry {
   hash: string
+  mode: ScanMode
   card: Card | null
   /** Foil sheen read off the physical copy — kept so cached hits price right. */
   foil?: boolean
@@ -33,18 +37,18 @@ const CACHE_LIMIT = 60
 const MISS_TTL_MS = 15_000
 const HASH_TOLERANCE = 10
 
-function cacheLookup(hash: string): CacheEntry | null {
+function cacheLookup(hash: string, mode: ScanMode): CacheEntry | null {
   const now = Date.now()
   for (const entry of cache) {
-    if (hammingDistance(entry.hash, hash) <= HASH_TOLERANCE) {
+    if (entry.mode === mode && hammingDistance(entry.hash, hash) <= HASH_TOLERANCE) {
       return entry.card === null && now - entry.at > MISS_TTL_MS ? null : entry
     }
   }
   return null
 }
 
-function cacheStore(hash: string, card: Card | null, foil?: boolean): void {
-  cache.unshift({ hash, card, foil, at: Date.now() })
+function cacheStore(hash: string, mode: ScanMode, card: Card | null, foil?: boolean): void {
+  cache.unshift({ hash, mode, card, foil, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
@@ -76,11 +80,12 @@ export interface IdentificationMeta {
 export async function identifyFrame(
   capture: FrameCapture,
   hash: string,
-  opts: { ignoreMisses?: boolean } = {},
+  opts: { ignoreMisses?: boolean; mode?: ScanMode } = {},
 ): Promise<IdentifyOutcome> {
+  const mode = opts.mode ?? 'card'
   const config = settings()
   const gameHint = config.gameFilter === 'auto' ? undefined : config.gameFilter
-  const cached = cacheLookup(hash)
+  const cached = cacheLookup(hash, mode)
   const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
   if (cacheUsable && cached.card) {
     return {
@@ -101,12 +106,52 @@ export async function identifyFrame(
     return { ok: false, reason: 'cached-miss', message: 'Same frame as a recent miss' }
   }
 
-  const outcome = await identifyViaOcr(capture.canvas, gameHint)
-  if (outcome.ok) cacheStore(hash, outcome.card, outcome.identification.foil)
+  const outcome =
+    mode === 'sealed' ? await identifySealedFrame(capture.canvas, gameHint) : await identifyViaOcr(capture.canvas, gameHint)
+  if (outcome.ok) cacheStore(hash, mode, outcome.card, outcome.identification.foil)
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual shutter tap bypasses this.
-  else if (outcome.reason === 'ocr-miss') cacheStore(hash, null)
+  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, null)
   return outcome
+}
+
+/** Pack/box front → set name → the set's sealed product. All on-device OCR. */
+async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
+  let lines: string[]
+  try {
+    lines = await readSealedLines(canvas)
+  } catch {
+    return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
+  }
+  if (!lines.length) {
+    return { ok: false, reason: 'ocr-miss', message: 'Couldn’t read the packaging — fill the frame with the front' }
+  }
+  let match
+  try {
+    match = await identifySealedText(lines, gameHint ? [gameHint] : undefined)
+  } catch {
+    return { ok: false, reason: 'api', message: 'Couldn’t reach the product catalog', readName: lines[0] }
+  }
+  if (!match) {
+    return {
+      ok: false,
+      reason: 'ocr-miss',
+      message: `Read “${lines[0]}” but couldn’t match a set — get the set name in frame`,
+      readName: lines[0],
+      readGame: gameHint,
+    }
+  }
+  return {
+    ok: true,
+    card: match.card,
+    identification: {
+      game: match.game,
+      name: match.card.name,
+      setCode: match.card.setCode,
+      confidence: match.score,
+      via: 'ocr',
+    },
+  }
 }
 
 const OCR_MATCH_THRESHOLD = 0.62

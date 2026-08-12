@@ -267,6 +267,36 @@ export async function seedDemoData(): Promise<void> {
     card,
   }))
 
+  // One sealed product, still unopened, to show off pack tracking.
+  const sealedDemo = demoCard({
+    id: 'mtg:tp-demo-mh3-box',
+    game: 'mtg',
+    apiId: 'tp-demo-mh3-box',
+    name: 'Modern Horizons 3 - Play Booster Box',
+    setCode: 'MH3',
+    setName: 'Modern Horizons 3',
+    releasedAt: '2024-06-14',
+    typeLine: 'Booster box',
+    supertype: 'Sealed',
+    sealed: { categoryId: 1, groupId: 23332, kind: 'Booster box' },
+    usd: 289.99,
+  })
+  collection.push({
+    id: 'demo-item-sealed',
+    cardId: sealedDemo.id,
+    game: 'mtg',
+    name: sealedDemo.name,
+    setCode: sealedDemo.setCode,
+    setName: sealedDemo.setName,
+    finish: 'nonfoil',
+    condition: 'NM',
+    qty: 1,
+    opened: false,
+    purchasePrice: 240,
+    addedAt: now - 5 * 3_600_000,
+    card: sealedDemo,
+  })
+
   const deck: Deck = {
     id: 'demo-deck-rakdos',
     game: 'mtg',

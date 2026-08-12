@@ -614,7 +614,7 @@ const CollectionCell = memo(function CollectionCell({
       <span className="cardcell__name">{item.name}</span>
       <span className="cardcell__set">
         {item.setCode}
-        {item.condition !== 'NM' ? ` · ${item.condition}` : ''}
+        {item.opened != null ? ` · ${item.opened ? 'Opened' : 'Sealed'}` : item.condition !== 'NM' ? ` · ${item.condition}` : ''}
       </span>
       {editMode && (
         <span className={`cardcell__check ${selected ? 'cardcell__check--on' : ''}`}>{selected && <Icon name="check" size={13} />}</span>

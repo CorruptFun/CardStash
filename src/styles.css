@@ -1794,6 +1794,34 @@ button {
   background: var(--signal-fill);
   border-color: var(--signal-rule);
 }
+.printpick__row--static {
+  cursor: default;
+}
+.printpick__row--static:hover {
+  background: none;
+}
+.copyedit__opened {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 2px 0;
+}
+.copyedit__openedtext {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.copyedit__openedtext strong {
+  font-size: 13px;
+  font-weight: 560;
+}
+.copyedit__openedtext em {
+  font-style: normal;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--paper-3);
+}
 .printpick__thumb {
   width: 34px;
   aspect-ratio: 63 / 88;

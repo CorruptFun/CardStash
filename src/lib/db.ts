@@ -5,6 +5,7 @@ import type {
   Card,
   CatalogCache,
   CollectionItem,
+  KvCacheRow,
   Condition,
   Deck,
   DeckBoard,
@@ -24,6 +25,7 @@ class CardstockDB extends Dexie {
   history!: Table<PricePoint, [string, string]>
   scans!: Table<ScanRecord, string>
   catalogs!: Table<CatalogCache, Game>
+  cache!: Table<KvCacheRow, string>
 
   constructor() {
     super('cardstock')
@@ -46,6 +48,8 @@ class CardstockDB extends Dexie {
       })
     // v3: day-cached TCGplayer catalogs (Riftbound & co. have no search API).
     this.version(3).stores({ catalogs: 'game' })
+    // v4: small keyed caches (TCGplayer group lists for sealed products).
+    this.version(4).stores({ cache: 'key' })
   }
 }
 
@@ -75,6 +79,8 @@ export interface AddOptions {
   qty?: number
   purchasePrice?: number
   note?: string
+  /** Sealed products: false = still sealed (the default when card.sealed). */
+  opened?: boolean
 }
 
 /** Same printing = same set + collector number (YGO reprints share one card id). */
@@ -82,16 +88,25 @@ function samePrinting(a: { setCode?: string; number?: string }, b: { setCode?: s
   return (a.setCode ?? '') === (b.setCode ?? '') && (a.number ?? '') === (b.number ?? '')
 }
 
+/** Sealed and opened copies of the same product must never merge. */
+function sameOpened(a: { opened?: boolean }, b: { opened?: boolean }): boolean {
+  return (a.opened ?? false) === (b.opened ?? false)
+}
+
 /** Add copies to the collection, merging into an existing printing+finish+condition row. */
 export async function addToCollection(card: Card, opts: AddOptions = {}): Promise<CollectionItem> {
   const finish = opts.finish ?? 'nonfoil'
   const condition = opts.condition ?? 'NM'
   const qty = opts.qty ?? 1
+  const opened = card.sealed ? (opts.opened ?? false) : undefined
   return db.transaction('rw', db.collection, async () => {
     const existing = await db.collection
       .where('cardId')
       .equals(card.id)
-      .and((item) => item.finish === finish && item.condition === condition && samePrinting(item, card))
+      .and(
+        (item) =>
+          item.finish === finish && item.condition === condition && samePrinting(item, card) && sameOpened(item, { opened }),
+      )
       .first()
     if (existing) {
       const purchasePrice =
@@ -114,6 +129,7 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
       finish,
       condition,
       qty,
+      opened,
       purchasePrice: opts.purchasePrice,
       note: opts.note,
       addedAt: Date.now(),
@@ -146,7 +162,7 @@ export async function removeCopies(id: string, count: number): Promise<void> {
  */
 export async function updateItem(
   id: string,
-  patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'purchasePrice' | 'note' | 'card'>>,
+  patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card'>>,
 ): Promise<CollectionItem | null> {
   return db.transaction('rw', db.collection, async () => {
     const item = await db.collection.get(id)
@@ -160,7 +176,8 @@ export async function updateItem(
           other.id !== id &&
           other.finish === edited.finish &&
           other.condition === edited.condition &&
-          samePrinting(other, edited),
+          samePrinting(other, edited) &&
+          sameOpened(other, edited),
       )
       .first()
     if (!collision) {
@@ -182,6 +199,27 @@ export async function updateItem(
 
 export async function removeItems(ids: string[]): Promise<void> {
   await db.collection.bulkDelete(ids)
+}
+
+/* Small keyed cache (TCGplayer group lists etc.). Best-effort: quota noise
+ * must never break a lookup, so failures read as cache misses. */
+
+export async function kvGet<T>(key: string, maxAgeMs: number): Promise<T | null> {
+  try {
+    const row = await db.cache.get(key)
+    if (!row || Date.now() - row.at > maxAgeMs) return null
+    return row.data as T
+  } catch {
+    return null
+  }
+}
+
+export async function kvPut(key: string, data: unknown): Promise<void> {
+  try {
+    await db.cache.put({ key, at: Date.now(), data })
+  } catch {
+    /* cache only */
+  }
 }
 
 /** name(lowercased) → total owned copies, for one game. */
@@ -378,6 +416,7 @@ export function sanitizeBackup(raw: unknown): Backup {
       finish: typeof entry.finish === 'string' && entry.finish in FINISH_LABEL ? (entry.finish as Finish) : 'nonfoil',
       condition: CONDITIONS.includes(entry.condition as Condition) ? (entry.condition as Condition) : 'NM',
       qty: Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0,
+      opened: typeof entry.opened === 'boolean' ? entry.opened : undefined,
       purchasePrice: asPositive(entry.purchasePrice),
       addedAt: Number.isFinite(addedAt) && addedAt > 0 ? addedAt : Date.now(),
       card: card as unknown as Card,

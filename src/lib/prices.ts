@@ -11,6 +11,8 @@ export interface Priceable {
   finish: Finish
   condition: Condition
   qty: number
+  /** Sealed products: true once cracked — the sealed market price no longer applies. */
+  opened?: boolean
   card: Card
 }
 
@@ -87,6 +89,9 @@ export function itemUnitPrice(item: Priceable): number | null {
 }
 
 function itemRawUnitPrice(item: Priceable): number | null {
+  // An opened box/pack isn't the sealed product anymore — its pulls get
+  // scanned in as singles, so the row itself stops counting.
+  if (item.opened) return null
   const { prices } = item.card
   // Recomputed from entries (not the stored headline) so a legacy EUR-only
   // card reads as unpriced instead of showing its euro figure as dollars.

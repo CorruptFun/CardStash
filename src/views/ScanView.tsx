@@ -6,7 +6,7 @@ import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/u
 import { track } from '../lib/analytics'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
-import type { IdentifyOutcome } from '../lib/identify'
+import type { IdentifyOutcome, ScanMode } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { headlineFinish, itemUnitPrice } from '../lib/prices'
 import { useSettings } from '../lib/settings'
@@ -20,6 +20,7 @@ import { guarded, uiStore, useUi } from '../store/ui'
  * foil-only printings as foil rather than "Normal").
  */
 function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
+  if (hit.card.sealed) return 'nonfoil'
   const options = finishOptions(hit.card)
   const foil = hit.identification.foil
   if (foil === true) {
@@ -92,7 +93,7 @@ function ScanChip({
     // Price the finish that's actually in frame — a scanned foil shows the
     // foil number, not the plain one.
     const probe = { finish, condition: 'NM' as const, qty: 1, card }
-    const cyclable = finishOptions(card).length > 1
+    const cyclable = !card.sealed && finishOptions(card).length > 1
     return (
       <>
         <button className="chip chip--found" onClick={onOpen}>
@@ -162,6 +163,8 @@ export function ScanView({ active }: { active: boolean }) {
   const collectRef = useRef<CollectQueue | null>(null)
   collectRef.current ??= new CollectQueue()
   const [started, setStarted] = useState(false)
+  /** Cards vs sealed products (packs, boxes, bundles). */
+  const [scanMode, setScanMode] = useState<ScanMode>('card')
   /** Manual finish pick on the chip, per identified card. */
   const [finishPick, setFinishPick] = useState<{ id: string; finish: Finish } | null>(null)
 
@@ -173,7 +176,7 @@ export function ScanView({ active }: { active: boolean }) {
     },
     [config.collectMode, config.haptics],
   )
-  const scanner = useScanner(onHit)
+  const scanner = useScanner(onHit, scanMode)
   const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
   const visible = active && !sheetOpen
 
@@ -216,7 +219,9 @@ export function ScanView({ active }: { active: boolean }) {
       ? 'Reading…'
       : scanner.status === 'locking' || scanner.sensing
         ? 'Hold steady…'
-        : 'Fill the frame with a card'
+        : scanMode === 'sealed'
+          ? 'Fill the frame with the pack or box front'
+          : 'Fill the frame with a card'
 
   return (
     <div className="scan">
@@ -236,6 +241,20 @@ export function ScanView({ active }: { active: boolean }) {
             onChange={(gameFilter) => config.set({ gameFilter })}
           />
           <div className="scan__topbtns">
+            <button
+              className={`collectpill ${scanMode === 'sealed' ? 'collectpill--on' : ''}`}
+              onClick={() => {
+                const next: ScanMode = scanMode === 'sealed' ? 'card' : 'sealed'
+                setScanMode(next)
+                scanner.rescan()
+                toast(next === 'sealed' ? 'Pack mode: scan boosters, boxes and bundles' : 'Card mode', 'info')
+              }}
+              aria-pressed={scanMode === 'sealed'}
+              aria-label="Scan sealed packs"
+            >
+              <Icon name="grid" size={14} />
+              <span className="collectpill__label">Packs</span>
+            </button>
             <button
               className={`collectpill ${config.collectMode ? 'collectpill--on' : ''}`}
               onClick={() => {

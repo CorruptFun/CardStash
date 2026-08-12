@@ -134,6 +134,41 @@ export async function readCardNames(canvas: HTMLCanvasElement, share: number): P
   return candidates.slice(0, 4)
 }
 
+/**
+ * Read the scattered large type on a pack/box front. Boxes aren't a single
+ * text block, so this pass temporarily switches Tesseract to full page
+ * segmentation, then restores the band-tuned mode.
+ */
+export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string[]> {
+  const worker = await getWorker()
+  const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 720)
+  await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
+  let text = ''
+  try {
+    const { data } = await worker.recognize(region)
+    text = String(data?.text ?? '')
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+  }
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const raw of text.split('\n')) {
+    // Keep digits — set names carry them ("Modern Horizons 3", "151").
+    const cleaned = raw
+      .replace(/[|_~`@#%^*=<>{}[\]\\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (cleaned.length < 3) continue
+    if (((cleaned.match(/[A-Za-z0-9]/g) ?? []).length) / cleaned.length < 0.5) continue
+    const key = cleaned.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      lines.push(cleaned)
+    }
+  }
+  return lines.slice(0, 14)
+}
+
 /** Tiny collector-line type needs upscaling before Tesseract can read it. */
 const CORNER_OCR_WIDTH = 1200
 
