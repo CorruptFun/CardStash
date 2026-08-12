@@ -9,6 +9,8 @@ import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome, ScanMode } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { headlineFinish, itemUnitPrice } from '../lib/prices'
+import { warmSealedIndex } from '../lib/sealed'
+import { warmCatalog } from '../lib/tcgcsv'
 import { useSettings } from '../lib/settings'
 import type { Card, Finish } from '../lib/types'
 import { haptic, money } from '../lib/util'
@@ -187,8 +189,17 @@ export function ScanView({ active }: { active: boolean }) {
   }, [visible, started, scanner.status])
 
   useEffect(() => {
-    if (started && visible) warmOcr()
-  }, [started, visible])
+    if (visible) warmOcr()
+  }, [visible])
+
+  // The game filter names intent: preload that game's catalog (Riftbound &
+  // co. have no search API, so the first match otherwise downloads it all),
+  // and in pack mode the set indexes sealed scans match against.
+  useEffect(() => {
+    if (!visible) return
+    if (config.gameFilter !== 'auto') warmCatalog(config.gameFilter)
+    if (scanMode === 'sealed') warmSealedIndex(config.gameFilter === 'auto' ? undefined : [config.gameFilter])
+  }, [visible, config.gameFilter, scanMode])
 
   const searchInstead = () => {
     const miss = scanner.miss

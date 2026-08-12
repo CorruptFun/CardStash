@@ -338,6 +338,14 @@ function rank(cards: Card[], query: string): Ranked[] {
   )
 }
 
+/**
+ * Fire-and-forget: pull a catalog game's card list into the day cache so the
+ * first scan/search doesn't pay for the download. No-op for API-backed games.
+ */
+export function warmCatalog(game: Game): void {
+  if (isCatalogGame(game)) catalog(game).catch(() => {})
+}
+
 export async function searchCatalog(game: Game, query: string, signal?: AbortSignal): Promise<Card[]> {
   const cards = await catalog(game, signal)
   return rank(cards, query)

@@ -47,11 +47,23 @@ export function warmOcr(): void {
   getWorker().catch(() => {})
 }
 
+export interface OcrBand {
+  y: number
+  h: number
+}
+
 /**
  * Horizontal bands of a card crop that can hold the name line, cheapest
  * first. The scan loop OCRs them one at a time and stops on the first match.
+ * Band 2 overlaps band 1's floor (so a name line straddling the cut is still
+ * read whole) but not its whole area: `prepRegion` scales by width, so
+ * re-OCRing band 1's rows again would reproduce identical pixels — and
+ * identical candidates — for twice the runtime.
  */
-export const OCR_BANDS = [0.26, 0.46] as const
+export const OCR_BANDS: readonly OcrBand[] = [
+  { y: 0, h: 0.26 },
+  { y: 0.2, h: 0.26 },
+]
 
 /** OCR runtime scales with pixel count; the name line survives this width fine. */
 const OCR_WIDTH = 640
@@ -115,13 +127,13 @@ function normalizeContrast(image: ImageData): void {
 }
 
 /**
- * OCR one top band of a card crop (the name line lives up there) and return
- * plausible name candidates, best first.
+ * OCR one band of a card crop (the name line lives in the upper half) and
+ * return plausible name candidates, best first.
  */
-export async function readCardNames(canvas: HTMLCanvasElement, share: number): Promise<string[]> {
+export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): Promise<string[]> {
   const worker = await getWorker()
-  const band = prepRegion(canvas, { x: 0, y: 0, w: 1, h: share }, OCR_WIDTH)
-  const { data } = await worker.recognize(band)
+  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
+  const { data } = await worker.recognize(region)
   const seen = new Set<string>()
   const candidates: string[] = []
   for (const line of String(data?.text ?? '').split('\n')) {
