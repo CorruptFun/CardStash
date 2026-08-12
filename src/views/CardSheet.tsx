@@ -117,7 +117,9 @@ function CardSheet() {
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const [card, setCard] = useState(sheet.card)
-  const [finish, setFinish] = useState<Finish>(sheet.item?.finish ?? headlineFinish(sheet.card.prices, finishOptions(sheet.card)))
+  const [finish, setFinish] = useState<Finish>(
+    sheet.item?.finish ?? sheet.finish ?? headlineFinish(sheet.card.prices, finishOptions(sheet.card)),
+  )
   const [condition, setCondition] = useState<Condition>(sheet.item?.condition ?? 'NM')
   const [qty, setQty] = useState(1)
   const [paid, setPaid] = useState('')

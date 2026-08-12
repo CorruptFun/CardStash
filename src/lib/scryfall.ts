@@ -134,15 +134,86 @@ export async function mtgById(id: string): Promise<Card | null> {
   }
 }
 
-/** Every paper printing of a card, newest first (one page ≈ 175 printings). */
-export async function mtgPrintings(name: string, signal?: AbortSignal): Promise<Card[]> {
-  const query = `!"${name.replace(/"/g, '')}" game:paper`
+/** Raw prints list (newest first), shared by the variants picker and trait matching. */
+async function rawPrintings(name: string, setCode?: string | null, signal?: AbortSignal): Promise<any[]> {
+  const query = [`!"${name.replace(/"/g, '')}"`, 'game:paper', setCode ? `set:${setCode.toLowerCase()}` : '']
+    .filter(Boolean)
+    .join(' ')
   const url = `${API}/cards/search?q=${encodeURIComponent(query)}&unique=prints&order=released&dir=desc`
   try {
     const res = await fetchJson(url, { signal })
-    return (res.data ?? []).map(toCard)
+    return res.data ?? []
   } catch (err: any) {
     if (err.message?.includes('404')) return []
     throw err
+  }
+}
+
+/** Every paper printing of a card, newest first (one page ≈ 175 printings). */
+export async function mtgPrintings(name: string, signal?: AbortSignal): Promise<Card[]> {
+  return (await rawPrintings(name, null, signal)).map(toCard)
+}
+
+/** What the scanner could see about the physical copy. */
+export interface ScanTraits {
+  treatment?: string | null
+  foil?: boolean | null
+}
+
+/** The frame treatment a Scryfall print actually carries. */
+export function treatmentOf(raw: any): string {
+  if (raw.border_color === 'borderless' || raw.full_art) return 'borderless'
+  const effects: string[] = Array.isArray(raw.frame_effects) ? raw.frame_effects : []
+  if (effects.includes('extendedart')) return 'extended'
+  if (effects.includes('showcase')) return 'showcase'
+  if (raw.frame === '1997' || raw.frame === '1993') return 'retro'
+  return 'regular'
+}
+
+/**
+ * Score prints against the scanned traits and return the best positive match
+ * (newest wins ties), or null when nothing actually fits the traits.
+ */
+export function pickByTraits(raws: any[], traits: ScanTraits): any | null {
+  const wanted = traits.treatment && traits.treatment !== 'regular' ? traits.treatment : null
+  let best: { raw: any; score: number } | null = null
+  for (const raw of raws) {
+    const treatment = treatmentOf(raw)
+    let score = 0
+    if (wanted) {
+      // The frame is the most distinctive thing the camera can see — it
+      // dominates; the sheen reading only breaks ties among frames.
+      score += treatment === wanted ? 4 : treatment === 'regular' ? -1 : 0
+    } else if (traits.foil != null) {
+      // Sheen-only signal: stay on the plain frame the camera didn't flag.
+      score += treatment === 'regular' ? 1 : 0
+    }
+    const finishes: string[] = Array.isArray(raw.finishes) ? raw.finishes : []
+    const finishFits = traits.foil === true ? finishes.includes('foil') || finishes.includes('etched') : finishes.includes('nonfoil')
+    if (traits.foil != null) score += finishFits ? 1 : wanted ? -1 : -3
+    if (score > (best?.score ?? 0)) best = { raw, score }
+  }
+  return best?.raw ?? null
+}
+
+/**
+ * Re-match a card by what the camera saw of the physical copy — full-art /
+ * borderless / showcase frames and foil — for when the collector number
+ * wasn't legible and the fuzzy match landed on the base printing.
+ */
+export async function mtgMatchTraits(
+  name: string,
+  setCode: string | null | undefined,
+  traits: ScanTraits,
+  signal?: AbortSignal,
+): Promise<Card | null> {
+  try {
+    let raws = await rawPrintings(name, setCode, signal)
+    // A misread set code shouldn't kill the trait match.
+    if (!raws.length && setCode) raws = await rawPrintings(name, null, signal)
+    const picked = pickByTraits(raws, traits)
+    return picked ? toCard(picked) : null
+  } catch {
+    return null
   }
 }

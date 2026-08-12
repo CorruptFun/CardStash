@@ -1,9 +1,10 @@
 import { blobToBase64, type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
-import { GeminiError, identifyCardPhoto } from './gemini'
+import { GeminiError, identifyCardPhoto, type Identification } from './gemini'
 import { LIGHT_MATCH_GAMES } from './games'
 import { OCR_BANDS, readCardNames } from './ocr'
+import { mtgMatchTraits } from './scryfall'
 import { settings } from './settings'
 import type { Card, Game } from './types'
 import { hammingDistance } from './vision'
@@ -14,6 +15,8 @@ import { similarity } from './util'
 interface CacheEntry {
   hash: string
   card: Card | null
+  /** Foil sheen read off the physical copy — kept so cached hits price right. */
+  foil?: boolean
   at: number
 }
 
@@ -32,8 +35,8 @@ function cacheLookup(hash: string): CacheEntry | null {
   return null
 }
 
-function cacheStore(hash: string, card: Card | null): void {
-  cache.unshift({ hash, card, at: Date.now() })
+function cacheStore(hash: string, card: Card | null, foil?: boolean): void {
+  cache.unshift({ hash, card, foil, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
@@ -69,6 +72,10 @@ export interface IdentificationMeta {
   number?: string | null
   confidence: number
   via: 'gemini' | 'ocr' | 'cache'
+  /** The physical copy showed a foil/holo sheen (Gemini vision only). */
+  foil?: boolean
+  /** MTG frame treatment seen on the copy (borderless, extended, …). */
+  treatment?: string
 }
 
 export async function identifyFrame(
@@ -91,6 +98,7 @@ export async function identifyFrame(
         number: cached.card.number,
         confidence: 1,
         via: 'cache',
+        foil: cached.foil,
       },
     }
   }
@@ -117,7 +125,7 @@ export async function identifyFrame(
     throw new ScannerConfigError('Add a Gemini API key or enable OCR fallback in Settings')
   }
 
-  if (outcome.ok) cacheStore(hash, outcome.card)
+  if (outcome.ok) cacheStore(hash, outcome.card, outcome.identification.foil)
   else if (outcome.reason === 'no-card' || outcome.reason === 'not-found') cacheStore(hash, null)
   return outcome
 }
@@ -190,6 +198,7 @@ async function identifyViaGemini(
       readGame: game,
     }
   }
+  if (game === 'mtg') card = await refineMtgMatch(card, identified, signal)
   return {
     ok: true,
     card,
@@ -200,8 +209,36 @@ async function identifyViaGemini(
       number: identified.collector_number,
       confidence: identified.confidence,
       via: 'gemini',
+      foil: identified.foil ?? undefined,
+      treatment: identified.treatment ?? undefined,
     },
   }
+}
+
+function collectorEq(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false
+  const norm = (value: string) => value.toLowerCase().replace(/^0+(?=\d)/, '')
+  return norm(a) === norm(b)
+}
+
+/**
+ * A legible collector number pins the exact version. Without one, a fuzzy
+ * match lands on the base printing — so when the camera saw a special frame
+ * (borderless/full art, extended, showcase, retro) or a foil sheen the match
+ * can't carry, re-pick the printing that actually has those traits.
+ */
+async function refineMtgMatch(card: Card, identified: Identification, signal?: AbortSignal): Promise<Card> {
+  if (collectorEq(identified.collector_number, card.number)) return card
+  const wantsTreatment = identified.treatment != null && identified.treatment !== 'regular'
+  const foilConflict = identified.foil === true && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')
+  if (!wantsTreatment && !foilConflict) return card
+  const better = await mtgMatchTraits(
+    card.name,
+    identified.set_code,
+    { treatment: identified.treatment, foil: identified.foil },
+    signal,
+  ).catch(() => null)
+  return better ?? card
 }
 
 const OCR_MATCH_THRESHOLD = 0.62

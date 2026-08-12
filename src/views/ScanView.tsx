@@ -5,14 +5,30 @@ import { CardImg, Seg } from '../components/basics'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
-import { finishOptions, GAMES, GAME_SHORT } from '../lib/games'
+import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
 import { usingOcrBecauseKeyRejected, type IdentifyOutcome } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
-import { headlineFinish, priceCurrency } from '../lib/prices'
+import { headlineFinish, itemCurrency, itemUnitPrice, priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
-import type { Card } from '../lib/types'
+import type { Card, Finish } from '../lib/types'
 import { haptic, money } from '../lib/util'
 import { guarded, uiStore, useUi } from '../store/ui'
+
+/**
+ * The finish the physical copy most likely has: the scanner's foil reading
+ * when it has one, otherwise the printing's headline finish (which also files
+ * foil-only printings as foil rather than "Normal").
+ */
+function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
+  const options = finishOptions(hit.card)
+  const foil = hit.identification.foil
+  if (foil === true) {
+    const premium = options.find((f) => f !== 'nonfoil')
+    if (premium) return premium
+  }
+  if (foil === false && options.includes('nonfoil')) return 'nonfoil'
+  return headlineFinish(hit.card.prices, options)
+}
 
 /** Collect mode: dedupe rapid re-scans of the same card. */
 const REPEAT_WINDOW_MS = 2500
@@ -20,30 +36,29 @@ const REPEAT_WINDOW_MS = 2500
 class CollectQueue {
   private recent: { cardId: string; at: number } | null = null
 
-  async hit(card: Card): Promise<void> {
+  async hit(card: Card, finish: Finish): Promise<void> {
     const last = this.recent
     if (last?.cardId === card.id && Date.now() - last.at < REPEAT_WINDOW_MS) {
       uiStore.getState().toast(`Skipped a repeat of ${card.name}`, 'info', {
         label: 'Add anyway',
         fn: () => {
-          this.add(card)
+          this.add(card, finish)
         },
       })
       return
     }
-    await this.add(card)
+    await this.add(card, finish)
   }
 
-  private async add(card: Card): Promise<void> {
+  private async add(card: Card, finish: Finish): Promise<void> {
     this.recent = { cardId: card.id, at: Date.now() }
-    // Foil-only printings should land as foil, not "Normal".
-    const finish = headlineFinish(card.prices, finishOptions(card))
     const item = await guarded(() => addToCollection(card, { finish }), 'Add')
     if (!item) return
     track('card_added', { game: card.game, source: 'scan' })
-    const price = card.prices.best ?? card.prices.bestFoil
-    const currency = priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best')
-    uiStore.getState().toast(`+1 ${card.name} · ${money(price, currency)}`, 'success', {
+    // Price the copy that was actually filed (finish-specific).
+    const probe = { finish, condition: 'NM' as const, qty: 1, card }
+    const label = finish === 'nonfoil' ? '' : ` ${FINISH_LABEL[finish].toLowerCase()}`
+    uiStore.getState().toast(`+1 ${card.name}${label} · ${money(itemUnitPrice(probe), itemCurrency(probe))}`, 'success', {
       label: 'Undo',
       fn: () => {
         guarded(() => removeCopies(item.id, 1), 'Undo')
@@ -54,27 +69,32 @@ class CollectQueue {
 
 function ScanChip({
   status,
-  card,
+  hit,
   onOpen,
   detail,
   onSearch,
 }: {
   status: ScannerStatus
-  card: Card | null
+  hit: Extract<IdentifyOutcome, { ok: true }> | null
   onOpen: () => void
   detail: string | null
   onSearch: (() => void) | null
 }) {
-  if (status === 'found' && card) {
-    const price = card.prices.best ?? card.prices.bestFoil
+  if (status === 'found' && hit) {
+    const card = hit.card
+    // Price the finish that's actually in frame — a scanned foil shows the
+    // foil number, not the plain one.
+    const finish = scanFinish(hit)
+    const probe = { finish, condition: 'NM' as const, qty: 1, card }
     return (
       <button className="chip chip--found" onClick={onOpen}>
-        <span className="chip__price">{money(price, priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best'))}</span>
+        <span className="chip__price">{money(itemUnitPrice(probe), itemCurrency(probe))}</span>
         <span className="chip__meta">
           <span className="chip__name">{card.name}</span>
           <span className="chip__set">
             {card.setCode}
             {card.number ? ` · ${card.number}` : ''}
+            {finish === 'nonfoil' ? '' : ` · ${FINISH_LABEL[finish]}`}
           </span>
         </span>
         <Icon name="chevronRight" size={16} className="chip__go" />
@@ -129,7 +149,7 @@ export function ScanView({ active }: { active: boolean }) {
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
       guarded(() => recordScan(hit.card), 'Save scan')
       haptic(config.haptics ? [14, 60, 14] : 0)
-      if (config.collectMode) collectRef.current!.hit(hit.card)
+      if (config.collectMode) collectRef.current!.hit(hit.card, scanFinish(hit))
       if (usingOcrBecauseKeyRejected() && !warnedKeyRef.current) {
         warnedKeyRef.current = true
         toast('Gemini rejected your API key, so scans run on-device for now — fix the key in Settings when you can.', 'info')
@@ -286,8 +306,10 @@ export function ScanView({ active }: { active: boolean }) {
             <div className="chipslot">
               <ScanChip
                 status={scanner.status}
-                card={scanner.hit?.card ?? null}
-                onOpen={() => scanner.hit && openSheet({ card: scanner.hit.card, origin: 'scan' })}
+                hit={scanner.hit}
+                onOpen={() =>
+                  scanner.hit && openSheet({ card: scanner.hit.card, origin: 'scan', finish: scanFinish(scanner.hit) })
+                }
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}
               />
