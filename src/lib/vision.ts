@@ -1,0 +1,171 @@
+import type { Region } from './camera'
+
+/** Tiny frame analysis that gates the scanner: motion, focus, card region. */
+
+export function grayscale(image: ImageData): Uint8ClampedArray {
+  const { data, width, height } = image
+  const gray = new Uint8ClampedArray(width * height)
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    gray[p] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+  }
+  return gray
+}
+
+/** Mean abs diff between two grayscale frames (sampled); 255 = no baseline. */
+function motionScore(current: Uint8ClampedArray, previous: Uint8ClampedArray): number {
+  const len = Math.min(current.length, previous.length)
+  if (!len) return 255
+  let sum = 0
+  for (let i = 0; i < len; i += 4) sum += Math.abs(current[i] - previous[i])
+  return sum / (len / 4)
+}
+
+export interface FrameAnalysis {
+  motion: number
+  sharpness: number
+  luma: number
+  region: Region | null
+  gray: Uint8ClampedArray
+}
+
+export function analyzeFrame(image: ImageData, previousGray: Uint8ClampedArray | null): FrameAnalysis {
+  const { width, height } = image
+  const gray = grayscale(image)
+  let lumaSum = 0
+  for (let i = 0; i < gray.length; i += 4) lumaSum += gray[i]
+  const luma = lumaSum / (gray.length / 4)
+  const motion = previousGray ? motionScore(gray, previousGray) : 255
+
+  // Sobel edge pass, accumulating per-column/per-row edge counts.
+  const colEdges = new Float64Array(width)
+  const rowEdges = new Float64Array(height)
+  let edgeSum = 0
+  let samples = 0
+  for (let y = 1; y < height - 1; y++) {
+    const row = y * width
+    for (let x = 1; x < width - 1; x++) {
+      const i = row + x
+      const gx =
+        -gray[i - width - 1] - 2 * gray[i - 1] - gray[i + width - 1] + gray[i - width + 1] + 2 * gray[i + 1] + gray[i + width + 1]
+      const gy =
+        -gray[i - width - 1] - 2 * gray[i - width] - gray[i - width + 1] + gray[i + width - 1] + 2 * gray[i + width] + gray[i + width + 1]
+      const magnitude = Math.abs(gx) + Math.abs(gy)
+      edgeSum += magnitude
+      samples++
+      if (magnitude > 160) {
+        colEdges[x] += 1
+        rowEdges[y] += 1
+      }
+    }
+  }
+  const sharpness = samples ? edgeSum / samples : 0
+  const region = findCardRegion(colEdges, rowEdges, width, height)
+  return { motion, sharpness, luma, region, gray }
+}
+
+/** Trim an edge histogram to the span holding ~92% of its mass. */
+function edgeSpan(histogram: Float64Array, size: number): [number, number] | null {
+  let total = 0
+  for (let i = 0; i < size; i++) total += histogram[i]
+  if (total < size * 0.06) return null
+  const keep = total * 0.92
+  let lo = 0
+  let hi = size - 1
+  let mass = total
+  while (hi - lo > size * 0.2) {
+    const left = histogram[lo]
+    const right = histogram[hi]
+    if (mass - Math.min(left, right) < keep) break
+    if (left <= right) {
+      mass -= left
+      lo++
+    } else {
+      mass -= right
+      hi--
+    }
+  }
+  return [lo, hi]
+}
+
+function findCardRegion(colEdges: Float64Array, rowEdges: Float64Array, width: number, height: number): Region | null {
+  const cols = edgeSpan(colEdges, width)
+  const rows = edgeSpan(rowEdges, height)
+  if (!cols || !rows) return null
+  const [x0, x1] = cols
+  const [y0, y1] = rows
+  let w = x1 - x0
+  let h = y1 - y0
+  if (w < width * 0.14 || h < height * 0.14) return null
+  const cx = (x0 + x1) / 2
+  const cy = (y0 + y1) / 2
+  const aspect = w / h
+  const CARD_ASPECT = 63 / 88
+  if (aspect < CARD_ASPECT * 0.62) w = h * CARD_ASPECT * 0.75
+  if (aspect > 1 / (CARD_ASPECT * 0.62)) h = w * CARD_ASPECT * 0.75
+  return {
+    x: Math.max(0, cx - w / 2) / width,
+    y: Math.max(0, cy - h / 2) / height,
+    w: Math.min(width, w) / width,
+    h: Math.min(height, h) / height,
+  }
+}
+
+let sharedCtx: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null
+
+function scaledContext(width: number, height: number): CanvasRenderingContext2D {
+  if (!sharedCtx) {
+    const canvas = document.createElement('canvas')
+    sharedCtx = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true })! }
+  }
+  sharedCtx.canvas.width = width
+  sharedCtx.canvas.height = height
+  return sharedCtx.ctx
+}
+
+/**
+ * 128-bit perceptual hash of a frame (mean + gradient bits on an 8×8 grid) —
+ * good enough to recognize "same card, same table" across a few seconds.
+ */
+export function frameHash(source: CanvasImageSource): string {
+  const ctx = scaledContext(9, 8)
+  ctx.drawImage(source, 0, 0, 9, 8)
+  const gray = grayscale(ctx.getImageData(0, 0, 9, 8))
+  let mean = 0
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) mean += gray[y * 9 + x]
+  mean /= 64
+  let meanHi = 0
+  let meanLo = 0
+  let gradHi = 0
+  let gradLo = 0
+  let bit = 0
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const value = gray[y * 9 + x]
+      const aboveMean = value > mean ? 1 : 0
+      const gradient = value > gray[y * 9 + x + 1] ? 1 : 0
+      if (bit < 32) {
+        meanHi = (meanHi << 1) | aboveMean
+        gradHi = (gradHi << 1) | gradient
+      } else {
+        meanLo = (meanLo << 1) | aboveMean
+        gradLo = (gradLo << 1) | gradient
+      }
+      bit++
+    }
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0')
+  return hex(meanHi) + hex(meanLo) + hex(gradHi) + hex(gradLo)
+}
+
+export function hammingDistance(a: string, b: string): number {
+  if (a.length !== b.length) return 128
+  let distance = 0
+  for (let i = 0; i < a.length; i++) {
+    let xor = parseInt(a[i], 16) ^ parseInt(b[i], 16)
+    while (xor) {
+      distance += xor & 1
+      xor >>= 1
+    }
+  }
+  return distance
+}
