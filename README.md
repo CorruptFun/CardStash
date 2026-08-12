@@ -41,8 +41,9 @@ Handy dev query params: `?demo=1` seeds a sample collection + deck on first run;
 ## Deploying
 
 The live site is served from the `gh-pages` branch, which carries **build output
-only** — source lives here on the main branch.
+only** — source lives here on the main branch. Every push to `main` builds and
+publishes the site automatically via GitHub Actions
+(`.github/workflows/deploy.yml`), so merging to `main` *is* deploying.
 
-```sh
-npm run deploy     # builds and force-pushes dist/ to gh-pages
-```
+`npm run deploy` exists as a manual fallback (builds and force-pushes `dist/`
+to `gh-pages`) for when Actions is unavailable.
