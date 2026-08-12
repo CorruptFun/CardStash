@@ -1,4 +1,5 @@
 import { linkAbort } from './fetchJson'
+import { GAME_FULL_NAME, GAMES } from './games'
 import type { Card, Game } from './types'
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -115,10 +116,7 @@ export async function identifyCardPhoto(
   gameHint?: Game,
   signal?: AbortSignal,
 ): Promise<Identification | null> {
-  const hint =
-    gameHint != null
-      ? `The user says this is a ${gameHint === 'mtg' ? 'Magic: The Gathering' : gameHint === 'pokemon' ? 'Pokémon' : 'Yu-Gi-Oh!'} card.`
-      : ''
+  const hint = gameHint != null ? `The user says this is a ${GAME_FULL_NAME[gameHint]} card.` : ''
   const res = await callWithFallback(
     model,
     apiKey,
@@ -129,9 +127,9 @@ export async function identifyCardPhoto(
             {
               text: `Identify the trading card in this photo. ${hint}
 Rules:
-- "game": mtg, pokemon, yugioh, or other (not a TCG card / unreadable).
-- "name": the exact printed card name, nothing else.
-- "set_code": the set/expansion code if legible (e.g. "MH3", "PAL", "LOB"), else null.
+- "game": ${GAMES.join(', ')} — or other (not a TCG card / unreadable). riftbound is the League of Legends TCG, starwars is Star Wars: Unlimited, onepiece is the One Piece Card Game, gundam is the Gundam Card Game.
+- "name": the exact printed card name, nothing else (for Lorcana include the version after " - ", e.g. "Elsa - Snow Queen").
+- "set_code": the set/expansion code if legible (e.g. "MH3", "PAL", "LOB", "OGN", "OP01"), else null.
 - "collector_number": the collector number if legible (e.g. "182/193", "0123"), digits/slash only, else null.
 - "confidence": 0 to 1, how sure you are of game+name.
 Respond with JSON only.`,
@@ -145,7 +143,7 @@ Respond with JSON only.`,
         responseSchema: {
           type: 'OBJECT',
           properties: {
-            game: { type: 'STRING', enum: ['mtg', 'pokemon', 'yugioh', 'other'] },
+            game: { type: 'STRING', enum: [...GAMES, 'other'] },
             name: { type: 'STRING' },
             set_code: { type: 'STRING', nullable: true },
             collector_number: { type: 'STRING', nullable: true },
@@ -170,7 +168,7 @@ Respond with JSON only.`,
   }
 }
 
-const KNOWN_GAMES = new Set(['mtg', 'pokemon', 'yugioh', 'other'])
+const KNOWN_GAMES = new Set<string>([...GAMES, 'other'])
 
 function sanitizeIdentification(raw: unknown): Identification | null {
   if (!raw || typeof raw !== 'object') return null
@@ -186,12 +184,6 @@ function sanitizeIdentification(raw: unknown): Identification | null {
     collector_number: number,
     confidence: Math.max(0, Math.min(1, obj.confidence)),
   }
-}
-
-const GAME_FULL_NAME: Record<Game, string> = {
-  mtg: 'Magic: The Gathering',
-  pokemon: 'Pokémon TCG',
-  yugioh: 'Yu-Gi-Oh!',
 }
 
 export interface BuildDecksRequest {
@@ -220,6 +212,19 @@ export interface BuildDecksResult {
   decks: ParsedDeck[]
 }
 
+/** What goes inside the ```decklist fence, per game. */
+const DECKLIST_SPEC: Record<Game, string> = {
+  mtg: ' (main deck, 60 cards, include lands).',
+  pokemon: ' (60 cards including energy).',
+  yugioh: ' (Main Deck 40-60; then a line `-- Extra Deck --` and extra deck monsters).',
+  riftbound: ' (main deck, exactly 40 cards; name the Legend, runes and battlefields outside the code block).',
+  lorcana: ' (60 cards, at most two inks).',
+  onepiece: ' (exactly 50 cards; name the Leader outside the code block).',
+  starwars: ' (50+ cards; name the Leader and Base outside the code block).',
+  digimon: ' (main deck, exactly 50 cards; then a line `-- Egg Deck --` and up to 5 Digi-Eggs).',
+  gundam: ' (exactly 50 cards; resource deck is fixed, skip it).',
+}
+
 export async function buildDecks(request: BuildDecksRequest, apiKey: string, model: string): Promise<BuildDecksResult> {
   const { game, format, style, budget, collectionList, useCollection, seedCards } = request
   const seedList = (seedCards ?? [])
@@ -242,11 +247,7 @@ export async function buildDecks(request: BuildDecksRequest, apiKey: string, mod
     '2. Then 2 deck proposals. Each one:',
     '   - `## Deck: <deck name>` — one line on the game plan and why it fits.',
     '   - A fenced code block starting with ```decklist containing ONLY lines of the form `<qty> <exact card name>`' +
-      (game === 'mtg'
-        ? ' (main deck, 60 cards, include lands).'
-        : game === 'pokemon'
-          ? ' (60 cards including energy).'
-          : ' (Main Deck 40-60; then a line `-- Extra Deck --` and extra deck monsters).'),
+      DECKLIST_SPEC[game],
     '   - `**To buy:**` bullets of the key cards they lack, with rough per-card prices.',
     'Keep total response under 900 words. Card names must be exact printed names.',
   ]

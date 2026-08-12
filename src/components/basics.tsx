@@ -9,6 +9,12 @@ const GAME_FALLBACK_BG: Record<string, string> = {
   mtg: 'linear-gradient(158deg, #2c1e17 0%, #191411 58%, #211713 100%)',
   pokemon: 'linear-gradient(158deg, #16212e 0%, #121518 58%, #151b23 100%)',
   yugioh: 'linear-gradient(158deg, #271d2e 0%, #181317 58%, #1e1723 100%)',
+  riftbound: 'linear-gradient(158deg, #122f2b 0%, #101614 58%, #142320 100%)',
+  lorcana: 'linear-gradient(158deg, #2b2414 0%, #171310 58%, #221c11 100%)',
+  onepiece: 'linear-gradient(158deg, #301a1c 0%, #191113 58%, #241518 100%)',
+  starwars: 'linear-gradient(158deg, #2e2a13 0%, #171610 58%, #232012 100%)',
+  digimon: 'linear-gradient(158deg, #33220f 0%, #19140f 58%, #251a10 100%)',
+  gundam: 'linear-gradient(158deg, #162333 0%, #121419 58%, #17202c 100%)',
 }
 
 export function CardImg({
@@ -72,6 +78,7 @@ export function Seg<T extends string>({
   value,
   onChange,
   size = 'md',
+  scroll = false,
   ariaLabel,
   ariaLabelledBy,
 }: {
@@ -79,11 +86,32 @@ export function Seg<T extends string>({
   value: T
   onChange: (value: T) => void
   size?: 'sm' | 'md'
+  /** Overflow sideways-scrolls instead of squeezing (long game lists). */
+  scroll?: boolean
   ariaLabel?: string
   ariaLabelledBy?: string
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Keep the active option in view when it changes (or on first paint).
+  useEffect(() => {
+    if (!scroll) return
+    const root = scrollRef.current
+    const active = root?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!root || !active) return
+    const pad = 12
+    const left = active.offsetLeft - pad
+    const right = active.offsetLeft + active.offsetWidth + pad
+    if (left < root.scrollLeft) root.scrollTo({ left })
+    else if (right > root.scrollLeft + root.clientWidth) root.scrollTo({ left: right - root.clientWidth })
+  }, [scroll, value])
   return (
-    <div className={`seg seg--${size}`} role="tablist" aria-label={ariaLabelledBy ? undefined : ariaLabel} aria-labelledby={ariaLabelledBy}>
+    <div
+      ref={scrollRef}
+      className={`seg seg--${size} ${scroll ? 'seg--scroll' : ''}`}
+      role="tablist"
+      aria-label={ariaLabelledBy ? undefined : ariaLabel}
+      aria-labelledby={ariaLabelledBy}
+    >
       {options.map((option) => (
         <button
           key={option.value}

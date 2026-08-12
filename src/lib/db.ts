@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import { GAMES, FINISH_LABEL } from './games'
 import type {
   Card,
+  CatalogCache,
   CollectionItem,
   Condition,
   Deck,
@@ -22,6 +23,7 @@ class CardstockDB extends Dexie {
   deckCards!: Table<DeckCard, string>
   history!: Table<PricePoint, [string, string]>
   scans!: Table<ScanRecord, string>
+  catalogs!: Table<CatalogCache, Game>
 
   constructor() {
     super('cardstock')
@@ -42,6 +44,8 @@ class CardstockDB extends Dexie {
             if (point.currency == null) point.currency = 'USD'
           })
       })
+    // v3: day-cached TCGplayer catalogs (Riftbound & co. have no search API).
+    this.version(3).stores({ catalogs: 'game' })
   }
 }
 
@@ -418,13 +422,14 @@ export async function importBackup(raw: unknown): Promise<void> {
 }
 
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', db.collection, db.decks, db.deckCards, db.history, db.scans, async () => {
+  await db.transaction('rw', [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs], async () => {
     await Promise.all([
       db.collection.clear(),
       db.decks.clear(),
       db.deckCards.clear(),
       db.history.clear(),
       db.scans.clear(),
+      db.catalogs.clear(),
     ])
   })
 }

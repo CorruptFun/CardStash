@@ -21,6 +21,8 @@ const IMAGE_HOSTS = [
   'cards.scryfall.io',
   'images.pokemontcg.io',
   'images.ygoprodeck.com',
+  'tcgplayer-cdn.tcgplayer.com',
+  'cards.lorcast.io',
 ];
 const EXT_HOSTS = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com', 'unpkg.com'];
 

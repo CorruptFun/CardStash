@@ -96,6 +96,7 @@ export function SearchView() {
       <header className="screenhead searchhead">
         <Seg
           ariaLabel="Game"
+          scroll
           options={GAMES.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
           value={game}
           onChange={setGame}

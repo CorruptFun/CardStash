@@ -29,8 +29,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 ## Layout
 
 - `src/lib/` — data + integrations: Dexie schema/CRUD (`db.ts`), price picking
-  (`prices.ts`), the three card APIs (`scryfall.ts`, `pokemon.ts`, `ygo.ts`,
-  unified in `cardsearch.ts`), Gemini vision + AI deck builder (`gemini.ts`),
+  (`prices.ts`), the card APIs (`scryfall.ts`, `pokemon.ts`, `ygo.ts`,
+  `lorcast.ts` for Lorcana, `tcgcsv.ts` — a day-cached TCGplayer catalog for
+  Riftbound/One Piece/Star Wars/Digimon/Gundam — unified in `cardsearch.ts`),
+  Gemini vision + AI deck builder (`gemini.ts`),
   OCR fallback (`ocr.ts`), scan pipeline (`identify.ts`, `vision.ts`,
   `camera.ts`), portfolio math (`portfolio.ts`), deck math (`deckstats.ts`),
   CSV import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
@@ -45,7 +47,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 ## Conventions
 
-- Card ids are `${game}:${apiId}`. Games: `mtg | pokemon | yugioh`.
+- Card ids are `${game}:${apiId}`. Games: `mtg | pokemon | yugioh | riftbound |
+  lorcana | onepiece | starwars | digimon | gundam` — the list lives in
+  `games.ts` (`GAMES`); per-game tables there + `deckstats.ts` (boards/rules)
+  are what a new game must extend.
 - DB writes from UI go through `guarded()` (`src/store/ui.ts`) so quota errors
   surface as toasts.
 - Analytics events must stay content-free (no card names/queries/keys) — the

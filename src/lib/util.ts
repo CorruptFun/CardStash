@@ -69,9 +69,20 @@ export function normalizeName(name: string): string {
     .trim()
 }
 
+const EBAY_GAME_WORD: Record<Game, string> = {
+  mtg: 'mtg',
+  pokemon: 'pokemon',
+  yugioh: 'yugioh',
+  riftbound: 'riftbound',
+  lorcana: 'lorcana',
+  onepiece: 'one piece card game',
+  starwars: 'star wars unlimited',
+  digimon: 'digimon tcg',
+  gundam: 'gundam card game',
+}
+
 export function ebaySoldLink(card: { name: string; setName?: string; game: Game }): string {
-  const gameWord = { mtg: 'mtg', pokemon: 'pokemon', yugioh: 'yugioh' }[card.game]
-  const query = [card.name, card.setName ?? '', gameWord].join(' ').trim()
+  const query = [card.name, card.setName ?? '', EBAY_GAME_WORD[card.game]].join(' ').trim()
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=13`
 }
 
@@ -79,9 +90,20 @@ export function tcgplayerSearchLink(name: string): string {
   return `https://www.tcgplayer.com/search/all/product?q=${encodeURIComponent(name)}&view=grid`
 }
 
+const CARDMARKET_SECTION: Record<Game, string> = {
+  mtg: 'Magic',
+  pokemon: 'Pokemon',
+  yugioh: 'YuGiOh',
+  riftbound: 'Riftbound',
+  lorcana: 'Lorcana',
+  onepiece: 'OnePiece',
+  starwars: 'StarWarsUnlimited',
+  digimon: 'Digimon',
+  gundam: 'Gundam',
+}
+
 export function cardmarketSearchLink(game: Game, name: string): string {
-  const section = { mtg: 'Magic', pokemon: 'Pokemon', yugioh: 'YuGiOh' }[game]
-  return `https://www.cardmarket.com/en/${section}/Products/Search?searchString=${encodeURIComponent(name)}`
+  return `https://www.cardmarket.com/en/${CARDMARKET_SECTION[game]}/Products/Search?searchString=${encodeURIComponent(name)}`
 }
 
 export function haptic(pattern: number | number[]): void {

@@ -17,11 +17,23 @@ export const GAME_BOARDS: Record<Game, DeckBoard[]> = {
   mtg: ['main', 'side'],
   pokemon: ['main'],
   yugioh: ['main', 'extra', 'side'],
+  riftbound: ['main', 'side'],
+  lorcana: ['main'],
+  onepiece: ['main', 'side'],
+  starwars: ['main', 'side'],
+  digimon: ['main', 'extra'],
+  gundam: ['main', 'side'],
 }
 
-/** Route Extra-Deck monsters to the extra board when adding to a YGO deck. */
+/**
+ * Route cards that live in a separate pile to it when adding "to the deck":
+ * YGO Extra-Deck monsters, Digimon Digi-Eggs (their "extra" board).
+ */
 export function boardForCard(game: Game, supertype: string | undefined, board: DeckBoard): DeckBoard {
-  return board === 'main' && game === 'yugioh' && supertype === 'Extra Monster' ? 'extra' : board
+  if (board !== 'main') return board
+  if (game === 'yugioh' && supertype === 'Extra Monster') return 'extra'
+  if (game === 'digimon' && /digi-?egg/i.test(supertype ?? '')) return 'extra'
+  return board
 }
 
 export function addedToBoardToast(name: string, board: DeckBoard): string {
@@ -123,21 +135,47 @@ export function deckStats(game: Game, rows: DeckCard[], ownedByName?: Map<string
   }
 }
 
+interface DeckRules {
+  /** Main deck must reach this size (warn below it). */
+  minMain?: number
+  /** Main deck is exactly this size (warn on either side of it). */
+  exactMain?: number
+  maxMain?: number
+  maxSide?: number
+  maxExtra?: number
+  copyLimit: number
+  /** Supertypes exempt from the copy limit when "basic" (lands, energy). */
+  copyExempt?: string[]
+  /** Pokémon/Lorcana just say "Deck"; the rest "Main deck". */
+  mainNoun?: string
+}
+
+const DECK_RULES: Record<Game, DeckRules> = {
+  mtg: { minMain: 60, maxSide: 15, copyLimit: 4, copyExempt: ['Land'] },
+  pokemon: { exactMain: 60, copyLimit: 4, copyExempt: ['Energy'], mainNoun: 'Deck' },
+  yugioh: { minMain: 40, maxMain: 60, maxExtra: 15, copyLimit: 3 },
+  riftbound: { exactMain: 40, copyLimit: 3 },
+  lorcana: { minMain: 60, copyLimit: 4, mainNoun: 'Deck' },
+  onepiece: { exactMain: 50, copyLimit: 4 },
+  starwars: { minMain: 50, maxSide: 10, copyLimit: 3 },
+  digimon: { exactMain: 50, maxExtra: 5, copyLimit: 4 },
+  gundam: { exactMain: 50, maxSide: 10, copyLimit: 4 },
+}
+
 function deckWarnings(game: Game, counts: Record<DeckBoard, number>, rows: DeckCard[]): string[] {
+  const rules = DECK_RULES[game]
   const warnings: string[] = []
-  if (game === 'mtg') {
-    if (counts.main > 0 && counts.main < 60) warnings.push(`Main deck has ${counts.main}/60 cards`)
-    if (counts.side > 15) warnings.push(`Sideboard over 15 (${counts.side})`)
-    for (const name of overCopyLimit(rows, 4, ['Land'])) warnings.push(`More than 4× ${name}`)
-  } else if (game === 'pokemon') {
-    if (counts.main > 0 && counts.main !== 60) warnings.push(`Deck has ${counts.main}/60 cards`)
-    for (const name of overCopyLimit(rows, 4, ['Energy'])) warnings.push(`More than 4× ${name}`)
-  } else {
-    if (counts.main > 0 && counts.main < 40) warnings.push(`Main deck has ${counts.main}/40 cards`)
-    if (counts.main > 60) warnings.push(`Main deck over 60 (${counts.main})`)
-    if (counts.extra > 15) warnings.push(`Extra deck over 15 (${counts.extra})`)
-    for (const name of overCopyLimit(rows, 3)) warnings.push(`More than 3× ${name}`)
-  }
+  const noun = rules.mainNoun ?? 'Main deck'
+  const floor = rules.exactMain ?? rules.minMain
+  if (floor && counts.main > 0 && counts.main < floor) warnings.push(`${noun} has ${counts.main}/${floor} cards`)
+  if (rules.exactMain && counts.main > rules.exactMain)
+    warnings.push(`${noun} has ${counts.main}/${rules.exactMain} cards`)
+  if (rules.maxMain && counts.main > rules.maxMain) warnings.push(`${noun} over ${rules.maxMain} (${counts.main})`)
+  if (rules.maxSide && counts.side > rules.maxSide) warnings.push(`Sideboard over ${rules.maxSide} (${counts.side})`)
+  if (rules.maxExtra && counts.extra > rules.maxExtra)
+    warnings.push(`Extra deck over ${rules.maxExtra} (${counts.extra})`)
+  for (const name of overCopyLimit(rows, rules.copyLimit, rules.copyExempt ?? []))
+    warnings.push(`More than ${rules.copyLimit}× ${name}`)
   return warnings
 }
 
