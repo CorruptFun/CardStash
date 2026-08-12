@@ -2,13 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { track } from '../lib/analytics'
 import { captureFrame, startCamera, type CameraSession, type Region } from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
-import {
-  identifyFrame,
-  ScannerConfigError,
-  type IdentifyOutcome,
-} from '../lib/identify'
+import { identifyFrame, type IdentifyOutcome } from '../lib/identify'
 import { stopOcr } from '../lib/ocr'
-import { settings } from '../lib/settings'
 import { analyzeFrame, frameHash } from '../lib/vision'
 
 /* Scanner tuning */
@@ -28,30 +23,6 @@ interface ApiFailurePolicy {
 function apiFailurePolicy(outcome: Extract<IdentifyOutcome, { ok: false }>, consecutive: number): ApiFailurePolicy {
   const waitMs = Math.min(RETRY_MAX_GAP_MS, RETRY_MIN_GAP_MS * 2 ** Math.max(0, consecutive - 1))
   const seconds = Math.round(waitMs / 1000)
-  if (outcome.status === 400 || outcome.status === 401 || outcome.status === 403) {
-    // With OCR enabled the scanner already switched engines (identify skips
-    // the rejected key from now on) — keep scanning instead of freezing.
-    return settings().ocrFallback
-      ? {
-          waitMs: RETRY_MIN_GAP_MS,
-          autoRetry: true,
-          detail: 'Gemini key not authorized — scanning on-device instead. Fix the key in Settings.',
-        }
-      : {
-          waitMs,
-          autoRetry: false,
-          detail: 'Gemini key not authorized — replace it (aistudio.google.com/apikey) or enable OCR fallback in Settings',
-        }
-  }
-  if (outcome.status === 429) {
-    return {
-      waitMs,
-      autoRetry: true,
-      detail: settings().ocrFallback
-        ? `Gemini quota reached — tried on-device OCR too (retrying in ${seconds}s)`
-        : `Gemini quota reached — retrying in ${seconds}s, or switch to OCR in Settings`,
-    }
-  }
   const message = outcome.message.replace(/[.\s]+$/, '')
   return { waitMs, autoRetry: true, detail: `${message} (retrying in ${seconds}s)` }
 }
@@ -305,16 +276,10 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       const capture = captureFrame(video, reticleRegion(video.videoWidth, video.videoHeight))
       const hash = frameHash(capture.canvas)
       const startedAt = performance.now()
-      await job.run((signal) => identifyFrame(capture, hash, { ignoreMisses: manual, signal }), {
+      await job.run(() => identifyFrame(capture, hash, { ignoreMisses: manual }), {
         outcome: (outcome) => {
           track('scan_attempt', {
-            engine: outcome.ok
-              ? outcome.identification.via
-              : outcome.reason === 'cached-miss'
-                ? 'cache'
-                : settings().geminiKey
-                  ? 'gemini'
-                  : 'ocr',
+            engine: outcome.ok ? outcome.identification.via : outcome.reason === 'cached-miss' ? 'cache' : 'ocr',
             outcome: outcome.ok ? 'hit' : 'miss',
             ...(outcome.ok ? {} : { reason: outcome.reason }),
             ...(outcome.ok && outcome.identification.foil != null ? { foil: outcome.identification.foil } : {}),
@@ -340,8 +305,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
           }
         },
         error: (err: any) => {
-          if (err instanceof ScannerConfigError) patch({ status: 'error', detail: err.message })
-          else patch({ status: 'nomatch', miss: null, detail: err.message?.slice(0, 120) ?? 'Identification failed' })
+          patch({ status: 'nomatch', miss: null, detail: err.message?.slice(0, 120) ?? 'Identification failed' })
         },
         settled: () => {
           setBusy(false)

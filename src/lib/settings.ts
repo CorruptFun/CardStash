@@ -11,10 +11,10 @@ export interface Settings {
   /** Scan view: every confident hit is added to the collection. */
   collectMode: boolean
   haptics: boolean
+  /** Powers the AI deck builder only — scanning is fully on-device. */
   geminiKey: string
   geminiModel: string
   pokemonKey: string
-  ocrFallback: boolean
   diagShare: boolean
   diagEndpoint: string
   diagToken: string
@@ -31,7 +31,6 @@ export const useSettings = create<Settings>()(
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
       pokemonKey: '',
-      ocrFallback: true,
       diagShare: false,
       diagEndpoint: DEFAULT_DIAG_ENDPOINT,
       diagToken: '',

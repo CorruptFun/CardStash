@@ -5,7 +5,7 @@ import { clearAnalytics, insights, type Insights } from '../lib/analytics'
 import { clearAllData } from '../lib/db'
 import { seedDemoData } from '../lib/demo'
 import { testGeminiKey } from '../lib/gemini'
-import { clearScanCache, resetGeminiRejection } from '../lib/identify'
+import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
 import type { Currency } from '../lib/types'
 import { useUi } from '../store/ui'
@@ -55,13 +55,8 @@ export function SettingsView() {
     setTestingKey(true)
     const result = await testGeminiKey(config.geminiKey, config.geminiModel)
     setTestingKey(false)
-    if (result.ok) {
-      // The scanner may have benched this key after a rejection — re-arm it.
-      resetGeminiRejection()
-      toast(`Key works — answered by ${result.model}`, 'success')
-    } else {
-      toast(`Key test failed: ${result.error}`, 'error')
-    }
+    if (result.ok) toast(`Key works — answered by ${result.model}`, 'success')
+    else toast(`Key test failed: ${result.error}`, 'error')
   }
 
   return (
@@ -85,16 +80,11 @@ export function SettingsView() {
           </div>
           <Toggle on={config.haptics} onChange={(haptics) => config.set({ haptics })} label="Haptics" />
         </div>
-        <div className="setrow">
-          <div className="setrow__text">
-            <span>OCR fallback</span>
-            <em>
-              Identify cards fully on-device when there's no Gemini key — or the key stops working. Reads the collector
-              line for the exact edition and checks for foil sheen (downloads ~12 MB once)
-            </em>
-          </div>
-          <Toggle on={config.ocrFallback} onChange={(ocrFallback) => config.set({ ocrFallback })} label="OCR fallback" />
-        </div>
+        <p className="setsec__note">
+          Scanning runs fully on this device: text recognition reads the card name and the collector line (so the exact
+          edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
+          engine downloads ~12 MB once and is cached for offline use.
+        </p>
       </section>
       <section className="setsec">
         <h3>Display</h3>
@@ -118,12 +108,12 @@ export function SettingsView() {
       <section className="setsec">
         <h3>AI & API keys</h3>
         <p className="setsec__note">
-          Keys are stored only on this device and sent only to their own service. The Gemini key powers instant camera
-          identification and the AI deck builder —{' '}
+          Keys are stored only on this device and sent only to their own service. The Gemini key powers the AI deck
+          builder and nothing else — scanning never uses it. Only add one if you want AI-built decks:{' '}
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
             get a free key here <Icon name="external" size={12} />
           </a>
-          . Without one, scanning falls back to on-device OCR.
+          .
         </p>
         <div className="setfield">
           <label htmlFor="gemini-key">

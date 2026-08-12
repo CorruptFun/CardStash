@@ -57,11 +57,10 @@ export interface Region {
 }
 
 export interface FrameCapture {
-  blob: Promise<Blob | null>
   canvas: HTMLCanvasElement
 }
 
-/** Crop a region of the live video into a JPEG-able canvas, capped at maxEdge. */
+/** Crop a region of the live video into a canvas for OCR/analysis, capped at maxEdge. */
 export function captureFrame(video: HTMLVideoElement, region: Region | null, maxEdge = 1100): FrameCapture {
   const vw = video.videoWidth
   const vh = video.videoHeight
@@ -75,19 +74,5 @@ export function captureFrame(video: HTMLVideoElement, region: Region | null, max
   canvas.width = Math.round(sw * scale)
   canvas.height = Math.round(sh * scale)
   canvas.getContext('2d')!.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
-  return {
-    blob: new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85)),
-    canvas,
-  }
-}
-
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  const CHUNK = 32768
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
+  return { canvas }
 }
