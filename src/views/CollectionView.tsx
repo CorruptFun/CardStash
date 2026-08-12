@@ -24,32 +24,29 @@ import { collectionToCsv, parseCollectionCsv, type CsvImportRow } from '../lib/i
 import { valueWindow } from '../lib/portfolio'
 import {
   collectionValue,
-  itemCurrency,
   itemUnitPrice,
   netProceeds,
   totalQty,
   valueByGame,
   FEE_PCT,
-  type MoneyPair,
 } from '../lib/prices'
 import { useSettings } from '../lib/settings'
-import type { CollectionItem, Currency, Deck, Game, PricePoint } from '../lib/types'
+import type { CollectionItem, Deck, Game, PricePoint } from '../lib/types'
 import { money, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 import { InsightsPanel } from './InsightsPanel'
 
 const NO_ITEMS: CollectionItem[] = []
 const NO_POINTS: PricePoint[] = []
-const ZERO: MoneyPair = { usd: 0, eur: 0 }
 const HISTORY_DAYS = 32
 const FILTER_DEBOUNCE_MS = 120
 const PRICED_STALE_MS = 48 * 3_600_000
 
 type SortMode = 'value' | 'name' | 'newest' | 'spares'
 
-function unitPriceMap(items: CollectionItem[]): Map<string, { unit: number; currency: Currency }> {
-  const map = new Map<string, { unit: number; currency: Currency }>()
-  for (const item of items) map.set(item.id, { unit: itemUnitPrice(item) ?? 0, currency: itemCurrency(item) })
+function unitPriceMap(items: CollectionItem[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const item of items) map.set(item.id, itemUnitPrice(item) ?? 0)
   return map
 }
 
@@ -57,15 +54,12 @@ function spareValue(item: CollectionItem, unit: number): number {
   return item.qty > 1 ? (item.qty - 1) * unit : 0
 }
 
-function sparesSummary(items: CollectionItem[], units: Map<string, { unit: number; currency: Currency }>) {
-  const summary = { count: 0, usd: 0, eur: 0 }
+function sparesSummary(items: CollectionItem[], units: Map<string, number>) {
+  const summary = { count: 0, value: 0 }
   for (const item of items) {
     if (item.qty <= 1) continue
-    const unit = units.get(item.id)
     summary.count += item.qty - 1
-    if (!unit) continue
-    const value = spareValue(item, unit.unit)
-    unit.currency === 'EUR' ? (summary.eur += value) : (summary.usd += value)
+    summary.value += spareValue(item, units.get(item.id) ?? 0)
   }
   return summary
 }
@@ -124,7 +118,7 @@ export function CollectionView() {
 
   const all = items ?? NO_ITEMS
   const units = useMemo(() => unitPriceMap(all), [all])
-  const unitOf = useCallback((id: string) => units.get(id)?.unit ?? 0, [units])
+  const unitOf = useCallback((id: string) => units.get(id) ?? 0, [units])
 
   const shown = useMemo(() => {
     let rows = all
@@ -427,7 +421,7 @@ export function CollectionView() {
           <span className="collhead__label">Collection value</span>
           <span className="collhead__figure">
             <span className="collhead__total">
-              <AnimatedNumber value={total.usd} format={(v) => money(v)} />
+              <AnimatedNumber value={total} format={(v) => money(v)} />
             </span>
             {window.ready && (
               <span className={`collhead__delta collhead__delta--${window.delta >= 0 ? 'up' : 'down'}`}>
@@ -436,29 +430,25 @@ export function CollectionView() {
               </span>
             )}
           </span>
-          {total.usd > 0 && (
+          {total > 0 && (
             <span className="netline">
               <span className="netline__label">Net if sold</span>
-              <span className="netline__val">{money(netProceeds(total.usd))}</span>
+              <span className="netline__val">{money(netProceeds(total))}</span>
               <em className="netline__note">after ~{Math.round(FEE_PCT * 100)}% fees, estimated</em>
             </span>
           )}
           <span className="collhead__meta">
             <span className="collhead__count">{count} cards</span>
-            {total.eur > 0 && <span className="collhead__eur">+ {money(total.eur, 'EUR')} · eur only</span>}
             {priced && <span className={`collhead__priced ${priced.stale ? 'collhead__priced--stale' : ''}`}>{priced.label}</span>}
           </span>
         </div>
         <div className="collhead__games">
           {(['all' as const, ...ownedGames]).map((key) => {
-            const pair = key === 'all' ? total : (byGame[key] ?? ZERO)
+            const value = key === 'all' ? total : (byGame[key] ?? 0)
             return (
               <button key={key} className={`gamefilter ${gameFilter === key ? 'gamefilter--on' : ''}`} onClick={() => setGameFilter(key)}>
                 <span>{key === 'all' ? 'All' : GAME_SHORT[key]}</span>
-                <em>
-                  {money(pair.usd)}
-                  {pair.eur > 0 && <i className="gamefilter__eur">+{money(pair.eur, 'EUR')}</i>}
-                </em>
+                <em>{money(value)}</em>
               </button>
             )
           })}
@@ -499,8 +489,7 @@ export function CollectionView() {
       {busyBar}
       {sort === 'spares' && spares.count > 0 && (
         <div className="sparesline">
-          {spares.count} SPARES · {money(spares.usd)}
-          {spares.eur > 0 && <> · {money(spares.eur, 'EUR')}</>}
+          {spares.count} SPARES · {money(spares.value)}
         </div>
       )}
       {items && shown.length === 0 && (
@@ -524,7 +513,6 @@ export function CollectionView() {
             editMode={editMode}
             selected={selected.has(item.id)}
             unit={unitOf(item.id)}
-            currency={units.get(item.id)?.currency ?? 'USD'}
             onPick={pick}
           />
         ))}
@@ -609,14 +597,12 @@ const CollectionCell = memo(function CollectionCell({
   editMode,
   selected,
   unit,
-  currency,
   onPick,
 }: {
   item: CollectionItem
   editMode: boolean
   selected: boolean
   unit: number
-  currency: Currency
   onPick: (item: CollectionItem) => void
 }) {
   return (
@@ -624,7 +610,7 @@ const CollectionCell = memo(function CollectionCell({
       <CardImg card={item.card} />
       {item.qty > 1 && <span className="cardcell__qty">×{item.qty}</span>}
       {item.finish !== 'nonfoil' && <span className="cardcell__finish">{FINISH_LABEL[item.finish]}</span>}
-      <span className="cardcell__price">{money(unit * item.qty, currency)}</span>
+      <span className="cardcell__price">{money(unit * item.qty)}</span>
       <span className="cardcell__name">{item.name}</span>
       <span className="cardcell__set">
         {item.setCode}

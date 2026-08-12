@@ -23,6 +23,11 @@ export type PriceSource =
 
 export type PriceKind = 'market' | 'low' | 'mid' | 'high' | 'trend' | 'avg30'
 
+/**
+ * The app prices in USD only. 'EUR' survives in the type because cards and
+ * history stored by pre-0.5 versions carry Cardmarket entries — readers in
+ * prices.ts/portfolio.ts filter them out rather than mislabel them as $.
+ */
 export type Currency = 'USD' | 'EUR'
 
 export interface PriceEntry {
@@ -34,9 +39,9 @@ export interface PriceEntry {
 }
 
 export interface Prices {
-  /** Cheapest sensible non-foil price, USD-favored. */
+  /** Non-foil USD headline price. */
   best: number | null
-  /** Best premium-finish price (foil/holo/etched/…). */
+  /** Best premium-finish USD price (foil/holo/etched/…). */
   bestFoil: number | null
   entries: PriceEntry[]
   updatedAt: number
@@ -52,6 +57,7 @@ export interface Printing {
 export interface CardLinks {
   market?: string
   tcgplayer?: string
+  /** No longer emitted (EU marketplace) — present on stored pre-0.5 cards. */
   cardmarket?: string
   ebaySold?: string
   source?: string

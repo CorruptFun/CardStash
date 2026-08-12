@@ -24,17 +24,15 @@ import {
   collectionValue,
   groupComps,
   headlineFinish,
-  itemCurrency,
   itemUnitPrice,
   netProceeds,
   parseMoney,
-  priceCurrency,
   FEE_PCT,
   type CompRow,
   type Priceable,
 } from '../lib/prices'
 import { useSettings } from '../lib/settings'
-import type { Card, CollectionItem, Condition, Currency, Deck, Finish, Game, PricePoint } from '../lib/types'
+import type { Card, CollectionItem, Condition, Deck, Finish, Game, PricePoint } from '../lib/types'
 import { dateTime, haptic, money } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
@@ -61,9 +59,9 @@ function premiumLabel(card: Card): string {
   return entry ? FINISH_LABEL[entry.finish] : 'Foil'
 }
 
-function addLabelPrice(card: Card, finish: Finish, condition: Condition): { value: number | null; currency: Currency } {
+function addLabelPrice(card: Card, finish: Finish, condition: Condition): number | null {
   const probe: Priceable = { finish, condition, qty: 1, card }
-  return { value: itemUnitPrice(probe), currency: itemCurrency(probe) }
+  return itemUnitPrice(probe)
 }
 
 function deckAddLabel(qty: number, deckName?: string): string {
@@ -80,11 +78,11 @@ function sortCopies(rows: CollectionItem[]): CollectionItem[] {
   )
 }
 
-function priceRange(comps: CompRow[], finish: Finish, currency: Currency): { low: number; high: number } | null {
+function priceRange(comps: CompRow[], finish: Finish): { low: number; high: number } | null {
   let low: number | null = null
   let high: number | null = null
   for (const row of comps) {
-    if (row.finish !== finish || row.currency !== currency) continue
+    if (row.finish !== finish) continue
     const rowHigh = row.high ?? row.avg30
     if (row.low != null && (low == null || row.low < low)) low = row.low
     if (rowHigh != null && (high == null || rowHigh > high)) high = rowHigh
@@ -96,9 +94,9 @@ function moneyInput(raw: string): string {
   return raw.replace(/[^\d.,]/g, '')
 }
 
-function costBasisEcho(value: number | null | undefined, currency: Currency = 'USD'): string {
+function costBasisEcho(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—'
-  return `${currency === 'EUR' ? '€' : '$'}${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /** deckId → copies of this card in that deck (all boards summed). */
@@ -131,8 +129,7 @@ function CardSheet() {
 
   const best = card.prices.best
   const bestFoil = card.prices.bestFoil
-  const currency = priceCurrency(card.prices, best == null ? 'foil' : 'best')
-  const history = useLiveQuery(() => priceHistory(card.id, currency), [card.id, currency])
+  const history = useLiveQuery(() => priceHistory(card.id), [card.id])
   const copies = useLiveQuery(() => db.collection.where('cardId').equals(card.id).toArray(), [card.id])
   const gameDecks = useLiveQuery(() => db.decks.where('game').equals(card.game).toArray(), [card.game])
   const targetDeck = useLiveQuery(async () => (sheet.deckId ? db.decks.get(sheet.deckId) : undefined), [sheet.deckId])
@@ -266,7 +263,7 @@ function CardSheet() {
 
   const displayFinish = headlineFinish(card.prices)
   const headline = best ?? bestFoil
-  const range = useMemo(() => priceRange(comps, displayFinish, currency), [comps, displayFinish, currency])
+  const range = useMemo(() => priceRange(comps, displayFinish), [comps, displayFinish])
   const addPrice = addLabelPrice(card, finish, condition)
   /* Finishes this printing exists in — plus the current pick, so the control
    * never strands the user (their physical copy beats incomplete API data). */
@@ -311,30 +308,30 @@ function CardSheet() {
         <div className="pricehero__main">
           <span className="pricehero__label">{FINISH_LABEL[displayFinish]}</span>
           <div className="pricehero__figure">
-            <span className="pricehero__value">{money(headline, currency)}</span>
+            <span className="pricehero__value">{money(headline)}</span>
             {trend && (
               <span className={`pricehero__delta pricehero__delta--${trend.abs >= 0 ? 'up' : 'down'}`}>
-                {trend.abs >= 0 ? '▲' : '▼'} {money(Math.abs(trend.abs), currency)}
+                {trend.abs >= 0 ? '▲' : '▼'} {money(Math.abs(trend.abs))}
                 <em>{trend.days}d</em>
               </span>
             )}
           </div>
           {range && (
             <span className="pricehero__range">
-              {money(range.low, currency)} – {money(range.high, currency)}
+              {money(range.low)} – {money(range.high)}
             </span>
           )}
         </div>
         {bestFoil != null && best != null && bestFoil !== best && (
           <div className="pricehero__alt">
             <span className="pricehero__label">{premiumLabel(card)}</span>
-            <span className="pricehero__value pricehero__value--alt">{money(bestFoil, priceCurrency(card.prices, 'foil'))}</span>
+            <span className="pricehero__value pricehero__value--alt">{money(bestFoil)}</span>
           </div>
         )}
         {headline != null && headline > 0 && (
           <div className="netline netline--hero">
             <span className="netline__label">Net if sold</span>
-            <span className="netline__val">{money(netProceeds(headline), currency)}</span>
+            <span className="netline__val">{money(netProceeds(headline))}</span>
             <em className="netline__note">after ~{Math.round(FEE_PCT * 100)}% fees, estimated</em>
           </div>
         )}
@@ -351,8 +348,7 @@ function CardSheet() {
             <span className="copies__legend">Your copies</span>
             <span className="copies__count">
               ×{copiesCount}
-              {copiesValue.usd > 0 && <> · {money(copiesValue.usd)}</>}
-              {copiesValue.eur > 0 && <> · {money(copiesValue.eur, 'EUR')}</>}
+              {copiesValue > 0 && <> · {money(copiesValue)}</>}
             </span>
           </div>
           {sortedCopies.map((row) => (
@@ -382,7 +378,7 @@ function CardSheet() {
         <h3>
           <Icon name="history" size={15} /> Price history
         </h3>
-        <Sparkline points={history ?? []} currency={currency} />
+        <Sparkline points={history ?? []} />
       </section>
       {comps.length > 0 && (
         <section className="sheetsec">
@@ -402,9 +398,9 @@ function CardSheet() {
                 <div key={i} className="compstable__row" role="row">
                   <span>{SOURCE_LABEL[row.source]}</span>
                   <span className="dim">{FINISH_LABEL[row.finish]}</span>
-                  <span className="num dim">{money(row.low ?? null, row.currency)}</span>
-                  <span className="num strong">{money(row.market ?? row.trend ?? row.mid ?? null, row.currency)}</span>
-                  <span className="num dim">{money(row.high ?? row.avg30 ?? null, row.currency)}</span>
+                  <span className="num dim">{money(row.low ?? null)}</span>
+                  <span className="num strong">{money(row.market ?? row.trend ?? row.mid ?? null)}</span>
+                  <span className="num dim">{money(row.high ?? row.avg30 ?? null)}</span>
                 </div>
               ))}
             </div>
@@ -416,11 +412,6 @@ function CardSheet() {
             {card.links.tcgplayer && (
               <a className="btn btn--ghost" href={card.links.tcgplayer} target="_blank" rel="noreferrer">
                 <Icon name="cart" size={15} /> TCGplayer
-              </a>
-            )}
-            {card.links.cardmarket && (
-              <a className="btn btn--ghost" href={card.links.cardmarket} target="_blank" rel="noreferrer">
-                <Icon name="cart" size={15} /> Cardmarket
               </a>
             )}
           </div>
@@ -459,9 +450,7 @@ function CardSheet() {
                     </span>
                   </span>
                   <span className="printpick__side">
-                    <span className="printpick__price">
-                      {money(price, priceCurrency(variant.prices, variant.prices.best == null ? 'foil' : 'best'))}
-                    </span>
+                    <span className="printpick__price">{money(price)}</span>
                     {selected && (
                       <span className="printpick__on">
                         <Icon name="check" size={12} /> selected
@@ -516,7 +505,7 @@ function CardSheet() {
             </div>
             {paid.trim().length > 0 && (
               <span className={`addbar__paidecho ${paidOk ? '' : 'addbar__paidecho--bad'}`}>
-                {paidOk ? `Cost basis ${costBasisEcho(paidValue, 'USD')} each` : 'Enter an amount like 12.50'}
+                {paidOk ? `Cost basis ${costBasisEcho(paidValue)} each` : 'Enter an amount like 12.50'}
               </span>
             )}
           </div>
@@ -533,7 +522,7 @@ function CardSheet() {
             <span className="addbar__addlabel">
               {sheet.deckId
                 ? deckAddLabel(qty, targetDeck?.name)
-                : `Add ${qty > 1 ? `${qty}× ` : ''}· ${money(addPrice.value, addPrice.currency)}`}
+                : `Add ${qty > 1 ? `${qty}× ` : ''}· ${money(addPrice)}`}
             </span>
           </button>
           {!sheet.deckId && (
@@ -569,7 +558,6 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const [note, setNote] = useState(row.note ?? '')
   const [saving, setSaving] = useState(false)
   const unit = itemUnitPrice(row)
-  const unitCurrency = itemCurrency(row)
   const paidValue = parseMoney(paid)
   const hasPaid = paid.trim().length > 0
 
@@ -613,7 +601,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
           <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
           <span className="copyrow__cond">{row.condition}</span>
         </span>
-        <span className="copyrow__unit">{money(unit, unitCurrency)}</span>
+        <span className="copyrow__unit">{money(unit)}</span>
         <Stepper
           value={row.qty}
           onChange={(qty) => {
@@ -666,7 +654,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
           />
           {hasPaid && (
             <span className={`copyedit__echo ${paidValue != null ? '' : 'copyedit__echo--bad'}`}>
-              {paidValue != null ? `Cost basis ${costBasisEcho(paidValue, 'USD')} each` : 'Enter an amount like 12.50'}
+              {paidValue != null ? `Cost basis ${costBasisEcho(paidValue)} each` : 'Enter an amount like 12.50'}
             </span>
           )}
           <div className="copyedit__actions">
@@ -702,7 +690,7 @@ const SPARK_H = 84
 const SPARK_PAD = { top: 10, right: 8, bottom: 6, left: 8 }
 const SPARK_LINE = '#8b7cff'
 
-function Sparkline({ points, currency = 'USD' }: { points: PricePoint[]; currency?: Currency }) {
+function Sparkline({ points }: { points: PricePoint[] }) {
   const priced = useMemo(() => points.filter((point) => point.best != null), [points])
   const [hover, setHover] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -738,12 +726,12 @@ function Sparkline({ points, currency = 'USD' }: { points: PricePoint[]; currenc
   return (
     <div className="spark">
       <div className="spark__readout">
-        <span className="spark__val">{money(shown.best, currency)}</span>
+        <span className="spark__val">{money(shown.best)}</span>
         <span className="spark__date">
           {new Date(shown.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         </span>
         <span className={`spark__delta ${delta >= 0 ? 'spark__delta--up' : 'spark__delta--down'}`}>
-          {delta >= 0 ? '▲' : '▼'} {money(Math.abs(delta), currency)} ({Math.abs(deltaPct).toFixed(1)}%)
+          {delta >= 0 ? '▲' : '▼'} {money(Math.abs(delta))} ({Math.abs(deltaPct).toFixed(1)}%)
         </span>
       </div>
       <svg
@@ -751,7 +739,7 @@ function Sparkline({ points, currency = 'USD' }: { points: PricePoint[]; currenc
         viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
         className="spark__svg"
         role="img"
-        aria-label={`Price history, ${priced.length} days, from ${money(first, currency)} to ${money(last, currency)}`}
+        aria-label={`Price history, ${priced.length} days, from ${money(first)} to ${money(last)}`}
         onPointerMove={(event) => pick(event.clientX)}
         onPointerLeave={() => setHover(null)}
         onTouchMove={(event) => pick(event.touches[0].clientX)}

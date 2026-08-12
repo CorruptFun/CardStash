@@ -57,5 +57,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   surface as toasts.
 - Analytics events must stay content-free (no card names/queries/keys) — the
   redaction lives in `analytics.ts`; event names are a fixed whitelist.
-- Prices: `best` = non-foil headline, `bestFoil` = premium finish; per-item
-  pricing multiplies by condition factor. EUR entries come from Cardmarket.
+- Prices: USD only (US/English market). `best` = non-foil headline, `bestFoil`
+  = premium finish; per-item pricing multiplies by condition factor. Data
+  stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
+  pickers in `prices.ts` and history readers filter them out; don't reintroduce
+  them into math or UI.

@@ -1,13 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Currency, Game } from './types'
+import type { Game } from './types'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest'
 const DEFAULT_DIAG_ENDPOINT = 'https://telemetry.corrupt.solutions/ingest/telemetry'
 
 export interface Settings {
   gameFilter: Game | 'auto'
-  currency: Currency
   /** Scan view: every confident hit is added to the collection. */
   collectMode: boolean
   haptics: boolean
@@ -25,7 +24,6 @@ export const useSettings = create<Settings>()(
   persist(
     (set) => ({
       gameFilter: 'auto',
-      currency: 'USD',
       collectMode: false,
       haptics: true,
       geminiKey: '',
