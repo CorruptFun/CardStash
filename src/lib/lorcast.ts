@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, PriceEntry } from './types'
-import { cardmarketSearchLink, ebaySoldLink, similarity, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, similarity, tcgplayerSearchLink } from './util'
 
 /**
  * Lorcast (lorcast.com) — the Scryfall-alike for Disney Lorcana. Free, no
@@ -52,7 +52,6 @@ function toCard(raw: any): Card {
     prices: mergePrices(entries),
     links: {
       tcgplayer: tcgplayerSearchLink(name),
-      cardmarket: cardmarketSearchLink('lorcana', name),
       ebaySold: ebaySoldLink({ name, setName: raw.set?.name, game: 'lorcana' }),
       source: `https://lorcast.com/search?q=${encodeURIComponent(name)}`,
     },

@@ -3119,28 +3119,11 @@ button {
   flex-wrap: wrap;
   gap: 0 var(--s2);
 }
-.collhead__eur {
-  font-family: var(--font-num);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--paper-3);
-  margin-top: 3px;
-  padding-left: var(--s2);
-  border-left: 1px solid var(--rule-strong);
-}
 .gamefilter em {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
-}
-.gamefilter__eur {
-  font-style: normal;
-  font-size: 9.5px;
-  letter-spacing: 0.02em;
-  color: var(--paper-3);
 }
 .colltools .btn--on {
   background: var(--ink-150);
@@ -3214,14 +3197,6 @@ button {
 .deckfab__inner {
   padding-left: calc(var(--s4) + var(--sal));
   padding-right: calc(var(--s4) + var(--sar));
-}
-.decktile__eur,
-.deckhead__eur {
-  white-space: nowrap;
-}
-.deckhead__title p .deckhead__eur {
-  padding-left: 0;
-  border-left: 0;
 }
 .ownedline__top {
   flex-wrap: wrap;

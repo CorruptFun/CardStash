@@ -14,7 +14,6 @@ import type {
   ScanRecord,
 } from './types'
 import { CONDITIONS } from './games'
-import { priceCurrency } from './prices'
 import { uid, ymd } from './util'
 
 class CardstockDB extends Dexie {
@@ -190,14 +189,14 @@ export async function recordPricePoint(card: Card): Promise<void> {
     date: ymd(),
     best: card.prices.best,
     foil: card.prices.bestFoil,
-    currency: priceCurrency(card.prices, 'best', 'USD'),
+    currency: 'USD',
   })
 }
 
-export async function priceHistory(cardId: string, currency?: string): Promise<PricePoint[]> {
+/** A card's history, oldest first. Legacy EUR points are left out — one line, one currency. */
+export async function priceHistory(cardId: string): Promise<PricePoint[]> {
   const points = await db.history.where('cardId').equals(cardId).toArray()
-  const filtered = currency ? points.filter((p) => (p.currency ?? 'USD') === currency) : points
-  return filtered.sort((a, b) => a.date.localeCompare(b.date))
+  return points.filter((p) => (p.currency ?? 'USD') === 'USD').sort((a, b) => a.date.localeCompare(b.date))
 }
 
 export async function historySince(date: string): Promise<PricePoint[]> {

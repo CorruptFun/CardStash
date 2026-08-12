@@ -8,7 +8,6 @@ import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
 import { GAMES, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
-import { priceCurrency } from '../lib/prices'
 import { useSettings } from '../lib/settings'
 import type { Card } from '../lib/types'
 import { haptic, money } from '../lib/util'
@@ -40,8 +39,7 @@ class CollectQueue {
     if (!item) return
     track('card_added', { game: card.game, source: 'scan' })
     const price = card.prices.best ?? card.prices.bestFoil
-    const currency = priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best')
-    uiStore.getState().toast(`+1 ${card.name} · ${money(price, currency)}`, 'success', {
+    uiStore.getState().toast(`+1 ${card.name} · ${money(price)}`, 'success', {
       label: 'Undo',
       fn: () => {
         guarded(() => removeCopies(item.id, 1), 'Undo')
@@ -67,7 +65,7 @@ function ScanChip({
     const price = card.prices.best ?? card.prices.bestFoil
     return (
       <button className="chip chip--found" onClick={onOpen}>
-        <span className="chip__price">{money(price, priceCurrency(card.prices, card.prices.best == null ? 'foil' : 'best'))}</span>
+        <span className="chip__price">{money(price)}</span>
         <span className="chip__meta">
           <span className="chip__name">{card.name}</span>
           <span className="chip__set">
@@ -312,12 +310,7 @@ export function ScanView({ active }: { active: boolean }) {
             <button key={scan.id} className="tray__item" onClick={() => openSheet({ card: scan.card, origin: 'scan' })}>
               <span className="tray__thumb">
                 <CardImg card={scan.card} className="tray__img" />
-                <span className="tray__price">
-                  {money(
-                    scan.card.prices.best ?? scan.card.prices.bestFoil,
-                    priceCurrency(scan.card.prices, scan.card.prices.best == null ? 'foil' : 'best'),
-                  )}
-                </span>
+                <span className="tray__price">{money(scan.card.prices.best ?? scan.card.prices.bestFoil)}</span>
               </span>
               <span className="tray__set">{scan.card.setCode ?? GAME_SHORT[scan.card.game]}</span>
             </button>
