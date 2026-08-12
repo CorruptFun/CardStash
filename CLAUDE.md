@@ -9,16 +9,22 @@ Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
 This repo originally carried **build output only** (README pointing at the
 gh-pages deploy); the app's source lived in ephemeral sessions and was lost.
 The source tree here was reconstructed from the deployed v0.3.1 bundle, then
-extended. Treat this tree as the source of truth from now on — never commit
-build output to the main branch, and never edit `gh-pages` by hand.
+extended. Treat this tree as the source of truth from now on. Hard rules:
+
+- **Never commit build output to main** — `dist/` is gitignored for a reason.
+- **Never edit or hand-push `gh-pages`** — CI regenerates it from `main` on
+  every push (`.github/workflows/deploy.yml`), force-overwriting the branch.
+- **Always push your source changes** before a session ends. Work that only
+  exists as a deploy is work that is lost.
 
 ## Commands
 
 - `npm run dev` — dev server (use `?demo=1` to seed demo data, `?nosw=1` to skip SW)
 - `npm run build` — `tsc -b` then `vite build` (emits `sw.js` with a stamped
   precache manifest via the plugin in `vite.config.ts`)
-- `npm run deploy` — build + force-push `dist/` to `gh-pages` (the live site).
-  Only run when the user asks for a deploy.
+- Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
+  workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
+  fallback only — don't use it when Actions works.
 
 ## Layout
 
