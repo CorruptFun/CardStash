@@ -56,23 +56,39 @@ export const OCR_BANDS = [0.26, 0.46] as const
 /** OCR runtime scales with pixel count; the name line survives this width fine. */
 const OCR_WIDTH = 640
 
-/** Crop the top `share` of the card, downscaled to grayscale with stretched contrast. */
-function prepBand(canvas: HTMLCanvasElement, share: number): HTMLCanvasElement {
-  const scale = Math.min(1, OCR_WIDTH / Math.max(1, canvas.width))
-  const srcHeight = Math.max(24, Math.round(canvas.height * share))
-  const band = document.createElement('canvas')
-  band.width = Math.max(1, Math.round(canvas.width * scale))
-  band.height = Math.max(16, Math.round(srcHeight * scale))
-  const ctx = band.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(canvas, 0, 0, canvas.width, srcHeight, 0, 0, band.width, band.height)
+export interface OcrRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * Crop a region (fractions of the source), rescale toward `targetWidth`
+ * (down for big name bands, up for tiny collector lines), grayscale and
+ * stretch contrast.
+ */
+function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number): HTMLCanvasElement {
+  const sx = Math.max(0, Math.floor(rect.x * canvas.width))
+  const sy = Math.max(0, Math.floor(rect.y * canvas.height))
+  const sw = Math.max(1, Math.min(canvas.width - sx, Math.round(rect.w * canvas.width)))
+  const sh = Math.max(1, Math.min(canvas.height - sy, Math.round(rect.h * canvas.height)))
+  const scale = Math.min(3, Math.max(0.1, targetWidth / sw))
+  const out = document.createElement('canvas')
+  out.width = Math.max(16, Math.round(sw * scale))
+  out.height = Math.max(16, Math.round(sh * scale))
+  const ctx = out.getContext('2d', { willReadFrequently: true })!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
   try {
-    const image = ctx.getImageData(0, 0, band.width, band.height)
+    const image = ctx.getImageData(0, 0, out.width, out.height)
     normalizeContrast(image)
     ctx.putImageData(image, 0, 0)
   } catch {
     /* preprocessing is an accuracy boost, not a requirement */
   }
-  return band
+  return out
 }
 
 /** Grayscale + percentile contrast stretch (clips glare/shadow outliers). */
@@ -104,7 +120,7 @@ function normalizeContrast(image: ImageData): void {
  */
 export async function readCardNames(canvas: HTMLCanvasElement, share: number): Promise<string[]> {
   const worker = await getWorker()
-  const band = prepBand(canvas, share)
+  const band = prepRegion(canvas, { x: 0, y: 0, w: 1, h: share }, OCR_WIDTH)
   const { data } = await worker.recognize(band)
   const seen = new Set<string>()
   const candidates: string[] = []
@@ -116,6 +132,17 @@ export async function readCardNames(canvas: HTMLCanvasElement, share: number): P
     }
   }
   return candidates.slice(0, 4)
+}
+
+/** Tiny collector-line type needs upscaling before Tesseract can read it. */
+const CORNER_OCR_WIDTH = 1200
+
+/** OCR an arbitrary card region (e.g. the collector line) and return raw text. */
+export async function readRegionText(canvas: HTMLCanvasElement, rect: OcrRect): Promise<string> {
+  const worker = await getWorker()
+  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)))
+  const { data } = await worker.recognize(region)
+  return String(data?.text ?? '')
 }
 
 function cleanOcrLine(line: string): string | null {

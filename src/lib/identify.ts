@@ -1,14 +1,17 @@
 import { blobToBase64, type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
+import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { isAbort } from './fetchJson'
 import { GeminiError, identifyCardPhoto, type Identification } from './gemini'
 import { LIGHT_MATCH_GAMES } from './games'
-import { OCR_BANDS, readCardNames } from './ocr'
-import { mtgMatchTraits } from './scryfall'
+import { OCR_BANDS, readCardNames, readRegionText } from './ocr'
+import { matchPokemon } from './pokemon'
+import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { settings } from './settings'
 import type { Card, Game } from './types'
-import { hammingDistance } from './vision'
+import { detectFoil, hammingDistance } from './vision'
 import { similarity } from './util'
+import { ygoPrintingVariants } from './ygo'
 
 /* Frame-hash cache: skip re-identifying the same card sitting on the table. */
 
@@ -209,7 +212,8 @@ async function identifyViaGemini(
       number: identified.collector_number,
       confidence: identified.confidence,
       via: 'gemini',
-      foil: identified.foil ?? undefined,
+      // When the model is unsure about the sheen, the pixel heuristic gets a say.
+      foil: identified.foil ?? (detectFoil(capture.canvas) ? true : undefined),
       treatment: identified.treatment ?? undefined,
     },
   }
@@ -273,10 +277,23 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
         timeoutMs: OCR_MATCH_TIMEOUT_MS,
       }).catch(() => null)
       if (best && best.score >= OCR_MATCH_THRESHOLD) {
+        // Name pinned the card; now read the printed collector line to pin
+        // the exact edition, and check the surface for a foil sheen — all
+        // on-device, no cloud vision involved.
+        const refined = await refineFromCorner(best.card, canvas, config.pokemonKey).catch(() => null)
+        const card = refined?.card ?? best.card
         return {
           ok: true,
-          card: best.card,
-          identification: { game: best.card.game, name, confidence: best.score, via: 'ocr' },
+          card,
+          identification: {
+            game: card.game,
+            name,
+            setCode: refined?.read.setCode,
+            number: refined?.read.number,
+            confidence: best.score,
+            via: 'ocr',
+            foil: detectFoil(canvas) ? true : undefined,
+          },
         }
       }
     }
@@ -287,4 +304,32 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     message: firstRead ? `Read “${firstRead}” but couldn’t match it` : 'Couldn’t read the card name — more light helps',
     readName: firstRead,
   }
+}
+
+/**
+ * Read the collector line printed on the card (set code / collector number /
+ * "123/198") and re-match to that exact edition. Fails soft: any trouble
+ * keeps the name-based match.
+ */
+async function refineFromCorner(
+  card: Card,
+  canvas: HTMLCanvasElement,
+  pokemonKey?: string,
+): Promise<{ card: Card; read: CornerRead } | null> {
+  const read = parseCornerInfo(card.game, await readRegionText(canvas, CORNER_REGION[card.game]))
+  if (!read.setCode && !read.number) return null
+  let exact: Card | null = null
+  if (card.game === 'yugioh') {
+    exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null
+  } else if (card.game === 'pokemon') {
+    exact = await matchPokemon(card.name, read.setCode, read.number, pokemonKey, read.total)
+  } else if (card.game === 'mtg' && !read.setCode && read.number) {
+    // Number without a set code: pick the newest printing carrying it.
+    const prints = await mtgPrintings(card.name)
+    exact = prints.find((print) => collectorEq(print.number, read.number)) ?? null
+  } else {
+    exact = await matchGame(card.game, card.name, read.setCode, read.number, { pokemonKey })
+  }
+  if (!exact || similarity(exact.name, card.name) < 0.7) return null
+  return { card: exact, read }
 }

@@ -317,6 +317,8 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
                   : 'ocr',
             outcome: outcome.ok ? 'hit' : 'miss',
             ...(outcome.ok ? {} : { reason: outcome.reason }),
+            ...(outcome.ok && outcome.identification.foil != null ? { foil: outcome.identification.foil } : {}),
+            ...(outcome.ok && outcome.identification.number != null ? { edition: true } : {}),
             ms: Math.round(performance.now() - startedAt),
             manual,
           })
