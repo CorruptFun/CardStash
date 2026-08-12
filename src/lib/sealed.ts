@@ -46,6 +46,14 @@ export interface SealedMatch {
 const SET_MATCH_THRESHOLD = 0.72
 
 /**
+ * Fire-and-forget: preload the group (set) indexes pack scans match against,
+ * so the first sealed frame spends its time on OCR instead of the network.
+ */
+export function warmSealedIndex(games?: Game[]): void {
+  for (const game of games?.length ? games : GAMES) tcgplayerGroups(game).catch(() => {})
+}
+
+/**
  * Match OCR'd packaging text to a set, then to one of its sealed products.
  * Games with no group data (offline, new category) simply don't compete.
  */

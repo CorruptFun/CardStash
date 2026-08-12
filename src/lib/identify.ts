@@ -2,7 +2,7 @@ import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { OCR_BANDS, readCardNames, readRegionText, readSealedLines } from './ocr'
+import { OCR_BANDS, readCardNames, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon } from './pokemon'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
@@ -159,6 +159,8 @@ const OCR_MATCH_THRESHOLD = 0.62
 const OCR_MATCH_TIMEOUT_MS = 6_000
 /** Names tried per band — the card name is almost always the first clean line. */
 const OCR_NAMES_PER_BAND = 3
+/** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
+const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
 async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
   // No hint: only sweep games with a cheap by-name API. Catalog-backed games
@@ -167,12 +169,13 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   const config = settings()
   const tried = new Set<string>()
   let firstRead: string | undefined
+  let cornerText: Promise<string> | null = null
   // Bands are OCR'd one at a time so a hit in the cheap top band skips the
   // rest of the work entirely.
-  for (const share of OCR_BANDS) {
+  for (const band of OCR_BANDS) {
     let names: string[]
     try {
-      names = await readCardNames(canvas, share)
+      names = await readCardNames(canvas, band)
     } catch {
       if (tried.size || firstRead) break
       return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
@@ -180,6 +183,13 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
     for (const name of fresh) tried.add(name.toLowerCase())
     firstRead ??= fresh[0]
+    if (!fresh.length) continue
+    // Queue the collector-line OCR now: the worker sits idle while the name
+    // candidates are out on the network, so the line is usually read "for
+    // free" by the time a match wants it. With a game hint the crop is that
+    // game's exact region; in auto mode the shared bottom strip covers every
+    // game but Yu-Gi-Oh, whose mid-card code refineFromCorner re-reads.
+    cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
       const best = await bestMatchAcrossGames(name, games, {
         pokemonKey: config.pokemonKey,
@@ -188,7 +198,7 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
       if (best && best.score >= OCR_MATCH_THRESHOLD) {
         // Name pinned the card; now read the printed collector line to pin
         // the exact edition, and check the surface for a foil sheen.
-        const refined = await refineFromCorner(best.card, canvas, config.pokemonKey).catch(() => null)
+        const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
         let card = refined?.card ?? best.card
         const foil = detectFoil(canvas)
         // Sheen on a printing that never came foil: the copy in hand must be
@@ -229,16 +239,27 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
 
 /**
  * Read the collector line printed on the card (set code / collector number /
- * "123/198") and re-match to that exact edition. Fails soft: any trouble
- * keeps the name-based match.
+ * "123/198") and re-match to that exact edition. The heavy OCR usually
+ * already happened: `cornerText` was queued while the name match was out on
+ * the network. When that speculative crop reads empty — above all Yu-Gi-Oh
+ * in auto mode, whose code sits mid-card rather than in the bottom strip —
+ * the game's own region is read as a second chance, unless the speculative
+ * crop WAS that region (`cornerIsExact`). Fails soft: any trouble keeps the
+ * name-based match.
  */
 async function refineFromCorner(
   card: Card,
   canvas: HTMLCanvasElement,
+  cornerText: Promise<string> | null,
+  cornerIsExact: boolean,
   pokemonKey?: string,
 ): Promise<{ card: Card; read: CornerRead } | null> {
-  const read = parseCornerInfo(card.game, await readRegionText(canvas, CORNER_REGION[card.game]))
-  if (!read.setCode && !read.number) return null
+  let read = parseCornerInfo(card.game, cornerText ? await cornerText : '')
+  if (!read.setCode && !read.number) {
+    if (cornerIsExact) return null
+    read = parseCornerInfo(card.game, await readRegionText(canvas, CORNER_REGION[card.game]))
+    if (!read.setCode && !read.number) return null
+  }
   let exact: Card | null = null
   if (card.game === 'yugioh') {
     exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null

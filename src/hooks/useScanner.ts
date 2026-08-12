@@ -3,7 +3,7 @@ import { track } from '../lib/analytics'
 import { captureFrame, startCamera, type CameraSession, type Region } from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
-import { stopOcr } from '../lib/ocr'
+import { stopOcr, warmOcr } from '../lib/ocr'
 import { analyzeFrame, frameHash } from '../lib/vision'
 
 /* Scanner tuning */
@@ -337,6 +337,9 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     wantsCameraRef.current = true
     startingRef.current = true
     failureRef.current = freshFailureState()
+    // The OCR worker (re)initializes while the permission prompt / camera
+    // warm-up runs, so the first frame doesn't pay for it.
+    warmOcr()
     patch({ status: 'starting', detail: null, needsResume: false })
     try {
       const session = await startCamera(video, { onLost: handleLost })

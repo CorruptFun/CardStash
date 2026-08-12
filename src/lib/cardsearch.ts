@@ -178,6 +178,9 @@ export async function resolveImportRows(
   return stats
 }
 
+/** A name-similarity score this high can't be beaten, only tied. */
+const PERFECT_SCORE = 0.999
+
 /** Try a name against several games; return the closest name match. */
 export async function bestMatchAcrossGames(
   name: string,
@@ -188,14 +191,34 @@ export async function bestMatchAcrossGames(
   // holding every other game's answer hostage.
   const withBudget = (match: Promise<Card | null>): Promise<Card | null> =>
     keys.timeoutMs ? Promise.race([match, sleep(keys.timeoutMs).then(() => null)]) : match
-  const settled = await Promise.allSettled(games.map((game) => withBudget(matchGame(game, name, null, null, keys))))
-  let best: { card: Card; score: number } | null = null
-  for (const result of settled) {
-    if (result.status !== 'fulfilled' || !result.value) continue
-    const score = similarity(name, result.value.name)
-    if (!best || score > best.score) best = { card: result.value, score }
-  }
-  return best
+  type Ranked = { card: Card; score: number }
+  if (!games.length) return null
+  // Overall best wins, ties broken by the games' order. A perfect name hit
+  // ends the wait as soon as every game listed before it has answered — no
+  // later game can beat it, so one slow API stops pacing every scan.
+  const results: (Ranked | null | undefined)[] = new Array<Ranked | null | undefined>(games.length).fill(undefined)
+  return new Promise((resolve) => {
+    let unsettled = games.length
+    for (const [at, game] of games.entries()) {
+      withBudget(matchGame(game, name, null, null, keys))
+        .then((card) => {
+          results[at] = card ? { card, score: similarity(name, card.name) } : null
+        })
+        .catch(() => {
+          results[at] = null
+        })
+        .finally(() => {
+          unsettled--
+          let best: Ranked | null = null
+          for (const result of results) {
+            if (result === undefined) break // an earlier game could still tie-and-win
+            if (result && (!best || result.score > best.score)) best = result
+            if (best && best.score >= PERFECT_SCORE) return resolve(best)
+          }
+          if (!unsettled) resolve(best)
+        })
+    }
+  })
 }
 
 /* --- printings / variants ------------------------------------------------ */
