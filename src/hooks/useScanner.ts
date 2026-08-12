@@ -327,7 +327,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   )
 
   const start = useCallback(async () => {
-    if (sessionRef.current || startingRef.current) return
+    if (sessionRef.current) return
     if (!navigator.mediaDevices?.getUserMedia) {
       patch({ status: 'unsupported', detail: 'Camera requires HTTPS and a modern browser' })
       return
@@ -335,6 +335,10 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     const video = videoRef.current
     if (!video) return
     wantsCameraRef.current = true
+    // A start while another start's getUserMedia is still pending must not be
+    // dropped: re-arming the flag above makes the in-flight one keep its
+    // stream instead of discarding it (stop→start races, dev double-mount).
+    if (startingRef.current) return
     startingRef.current = true
     failureRef.current = freshFailureState()
     patch({ status: 'starting', detail: null, needsResume: false })
