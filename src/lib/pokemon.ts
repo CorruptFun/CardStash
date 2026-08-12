@@ -130,6 +130,7 @@ export async function matchPokemon(
   setCode?: string | null,
   number?: string | null,
   apiKey?: string,
+  printedTotal?: string | null,
 ): Promise<Card | null> {
   const queries = nameQueries(name)
   if (!queries.length) return null
@@ -137,15 +138,22 @@ export async function matchPokemon(
   const withNumber = num ? [...queries.map((q) => `${q} number:"${num}"`), ...queries] : queries
   const results = await runQueries(withNumber, 10, apiKey).catch(() => [])
   if (!results.length) return null
+  // The printed "123/198" total identifies the set even when no code is legible.
+  let pool = results
+  if (printedTotal) {
+    const total = Number(printedTotal)
+    const sized = results.filter((raw: any) => Number(raw.set?.printedTotal) === total)
+    if (sized.length) pool = sized
+  }
   if (setCode) {
-    const exact = results.find(
+    const exact = pool.find(
       (raw: any) =>
         raw.set?.ptcgoCode?.toLowerCase() === setCode.toLowerCase() ||
         raw.set?.id?.toLowerCase() === setCode.toLowerCase(),
     )
     if (exact) return toCard(exact)
   }
-  return toCard(results[0])
+  return toCard(pool[0])
 }
 
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {

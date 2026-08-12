@@ -88,7 +88,10 @@ export function SettingsView() {
         <div className="setrow">
           <div className="setrow__text">
             <span>OCR fallback</span>
-            <em>Identify cards on-device when there's no Gemini key — or the key stops working (downloads ~12 MB once)</em>
+            <em>
+              Identify cards fully on-device when there's no Gemini key — or the key stops working. Reads the collector
+              line for the exact edition and checks for foil sheen (downloads ~12 MB once)
+            </em>
           </div>
           <Toggle on={config.ocrFallback} onChange={(ocrFallback) => config.set({ ocrFallback })} label="OCR fallback" />
         </div>

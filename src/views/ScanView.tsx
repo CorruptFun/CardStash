@@ -70,35 +70,54 @@ class CollectQueue {
 function ScanChip({
   status,
   hit,
+  finish,
+  foilAuto,
+  onCycleFinish,
   onOpen,
   detail,
   onSearch,
 }: {
   status: ScannerStatus
   hit: Extract<IdentifyOutcome, { ok: true }> | null
+  finish: Finish | null
+  /** The finish came from the on-device foil detector, not a manual tap. */
+  foilAuto: boolean
+  onCycleFinish: () => void
   onOpen: () => void
   detail: string | null
   onSearch: (() => void) | null
 }) {
-  if (status === 'found' && hit) {
+  if (status === 'found' && hit && finish) {
     const card = hit.card
     // Price the finish that's actually in frame — a scanned foil shows the
     // foil number, not the plain one.
-    const finish = scanFinish(hit)
     const probe = { finish, condition: 'NM' as const, qty: 1, card }
+    const cyclable = finishOptions(card).length > 1
     return (
-      <button className="chip chip--found" onClick={onOpen}>
-        <span className="chip__price">{money(itemUnitPrice(probe), itemCurrency(probe))}</span>
-        <span className="chip__meta">
-          <span className="chip__name">{card.name}</span>
-          <span className="chip__set">
-            {card.setCode}
-            {card.number ? ` · ${card.number}` : ''}
-            {finish === 'nonfoil' ? '' : ` · ${FINISH_LABEL[finish]}`}
+      <>
+        <button className="chip chip--found" onClick={onOpen}>
+          <span className="chip__price">{money(itemUnitPrice(probe), itemCurrency(probe))}</span>
+          <span className="chip__meta">
+            <span className="chip__name">{card.name}</span>
+            <span className="chip__set">
+              {card.setCode}
+              {card.number ? ` · ${card.number}` : ''}
+            </span>
           </span>
-        </span>
-        <Icon name="chevronRight" size={16} className="chip__go" />
-      </button>
+          <Icon name="chevronRight" size={16} className="chip__go" />
+        </button>
+        {cyclable && (
+          <button
+            className={`finishpill ${finish !== 'nonfoil' ? 'finishpill--premium' : ''}`}
+            onClick={onCycleFinish}
+            aria-label="Change finish"
+          >
+            <Icon name="sparkle" size={12} />
+            {FINISH_LABEL[finish]}
+            {foilAuto && finish !== 'nonfoil' ? <em>auto</em> : null}
+          </button>
+        )}
+      </>
     )
   }
   if (status === 'thinking') {
@@ -144,6 +163,8 @@ export function ScanView({ active }: { active: boolean }) {
   collectRef.current ??= new CollectQueue()
   const [started, setStarted] = useState(false)
   const warnedKeyRef = useRef(false)
+  /** Manual finish pick on the chip, per identified card. */
+  const [finishPick, setFinishPick] = useState<{ id: string; finish: Finish } | null>(null)
 
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
@@ -175,6 +196,17 @@ export function ScanView({ active }: { active: boolean }) {
     const miss = scanner.miss
     setSearchPrefill({ query: miss?.readName ?? '', game: miss?.readGame })
     location.hash = '#/search'
+  }
+
+  const hit = scanner.hit
+  const hitFinish = hit ? (finishPick?.id === hit.card.id ? finishPick.finish : scanFinish(hit)) : null
+  const foilAuto = !!hit && finishPick?.id !== hit.card.id && hit.identification.foil === true
+  const cycleFinish = () => {
+    if (!hit || !hitFinish) return
+    const options = finishOptions(hit.card)
+    const next = options[(options.indexOf(hitFinish) + 1) % options.length] ?? hitFinish
+    setFinishPick({ id: hit.card.id, finish: next })
+    haptic(config.haptics ? 6 : 0)
   }
 
   const scanning = ACTIVE_SCAN_STATUSES.includes(scanner.status)
@@ -252,7 +284,9 @@ export function ScanView({ active }: { active: boolean }) {
             <Icon name="scan" size={18} /> Start scanning
           </button>
           <p className="scan__gatehint">
-            {config.geminiKey ? 'Gemini vision is on' : 'No API key needed — on-device text recognition will identify cards'}
+            {config.geminiKey
+              ? 'Gemini vision is on'
+              : 'No API key needed — on-device recognition reads the card, its collector number and foil sheen'}
           </p>
         </div>
       )}
@@ -306,10 +340,11 @@ export function ScanView({ active }: { active: boolean }) {
             <div className="chipslot">
               <ScanChip
                 status={scanner.status}
-                hit={scanner.hit}
-                onOpen={() =>
-                  scanner.hit && openSheet({ card: scanner.hit.card, origin: 'scan', finish: scanFinish(scanner.hit) })
-                }
+                hit={hit}
+                finish={hitFinish}
+                foilAuto={foilAuto}
+                onCycleFinish={cycleFinish}
+                onOpen={() => hit && hitFinish && openSheet({ card: hit.card, origin: 'scan', finish: hitFinish })}
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}
               />

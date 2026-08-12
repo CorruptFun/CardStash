@@ -110,6 +110,64 @@ function findCardRegion(colEdges: Float64Array, rowEdges: Float64Array, width: n
   }
 }
 
+/**
+ * Foil sheen detector — no cloud vision needed. A foil throws bright,
+ * saturated specular streaks whose hues span the rainbow and spread across
+ * the card; printed art almost never puts 5+ hue families of near-specular
+ * highlights in multiple quadrants at once. Deliberately conservative: it
+ * answers "definitely foil" or "don't know", never "definitely not" —
+ * a foil held flat can show no sheen at all.
+ */
+export function foilSheen(image: ImageData): boolean {
+  const { data, width, height } = image
+  const total = width * height
+  if (!total) return false
+  const hueBins = new Uint32Array(12)
+  const quadrants = [0, 0, 0, 0]
+  const halfW = width / 2
+  const halfH = height / 2
+  let sheen = 0
+  for (let p = 0, i = 0; p < total; p++, i += 4) {
+    const r = data[i] / 255
+    const g = data[i + 1] / 255
+    const b = data[i + 2] / 255
+    const max = Math.max(r, g, b)
+    if (max < 0.78) continue
+    const min = Math.min(r, g, b)
+    const delta = max - min
+    if (delta / max < 0.34) continue // white glare, paper, borders
+    sheen++
+    const x = p % width
+    const y = (p / width) | 0
+    quadrants[(x < halfW ? 0 : 1) + (y < halfH ? 0 : 2)]++
+    let hue: number
+    if (max === r) hue = ((g - b) / delta + 6) % 6
+    else if (max === g) hue = (b - r) / delta + 2
+    else hue = (r - g) / delta + 4
+    hueBins[Math.min(11, (hue * 2) | 0)]++
+  }
+  if (sheen / total < 0.03) return false
+  const strong = Math.max(4, sheen * 0.05)
+  let families = 0
+  for (const count of hueBins) if (count >= strong) families++
+  const spread = quadrants.filter((q) => q >= total * 0.004).length
+  return families >= 5 && spread >= 2
+}
+
+const FOIL_SAMPLE_W = 120
+const FOIL_SAMPLE_H = 168
+
+/** Run the sheen check on a card crop. False means "unknown", not "non-foil". */
+export function detectFoil(source: CanvasImageSource): boolean {
+  try {
+    const ctx = scaledContext(FOIL_SAMPLE_W, FOIL_SAMPLE_H)
+    ctx.drawImage(source, 0, 0, FOIL_SAMPLE_W, FOIL_SAMPLE_H)
+    return foilSheen(ctx.getImageData(0, 0, FOIL_SAMPLE_W, FOIL_SAMPLE_H))
+  } catch {
+    return false
+  }
+}
+
 let sharedCtx: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null
 
 function scaledContext(width: number, height: number): CanvasRenderingContext2D {
