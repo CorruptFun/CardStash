@@ -172,6 +172,8 @@ export interface CatalogCache {
   game: Game
   /** When the catalog was fetched — stale after ~a day (prices are daily). */
   at: number
+  /** Catalog-shape version; rows from older builds are refetched, not trusted. */
+  v?: number
   cards: Card[]
 }
 

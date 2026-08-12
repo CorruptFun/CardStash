@@ -2,7 +2,7 @@ import { db, kvGet, kvPut } from './db'
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, CatalogCache, Finish, Game, PriceEntry } from './types'
-import { ebaySoldLink, normalizeName, similarity, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, normalizeName, similarity, sleep, tcgplayerSearchLink } from './util'
 
 /**
  * TCGCSV (tcgcsv.com) mirrors TCGplayer's catalog + daily prices as static
@@ -11,10 +11,19 @@ import { ebaySoldLink, normalizeName, similarity, tcgplayerSearchLink } from './
  * — a few hundred KB for young games — cache it in Dexie for a day, and
  * search locally. Category ids are resolved by name at runtime so nothing
  * breaks when TCGplayer shuffles ids.
+ *
+ * The load is all-or-nothing per set: a set that fails to download marks the
+ * catalog incomplete, which is served for the moment but retried in minutes
+ * and never persisted — otherwise the missing set's cards would read as
+ * "doesn't exist" until the day cache expired.
  */
 
 const API = 'https://tcgcsv.com/tcgplayer'
 const CATALOG_TTL_MS = 20 * 3_600_000
+/** Bump when catalog-building logic changes so already-stored (possibly partial) caches refetch. */
+const CATALOG_VERSION = 2
+/** How soon a knowingly incomplete catalog (a set failed to download) retries. */
+const INCOMPLETE_RETRY_MS = 5 * 60_000
 const FETCH_CONCURRENCY = 6
 const SEARCH_LIMIT = 30
 
@@ -42,6 +51,16 @@ async function results(url: string, signal?: AbortSignal): Promise<any[]> {
   const res = await fetchJson(url, { signal, timeoutMs: 20_000 })
   const rows = Array.isArray(res) ? res : res?.results
   return Array.isArray(rows) ? rows : []
+}
+
+/** Retry a flaky static-file fetch once before giving up on it. */
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch {
+    await sleep(500)
+    return fn()
+  }
 }
 
 /** Run `fn` over `items` with a small concurrency pool, keeping order. */
@@ -136,10 +155,12 @@ function toCard(game: Game, product: any, group: any, prices: PriceRow[], spec: 
   const name: string = product.name ?? product.cleanName ?? 'Unknown card'
   const cardType = extValue(product, 'CardType', 'Card Type', 'Type')
   const supertype = cardType?.split(/[,/·;|]/)[0]?.trim()
+  const cost = extValue(product, 'Cost', 'Energy Cost', 'Play Cost', 'Energy')
+  const power = extValue(product, 'Power', 'DP', 'Might')
   const statBits = [
-    extValue(product, 'Color'),
-    extValue(product, 'Cost', 'Energy Cost', 'Play Cost') ? `Cost ${extValue(product, 'Cost', 'Energy Cost', 'Play Cost')}` : null,
-    extValue(product, 'Power', 'DP') ? `Power ${extValue(product, 'Power', 'DP')}` : null,
+    extValue(product, 'Color', 'Domain'),
+    cost ? `Cost ${cost}` : null,
+    power ? `Power ${power}` : null,
   ].filter(Boolean)
   const finishes = [
     ...new Set(prices.map((row) => (/foil|premium/i.test(row.subTypeName ?? '') ? spec.premiumFinish : 'nonfoil'))),
@@ -170,9 +191,29 @@ function toCard(game: Game, product: any, group: any, prices: PriceRow[], spec: 
   }
 }
 
-/** A product is a single card (not a booster/box) if it carries card data. */
+/** Names that read as packaging, not as a card. */
+const PACKAGING_NAME =
+  /booster|\bbox(?:es)?\b|\bdisplay\b|\bcase\b|bundle|\bdecks?\b|\btins?\b|collection|pre-?release|starter|gift set|\bkit\b|\bpacks?\b|blister|carton|\bbrick\b/i
+
+/**
+ * A product is a single card (not a booster/box/accessory) if it carries card
+ * data. Number/Rarity are the classic markers, but TCGplayer lists young sets
+ * with sparse data and fills it in over the following weeks (Riftbound's new
+ * sets arrive like this), so any card-facing stat counts too — and a product
+ * with no card data at all still counts as a single unless its name reads
+ * like packaging or an accessory. `Description` alone stays neutral: sealed
+ * products carry their marketing blurb in that same field.
+ */
 function isSingle(product: any): boolean {
-  return extValue(product, 'Number', 'Card Number') != null || extValue(product, 'Rarity') != null
+  if (extValue(product, 'Number', 'Card Number') != null || extValue(product, 'Rarity') != null) return true
+  const cardStat = extValue(
+    product,
+    'CardType', 'Card Type', 'Color', 'Domain', 'Cost', 'Energy Cost', 'Play Cost', 'Energy',
+    'Power', 'DP', 'Might', 'Attribute', 'Level', 'Life', 'Counter',
+  )
+  if (cardStat != null) return true
+  const name = String(product.name ?? '')
+  return !PACKAGING_NAME.test(name) && !NOT_SEALED.test(name)
 }
 
 /* --- catalog cache ------------------------------------------------------- */
@@ -180,29 +221,45 @@ function isSingle(product: any): boolean {
 const memory = new Map<Game, CatalogCache>()
 const loading = new Map<Game, Promise<Card[]>>()
 
-async function fetchCatalog(game: Game, spec: CatalogSpec, signal?: AbortSignal): Promise<Card[]> {
-  const category = await categoryId(spec, signal)
-  const groups = await results(`${API}/${category}/groups`, signal)
-  const perGroup = await pool(groups, FETCH_CONCURRENCY, async (group) => {
+interface FetchedCatalog {
+  cards: Card[]
+  /** False when at least one set failed to download — don't trust it for a day. */
+  complete: boolean
+}
+
+async function fetchCatalog(game: Game, spec: CatalogSpec): Promise<FetchedCatalog> {
+  const category = await categoryId(spec)
+  const groups = await results(`${API}/${category}/groups`)
+  let failed = 0
+  const perGroup = await pool(groups, FETCH_CONCURRENCY, async (group): Promise<Card[]> => {
     const groupId = group?.groupId
     if (groupId == null) return []
-    const [products, priceRows] = await Promise.all([
-      results(`${API}/${category}/${groupId}/products`, signal).catch(() => []),
-      results(`${API}/${category}/${groupId}/prices`, signal).catch(() => []),
-    ])
-    const pricesByProduct = new Map<number, PriceRow[]>()
-    for (const row of priceRows) {
-      const list = pricesByProduct.get(row.productId) ?? []
-      list.push(row)
-      pricesByProduct.set(row.productId, list)
+    try {
+      const [products, priceRows] = await Promise.all([
+        // The set's cards must load; a missing prices file (brand-new set
+        // with no listings yet) is fine.
+        withRetry(() => results(`${API}/${category}/${groupId}/products`)),
+        withRetry(() => results(`${API}/${category}/${groupId}/prices`)).catch(() => []),
+      ])
+      const pricesByProduct = new Map<number, PriceRow[]>()
+      for (const row of priceRows) {
+        const list = pricesByProduct.get(row.productId) ?? []
+        list.push(row)
+        pricesByProduct.set(row.productId, list)
+      }
+      return products
+        .filter(isSingle)
+        .map((product) => toCard(game, product, group, pricesByProduct.get(product.productId) ?? [], spec))
+    } catch {
+      // Count the loss instead of swallowing it: one lost set must not
+      // silently vanish from search until the day cache expires.
+      failed++
+      return []
     }
-    return products
-      .filter(isSingle)
-      .map((product) => toCard(game, product, group, pricesByProduct.get(product.productId) ?? [], spec))
   })
   const cards = perGroup.flat()
   if (!cards.length) throw new Error('The TCGplayer catalog came back empty')
-  return cards
+  return { cards, complete: failed === 0 }
 }
 
 async function catalog(game: Game, signal?: AbortSignal): Promise<Card[]> {
@@ -212,34 +269,45 @@ async function catalog(game: Game, signal?: AbortSignal): Promise<Card[]> {
   const inMemory = memory.get(game)
   if (inMemory && now - inMemory.at < CATALOG_TTL_MS) return inMemory.cards
 
-  const inFlight = loading.get(game)
-  if (inFlight) return inFlight
-
-  const load = (async () => {
-    const stored = await db.catalogs.get(game).catch(() => undefined)
-    if (stored && now - stored.at < CATALOG_TTL_MS && stored.cards.length) {
-      memory.set(game, stored)
-      return stored.cards
-    }
-    try {
-      const cards = await fetchCatalog(game, spec, signal)
-      const cache: CatalogCache = { game, at: Date.now(), cards }
-      memory.set(game, cache)
-      // Persisting is best-effort: quota pressure must not fail the search.
-      db.catalogs.put(cache).catch(() => {})
-      return cards
-    } catch (err) {
-      // Offline / API hiccup: a stale catalog still beats an error screen.
-      const fallback = stored ?? inMemory
-      if (fallback?.cards.length) {
-        memory.set(game, { ...fallback, at: now - CATALOG_TTL_MS + 5 * 60_000 })
-        return fallback.cards
+  // One shared, signal-free load per game. The search box aborts its request
+  // on every keystroke; letting that abort cancel — or truncate — the
+  // day-long catalog every later lookup reuses is how sets went missing for
+  // hours. An aborted caller just stops waiting; the download finishes.
+  let load = loading.get(game)
+  if (!load) {
+    load = (async () => {
+      const stored = await db.catalogs.get(game).catch(() => undefined)
+      if (stored && stored.v === CATALOG_VERSION && now - stored.at < CATALOG_TTL_MS && stored.cards.length) {
+        memory.set(game, stored)
+        return stored.cards
       }
-      throw err
-    }
-  })().finally(() => loading.delete(game))
-  loading.set(game, load)
-  return load
+      try {
+        const { cards, complete } = await fetchCatalog(game, spec)
+        const cache: CatalogCache = { game, v: CATALOG_VERSION, at: Date.now(), cards }
+        if (complete) {
+          memory.set(game, cache)
+          // Persisting is best-effort: quota pressure must not fail the search.
+          db.catalogs.put(cache).catch(() => {})
+        } else {
+          // A set is missing. Serve what arrived, retry soon, never persist.
+          memory.set(game, { ...cache, at: Date.now() - CATALOG_TTL_MS + INCOMPLETE_RETRY_MS })
+        }
+        return cards
+      } catch (err) {
+        // Offline / API hiccup: a stale catalog still beats an error screen.
+        const fallback = stored ?? inMemory
+        if (fallback?.cards.length) {
+          memory.set(game, { ...fallback, at: now - CATALOG_TTL_MS + INCOMPLETE_RETRY_MS })
+          return fallback.cards
+        }
+        throw err
+      }
+    })().finally(() => loading.delete(game))
+    loading.set(game, load)
+  }
+  const cards = await load
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  return cards
 }
 
 /* --- the adapter API ----------------------------------------------------- */
