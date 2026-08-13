@@ -83,10 +83,13 @@ function similarity(a, b) {
 }
 
 /** Did the pipeline land on the right card? Right GAME, and the name exact
- * (normalized) or ≥0.9 — a confident hit in the wrong game is a failure. */
+ * (normalized) or ≥0.9 — a confident hit in the wrong game is a failure.
+ * Non-Latin names (Japanese fixtures) normalize to nothing, so raw string
+ * equality answers first. */
 function graded(expected, outcome) {
   if (!outcome?.ok) return false
   if (outcome.game && outcome.game !== expected.game) return false
+  if (String(outcome.name ?? '') === String(expected.name)) return true
   return similarity(expected.name, outcome.name) >= 0.9
 }
 
@@ -154,14 +157,16 @@ async function main() {
     process.exit(2)
   }
 
-  // Cell list: hinted runs for everything; auto runs for a subset.
+  // Cell list: hinted runs for everything; auto runs for a subset. Fixtures
+  // marked hintedOnly (foreign-language prints — auto mode has no
+  // collector-line rescue by design) never get auto cells.
   const cells = []
   const degradations = (all) => (degFilter ? all.filter((d) => degFilter.includes(d)) : all)
   for (const fixture of fixtures) {
     const imageUrl = `/tests/harness/fixtures/${fixture.image}`
     for (const degradation of degradations(DEGRADATION_KEYS)) {
       if (mode !== 'auto') cells.push({ fixture, degradation, hint: fixture.game, imageUrl })
-      if (mode !== 'hinted' && AUTO_GAMES.has(fixture.game) && AUTO_DEGRADATIONS.has(degradation)) {
+      if (mode !== 'hinted' && AUTO_GAMES.has(fixture.game) && AUTO_DEGRADATIONS.has(degradation) && !fixture.hintedOnly) {
         cells.push({ fixture, degradation, hint: 'auto', imageUrl })
       }
     }
@@ -317,16 +322,32 @@ async function main() {
     console.log(`  report: ${out}`)
 
     // --- assertions ---------------------------------------------------------
+    // The regression gate compares per-game rates over the KEYS both runs
+    // share — new fixtures (added cards, foreign-language prints) must not
+    // read as a pipeline regression, nor mask one.
     let bad = false
     if (typeof args.baseline === 'string') {
       const baseline = JSON.parse(readFileSync(args.baseline, 'utf8'))
+      const baselineCells = Array.isArray(baseline.cells) ? baseline.cells : null
+      const rateOverSharedKeys = (game) => {
+        if (!baselineCells) return null
+        const keysThen = new Set(baselineCells.filter((c) => c.game === game).map((c) => c.key))
+        const nowCells = results.filter((r) => r.game === game && keysThen.has(r.key))
+        const thenCells = baselineCells.filter((c) => c.game === game && results.some((r) => r.key === c.key))
+        if (!nowCells.length || !thenCells.length) return null
+        return {
+          now: nowCells.filter((r) => r.pass).length / nowCells.length,
+          then: thenCells.filter((c) => c.pass).length / thenCells.length,
+        }
+      }
       for (const [game, g] of Object.entries(byGame)) {
         const b = baseline.byGame?.[game]
         if (!b?.total) continue
-        const now = g.pass / g.total
-        const then = b.pass / b.total
+        const shared = rateOverSharedKeys(game)
+        const now = shared?.now ?? g.pass / g.total
+        const then = shared?.then ?? b.pass / b.total
         if (now + 1e-9 < then) {
-          console.error(`REGRESSION: ${game} ${(then * 100).toFixed(0)}% → ${(now * 100).toFixed(0)}%`)
+          console.error(`REGRESSION: ${game} ${(then * 100).toFixed(0)}% → ${(now * 100).toFixed(0)}%${shared ? ' (shared keys)' : ''}`)
           bad = true
         }
       }

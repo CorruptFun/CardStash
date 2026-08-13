@@ -63,6 +63,22 @@ export function createStubs(fixturesDir) {
   const dexBriefs = maybe('api/tcgdex-briefs.json', { all: [] }).all
   const dexFulls = maybe('api/tcgdex-cards.json', {})
   const dexSets = maybe('api/tcgdex-sets.json', {})
+  // Per-language TCGdex datasets (ja, …): en keeps its legacy file names,
+  // other languages use the -<lang>- infix, all captured by fetch-fixtures.
+  const dexLang = (lang) =>
+    lang === 'en'
+      ? {
+          briefs: dexBriefs,
+          fulls: dexFulls,
+          sets: dexSets,
+          setsList: maybe('api/tcgdex-sets-list.json', []),
+        }
+      : {
+          briefs: maybe(`api/tcgdex-${lang}-briefs.json`, { all: [] }).all,
+          fulls: maybe(`api/tcgdex-${lang}-cards.json`, {}),
+          sets: maybe(`api/tcgdex-${lang}-sets.json`, {}),
+          setsList: maybe(`api/tcgdex-${lang}-sets-list.json`, []),
+        }
   const ptcgio = maybe('api/pokemontcgio.json', { alive: false, rowsByQueryName: {} })
   const seenPtcg = new Set()
   const ptcgioRows = Object.values(ptcgio.rowsByQueryName)
@@ -101,21 +117,28 @@ export function createStubs(fixturesDir) {
   /* ------------------------------------------------------------- tcgdex - */
   function tcgdex(url) {
     const path = url.pathname
-    let m = path.match(/^\/v2\/en\/cards\/([^/]+)$/)
+    const langMatch = path.match(/^\/v2\/([a-z]{2}(?:-[a-z]{2})?)(\/.*)?$/)
+    if (!langMatch) return json({ error: 'not stubbed' }, 404)
+    const data = dexLang(langMatch[1])
+    const rest = langMatch[2] ?? ''
+    let m = rest.match(/^\/cards\/([^/]+)$/)
     if (m) {
-      const full = dexFulls[decodeURIComponent(m[1])]
+      const full = data.fulls[decodeURIComponent(m[1])]
       return full ? json(full) : json({ error: 'Card not found' }, 404)
     }
-    m = path.match(/^\/v2\/en\/sets\/([^/]+)$/)
+    m = rest.match(/^\/sets\/([^/]+)$/)
     if (m) {
-      const set = dexSets[decodeURIComponent(m[1])]
+      const set = data.sets[decodeURIComponent(m[1])]
       return set ? json(set) : json({ error: 'Set not found' }, 404)
     }
-    if (path === '/v2/en/cards') {
+    // Real /sets always answers the full brief list; an uncaptured language
+    // answers empty — the sweep then simply finds no candidate sets there.
+    if (rest === '/sets') return json(data.setsList)
+    if (rest === '/cards') {
       const name = (url.searchParams.get('name') ?? '').toLowerCase().trim()
-      if (!name) return json(dexBriefs.slice(0, 100))
+      if (!name) return json(data.briefs.slice(0, 100))
       // Real TCGdex name= is a lax case-insensitive contains.
-      return json(dexBriefs.filter((b) => String(b.name ?? '').toLowerCase().includes(name)))
+      return json(data.briefs.filter((b) => String(b.name ?? '').toLowerCase().includes(name)))
     }
     return json({ error: 'not stubbed' }, 404)
   }
@@ -239,12 +262,17 @@ export function createStubs(fixturesDir) {
   /* ---------------------------------------------------------- ygoprodeck - */
   function ygoprodeck(url) {
     if (!url.pathname.endsWith('/cardinfo.php')) return json({ error: 'not stubbed' }, 400)
+    const id = url.searchParams.get('id')
     const fname = url.searchParams.get('fname')
     const name = url.searchParams.get('name')
     let rows = ygoRows
+    // Live id= (the printed 8-digit passcode) is an exact numeric match. This
+    // filter must come first: an id query with no name/fname previously fell
+    // through to "all rows", which would flatter any passcode misread.
+    if (id != null) rows = rows.filter((r) => String(r.id) === id.trim().replace(/^0+(?=\d)/, ''))
     // Live name= is EXACT (case-insensitive, punctuation significant) — a
     // laxer stub was flattering junk-suffixed reads the real API rejects.
-    if (name != null) rows = rows.filter((r) => String(r.name).toLowerCase() === name.trim().toLowerCase())
+    else if (name != null) rows = rows.filter((r) => String(r.name).toLowerCase() === name.trim().toLowerCase())
     else if (fname != null) rows = rows.filter((r) => String(r.name).toLowerCase().includes(fname.toLowerCase()))
     // Real API answers "nothing matched" with HTTP 400 + an error body.
     if (!rows.length) return json({ error: 'No card matching your query was found in the database.' }, 400)

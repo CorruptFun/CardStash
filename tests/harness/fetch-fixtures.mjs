@@ -221,6 +221,14 @@ async function pokemon() {
     }
   }
 
+  // The FULL en sets brief list (small once trimmed): the collector-only
+  // sweep filters it by printed set size, and a partial list would hide the
+  // size collisions the real API forces the pipeline to survive.
+  const setsList = await fetchRetry(`${DEX}/sets`).catch((err) => {
+    fail('pokemon/sets-list', err)
+    return []
+  })
+
   manifest.datasets.pokemon = {
     briefs: await save('api/tcgdex-briefs.json', {
       // The stub answers /cards?name=X with a contains-filter over this union.
@@ -231,7 +239,75 @@ async function pokemon() {
     }),
     fulls: await save('api/tcgdex-cards.json', Object.fromEntries(fulls)),
     sets: await save('api/tcgdex-sets.json', Object.fromEntries([...sets.entries()].map(([id, s]) => [id, { ...s, cards: s.cards ?? [] }]))),
+    setsList: await save(
+      'api/tcgdex-sets-list.json',
+      setsList.map(({ id, name, cardCount, releaseDate }) => ({ id, name, cardCount, releaseDate })),
+    ),
     pokemontcgio: await save('api/pokemontcgio.json', primary),
+  }
+}
+
+/* ----------------------------------------------- Pokémon, Japanese print - */
+
+/**
+ * A real Japanese card: the name is kanji/kana the shipped eng OCR cannot
+ * read, so identification must ride the printed collector line + set code
+ * ("046/066" + "SV4K") through the TCGdex ja catalog. hintedOnly — auto mode
+ * has no collector-only rescue by design.
+ */
+async function pokemonJa() {
+  console.log('\nPokémon ja (TCGdex)…')
+  const list = await fetchRetry('https://api.tcgdex.net/v2/ja/sets')
+  await save(
+    'api/tcgdex-ja-sets-list.json',
+    list.map(({ id, name, cardCount, releaseDate }) => ({ id, name, cardCount, releaseDate })),
+  )
+  // 古代の咆哮 (Ancient Roar, sv4K) — the set from the user's bug report —
+  // else any modern SV-era ja set of plausible size.
+  const brief =
+    list.find((s) => /^sv4k$/i.test(String(s.id))) ??
+    list.filter((s) => /^sv/i.test(String(s.id)) && Number(s?.cardCount?.official) > 40).slice(-1)[0]
+  if (!brief) {
+    fail('pokemon-ja/set', 'no ja SV-era set on TCGdex')
+    return
+  }
+  const set = await fetchRetry(`https://api.tcgdex.net/v2/ja/sets/${brief.id}`)
+  await save('api/tcgdex-ja-sets.json', { [set.id]: { ...set, cards: set.cards ?? [] } })
+  // A mid-set card whose localId prints as a plain fraction; needs an image.
+  const candidates = (set.cards ?? [])
+    .filter((c) => c?.id && Number(c?.localId) >= 20 && Number(c?.localId) <= Number(set?.cardCount?.official ?? 0))
+    .slice(0, 12)
+  const fulls = {}
+  let pick = null
+  for (const candidate of candidates) {
+    const full = await fetchRetry(`https://api.tcgdex.net/v2/ja/cards/${candidate.id}`).catch(() => null)
+    if (full?.id) fulls[full.id] = full
+    if (full?.id && full.image && !pick) pick = full
+    if (pick && Object.keys(fulls).length >= 4) break
+  }
+  await save('api/tcgdex-ja-cards.json', fulls)
+  if (!pick) {
+    fail('pokemon-ja/card', `no ja card with an image in ${set.id}`)
+    return
+  }
+  try {
+    const img = await saveImage(`images/pokemon/ja-collector.webp`, `${pick.image}/high.webp`).catch(() =>
+      saveImage(`images/pokemon/ja-collector.png`, `${pick.image}/high.png`),
+    )
+    fixture({
+      game: 'pokemon',
+      key: 'ja-collector',
+      name: pick.name,
+      setCode: set.id.toUpperCase(),
+      number: String(pick.localId ?? ''),
+      total: set?.cardCount?.official != null ? String(set.cardCount.official) : undefined,
+      image: img.rel,
+      dexId: pick.id,
+      lang: 'ja',
+      hintedOnly: true,
+    })
+  } catch (err) {
+    fail('pokemon-ja/image', err)
   }
 }
 
@@ -427,6 +503,32 @@ async function mtg() {
     }
   }
 
+  // A real Japanese print: the name line is kanji, so identification must
+  // ride the corner's "0266 R … NEO・JA" through the exact set+number lookup.
+  // The EN print of the same collector number is captured FIRST so the stub's
+  // /cards/:set/:number answers with it, like the real API's default-language
+  // resolution. hintedOnly — auto mode has no collector-only rescue.
+  try {
+    const en = trimScryfall(await fetchRetry(`${SCRYFALL}/cards/neo/266`))
+    await new Promise((r) => setTimeout(r, 120))
+    const ja = trimScryfall(await fetchRetry(`${SCRYFALL}/cards/neo/266/ja`))
+    printsByName[en.name] = dedupeBy([...(printsByName[en.name] ?? []), en, ja], (p) => p.id)
+    const img = await saveImage('images/mtg/ja-collector.jpg', ja.image_uris.large)
+    fixture({
+      game: 'mtg',
+      key: 'ja-collector',
+      name: en.name,
+      setCode: en.set?.toUpperCase(),
+      number: en.collector_number,
+      image: img.rel,
+      scryfallId: ja.id,
+      lang: 'ja',
+      hintedOnly: true,
+    })
+  } catch (err) {
+    fail('mtg/ja-collector', err)
+  }
+
   const names = await fetchRetry(`${SCRYFALL}/catalog/card-names`)
   manifest.datasets.mtg = {
     prints: await save('api/scryfall-prints.json', printsByName),
@@ -521,6 +623,7 @@ function trimYgo(raw) {
 
 const steps = [
   ['pokemon', pokemon],
+  ['pokemon-ja', pokemonJa],
   ['riftbound', () => tcgcsvGame('riftbound', /riftbound/i, (groups) => groups, pickRiftbound)],
   [
     'onepiece',
