@@ -117,6 +117,15 @@ export async function matchYgo(name: string, thorough = false): Promise<Card | n
   } catch {
     /* fall back to fuzzy search */
   }
+  // Deliberately NOT ranked by name fit. fname is a substring filter, so on a
+  // PARTIAL read ("MAGICIAN", the "DARK" lost to glare) every row in the pool
+  // is a wrong answer, and ranking by similarity picks the one likeliest to
+  // squeak past the caller's threshold — the shortest name containing the
+  // fragment. Measured: ranking turned 11 passing Dark Magician cells into
+  // "Ape Magician" at 0.667, one thousandth over the bar, where the unranked
+  // row scored 0.615, was duly rejected, and the next candidate ("DARK
+  // MAGICIAN", 1.00) identified the card. The threshold is the guard here;
+  // helping a fragment clear it is the opposite of an improvement.
   const results = await runSearch(name, 5).catch(() => [])
   if (results.length) return toCard(results[0])
   // fname is a substring filter with zero tolerance — one OCR-eaten hyphen

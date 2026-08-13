@@ -372,6 +372,13 @@ const JOINABLE_LINE_LEN = 20
 /** Suffixes that LOOK like junk but are load-bearing card-name endings. */
 const NAME_SUFFIX = /^(?:ex|gx|v|vmax|vstar|x)$/i
 
+/**
+ * Fewest letters a candidate can carry and still be somebody's card name.
+ * Three, because three-letter names are real and get scanned ("Mew", "Muk",
+ * "Fog"); at two the shortest genuine name has already been passed.
+ */
+const MIN_NAME_LETTERS = 3
+
 /** A token that plausibly belongs to a printed name. */
 function wordish(token: string): boolean {
   if (NAME_SUFFIX.test(token)) return true
@@ -451,7 +458,17 @@ function trimTrailingJunk(line: string): string | null {
 export function nameCandidates(lines: string[]): string[] {
   const out: string[] = []
   const push = (value: string | null) => {
-    if (value && !out.some((seen) => seen.toLowerCase() === value.toLowerCase())) out.push(value)
+    // The same floor cleanOcrLine holds a whole line to — the derived
+    // candidates have to clear it too. trimTrailingJunk in particular can
+    // shed everything but a two-letter head ("gr ee" → "gr"), and every
+    // candidate costs a lookup against every game in the sweep. A fragment
+    // that short cannot BE a printed card name, but in a catalogue the size
+    // of Yu-Gi-Oh's (~13k) it can still hit one EXACTLY — which scores 1.0
+    // and sails past every threshold, turning pure noise into a confident
+    // wrong card. Measured on the matrix: 119 lookups spent on such
+    // fragments, and not one of them ever identified a card.
+    if (!value || (value.match(/[A-Za-z]/g) ?? []).length < MIN_NAME_LETTERS) return
+    if (!out.some((seen) => seen.toLowerCase() === value.toLowerCase())) out.push(value)
   }
   for (let i = 0; i < lines.length; i++) {
     if (i + 1 < lines.length && lines[i].length <= JOINABLE_LINE_LEN && lines[i + 1].length <= JOINABLE_LINE_LEN) {

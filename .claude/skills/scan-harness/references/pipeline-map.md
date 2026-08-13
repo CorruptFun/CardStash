@@ -90,6 +90,24 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    not feed the solo-number fallback).
 6. **Abort:** `identifyFrame` takes the scan job's signal; passes `bail()`
    between stages so a stopped scanner stops escalating.
+7. **A cross-game match needs game evidence** (`collectorLineAllows`,
+   corner.ts). The auto sweep keeps the best `nameScore` across games and
+   nothing in that comparison knows what game is in frame, so a game that
+   fails to answer — pokemontcg.io 500s routinely — cedes its card to whoever
+   else matched the read. Yu-Gi-Oh is the dangerous claimant: `fname=` is a
+   substring filter over ~13k names, so it answers almost any fragment, and a
+   fragment that hits a name EXACTLY scores 1.0 and clears every threshold.
+   The printed collector line arbitrates: the fraction games (Pokémon, MTG,
+   Lorcana, Riftbound, SWU) print "183/226", the code games (Yu-Gi-Oh, One
+   Piece, Digimon, Gundam) print "LOB-EN001" and never a fraction. One
+   directional — it only rules a game OUT, only on the shape it cannot print,
+   and a strip that read nothing rules out nothing. Measured over the matrix:
+   fires on 41/81 Pokémon cells, **0/36 Yu-Gi-Oh** ones.
+8. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
+   `trimTrailingJunk` could shed everything but a two-letter head ("gr ee" →
+   "gr"); the matrix spent 119 lookups on such fragments and not one ever
+   identified a card, while each was a chance to hit a real name exactly in a
+   big catalogue. Three, not four, because "Mew" and "Muk" are real.
 
 ## Scanner loop (hooks/useScanner.ts)
 

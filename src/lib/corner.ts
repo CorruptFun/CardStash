@@ -263,6 +263,37 @@ export function sameYgoCode(a: string | undefined, b: string | undefined): boole
 }
 
 /**
+ * Could a card printing this collector-line text belong to `game`?
+ *
+ * The games split cleanly on the SHAPE of the number they print: Pokémon,
+ * Magic, Lorcana, Riftbound and Star Wars print the collector number as a
+ * fraction of the set size ("183/226"), while the code games — Yu-Gi-Oh, One
+ * Piece, Digimon, Gundam — print a set-prefixed code ("LOB-EN001", "OP01-016")
+ * and never a fraction at all. So a fraction read off the bottom strip is
+ * positive evidence AGAINST those games, and it is the only cross-game
+ * evidence available before a name has been matched to anything.
+ *
+ * Deliberately one-directional: this only ever rules a game OUT, and only on
+ * the one shape it cannot print. It is not a game detector — a card that reads
+ * no line at all (the common case on a poor capture) rules out nothing, and
+ * the caller carries on exactly as before.
+ *
+ * Measured over the whole scan matrix, the fraction fires on 41/81 Pokémon
+ * cells and on 0/36 Yu-Gi-Oh ones: it catches the failure direction about half
+ * the time and never once misfired on a genuine Yu-Gi-Oh card. Yu-Gi-Oh's own
+ * digit pairs can't trip it — "ATK/2500 DEF/2000" has letters, not digits, on
+ * the near side of every slash.
+ */
+export function collectorLineAllows(game: Game, text: string): boolean {
+  if (!CODE_GAMES.has(game)) return true
+  const upper = text.toUpperCase().replace(/[–—]/g, '-')
+  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  // The same shape and set-size floor looksLikeCollectorLine trusts, so a
+  // creature's "4/4" or a stray "1/2" is not mistaken for a set size.
+  return !(frac && Number(frac[2]) >= 20)
+}
+
+/**
  * Does this text read like a printed collector line? Used to decide which way
  * up a SIDEWAYS card is: turned the right way the bottom strip holds the
  * fraction / set-dash code / passcode, turned the wrong way it holds the

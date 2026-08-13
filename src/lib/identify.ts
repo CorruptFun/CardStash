@@ -2,6 +2,7 @@ import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
 import {
+  collectorLineAllows,
   CORNER_REGION,
   CORNER_RETRY_REGIONS,
   looksLikeCollectorLine,
@@ -453,7 +454,10 @@ async function identifyViaOcr(
     // wants it. With a game hint the crop is that game's exact region; in
     // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
     // whose mid-card code refineFromCorner re-reads.
-    reading.cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
+    const cornerText = (reading.cornerText ??= readRegionText(
+      canvas,
+      mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP),
+    ).catch(() => ''))
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
       if (slowLookupsLeft <= 0 || Date.now() > lookupDeadline) break
       // Consumed here, not at freshOf: candidates past this pass's window
@@ -483,9 +487,20 @@ async function identifyViaOcr(
         traceEvent('turned-reject', { read: name, card: best.card.name, score: Number(best.score.toFixed(3)) })
         continue
       }
+      // In the auto sweep the name was matched across GAMES, and the winner is
+      // simply whichever API scored best — so a game that failed to answer
+      // (pokemontcg.io 500s routinely) cedes its card to whatever else fuzzy-
+      // matched the read. The printed collector line is the one piece of game
+      // evidence going spare here, already read for the refine below: a card
+      // showing a set-size fraction is not a Yu-Gi-Oh card, however well some
+      // OCR fragment of it happened to match one.
+      if (games.length > 1 && !collectorLineAllows(best.card.game, await cornerText)) {
+        traceEvent('game-reject', { read: name, card: best.card.name, game: best.card.game, score: Number(best.score.toFixed(3)) })
+        continue
+      }
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
-      const refined = await refineFromCorner(best.card, canvas, reading.cornerText, !!gameHint, mapRect, config.pokemonKey).catch(
+      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(
         () => null,
       )
       let card = refined?.card ?? best.card

@@ -93,6 +93,37 @@ result seems absurd, check this list before writing code.
     conclude from a single-run ±1 delta on the hard rows — the stable wins
     are the ones that repeat across three consecutive runs.
 
+## Cross-game identification (the v0.10.2 round)
+
+20. **A small stub universe hides DANGER as readily as it flatters.** Lesson 4
+    is usually quoted the other way round, but the captured Yu-Gi-Oh universe
+    is 131 rows against ~13k live, and that gap conceals a whole failure
+    class: the matrix showed 13 cross-game matches where Yu-Gi-Oh answered a
+    Pokémon card's junk fragment ("or", "gr", "EE", "cr"), all scoring
+    0.05–0.19 and dying at the threshold. Live, `fname=` is a substring filter
+    over the full catalogue, and a fragment that hits a name EXACTLY scores
+    1.0. Rule: when the harness says a cross-game path is safe, check whether
+    it is safe or merely under-populated — and prove the mechanism in a node
+    test with a stubbed universe (`tests/unit/crossgame-sweep.test.mjs`)
+    instead of waiting for the matrix to show something it structurally
+    cannot.
+21. **Ranking a substring pool by name fit is an ANTI-fix.** On a partial read
+    every row in an `fname=` pool is wrong, and ranking by similarity picks
+    the row likeliest to squeak past the bar — the shortest name containing
+    the fragment. Ranking the pool turned 11 passing Dark Magician cells into
+    "Ape Magician" (0.667, a thousandth over the 0.66 bar), where the unranked
+    row scored 0.615, was rejected, and the NEXT candidate ("DARK MAGICIAN",
+    1.00) identified the card. The threshold is the guard; anything that helps
+    a fragment clear it is a regression wearing an improvement's clothes.
+    Yu-Gi-Oh 81% → 50% in one run, caught only because the full matrix ran.
+22. **Fix the wrong game, not the wrong score.** Every threshold lever that
+    would stop a cross-game wrong card also costs real passes — the auto bar
+    that would kill "Rage"→Yu-Gi-Oh also kills the genuine "AsH BLOSSOM &
+    SPRING"→Ash Blossom at 0.72. Evidence separates them where a score cannot:
+    the collector line says which game is physically in frame. Guard invariant
+    1 cuts both ways — a NARROWING also needs its evidence, or it just moves
+    the losses somewhere less visible.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review
