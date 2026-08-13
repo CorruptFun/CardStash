@@ -118,8 +118,16 @@ const DESKEW_MAX_DEG = 9
 
 export interface CropRefinement {
   canvas: HTMLCanvasElement
-  /** The detected card region (fractions of the input), if one was used. */
+  /** The crop region that was applied to the input (null: no crop). */
   region: Region | null
+  /**
+   * Where the card sits within the RETURNED canvas — identity after a crop,
+   * the detected region when the crop was skipped as not worth it. Precision
+   * consumers (the tiny collector-line slivers) map through this; the broad
+   * name bands stay frame-relative on purpose, a mediocre detection must not
+   * shift them off the name.
+   */
+  cardRegion: Region | null
   /** Roll angle that was removed, in degrees (0 when none). */
   angle: number
   applied: boolean
@@ -134,7 +142,7 @@ export interface CropRefinement {
  * roll. Fails soft: anything implausible returns the input untouched.
  */
 export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
-  const none: CropRefinement = { canvas: source, region: null, angle: 0, applied: false }
+  const none: CropRefinement = { canvas: source, region: null, cardRegion: null, angle: 0, applied: false }
   try {
     const sw = REFINE_WIDTH
     const sh = Math.max(24, Math.round((source.height / source.width) * REFINE_WIDTH))
@@ -216,17 +224,23 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
       x1 = Math.min(1, x1)
       y1 = Math.min(1, y1)
       region = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
-      // Too small to be the card, or basically the whole frame already.
       if (region.w < 0.3 || region.h < 0.3) region = null
       else if (region.w > 0.94 && region.h > 0.94) region = null
     }
 
-    if (!region && !deskew) return none
+    // Only crop when it buys real magnification. A near-full detection is
+    // regularly a few percent tight (light borders, noise edges) and a crop
+    // that clips half a glyph off the title costs far more than the pixels
+    // it gains — those frames stay whole, with the detection kept for
+    // precision consumers to map through.
+    const cropRegion = region && region.w * region.h <= 0.66 ? region : null
 
-    const sx = (region?.x ?? 0) * source.width
-    const sy = (region?.y ?? 0) * source.height
-    const cw = Math.max(1, Math.round((region?.w ?? 1) * source.width))
-    const ch = Math.max(1, Math.round((region?.h ?? 1) * source.height))
+    if (!cropRegion && !deskew) return { ...none, cardRegion: region }
+
+    const sx = (cropRegion?.x ?? 0) * source.width
+    const sy = (cropRegion?.y ?? 0) * source.height
+    const cw = Math.max(1, Math.round((cropRegion?.w ?? 1) * source.width))
+    const ch = Math.max(1, Math.round((cropRegion?.h ?? 1) * source.height))
     const out = document.createElement('canvas')
     out.width = cw
     out.height = ch
@@ -241,7 +255,10 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
     } else {
       octx.drawImage(source, sx, sy, cw, ch, 0, 0, cw, ch)
     }
-    return { canvas: out, region, angle: deskew, applied: true }
+    // After a crop the card IS the canvas; otherwise the (deskewed) canvas
+    // still carries the detection for mapping — small angles keep it valid.
+    const cardRegion = cropRegion ? null : region
+    return { canvas: out, region: cropRegion, cardRegion, angle: deskew, applied: true }
   } catch {
     return none
   }

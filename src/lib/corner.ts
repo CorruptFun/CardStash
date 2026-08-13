@@ -27,6 +27,24 @@ export const CORNER_REGION: Record<Game, CornerRect> = {
   gundam: { x: 0, y: 0.85, w: 1, h: 0.15 },
 }
 
+/**
+ * Where to look HARDER when the wide strip fails: the collector line is tiny
+ * type that drowns next to rules text at strip scale, but a narrow sliver
+ * OCR'd at full upscale resolves it. Ordered by likelihood; read binarized.
+ * (Pokémon: modern cards print it bottom-left, vintage bottom-right.)
+ */
+export const CORNER_RETRY_REGIONS: Partial<Record<Game, CornerRect[]>> = {
+  pokemon: [
+    { x: 0, y: 0.925, w: 0.52, h: 0.075 },
+    { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },
+  ],
+  mtg: [{ x: 0, y: 0.9, w: 0.5, h: 0.1 }],
+  riftbound: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+  lorcana: [{ x: 0, y: 0.92, w: 0.55, h: 0.08 }],
+  onepiece: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+  starwars: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+}
+
 export interface CornerRead {
   setCode?: string
   number?: string

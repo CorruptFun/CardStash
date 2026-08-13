@@ -141,9 +141,13 @@ async function pokemon() {
     if (set?.id) sets.set(setId, set)
   }
 
+  // Pokémon TCG *Pocket* (the mobile game) shares the TCGdex index but its
+  // digital frames print NO collector line — never usable as scan imagery.
+  const isPaper = (c) => !/^[ab]\d/i.test(String(c?.set?.id ?? ''))
+
   // --- the user's real failing card: full-art Tauros, collector 096/086 ---
   const tauros = await searchAndHydrate('tauros')
-  const taurosFulls = tauros.map((b) => fulls.get(b.id)).filter(Boolean)
+  const taurosFulls = tauros.map((b) => fulls.get(b.id)).filter((c) => c && isPaper(c))
   const exact = taurosFulls.filter(
     (c) => String(c.localId) === '96' && Number(c?.set?.cardCount?.official) === 86,
   )
@@ -167,7 +171,7 @@ async function pokemon() {
   await byId('umbreon-vmax-alt', 'swsh7-215') // dark full-art alt (hard: dark plate, busy art)
   for (const name of ['pikachu', 'iono']) {
     const briefs = await searchAndHydrate(name)
-    const cards = briefs.map((b) => fulls.get(b.id)).filter((c) => c && c.image)
+    const cards = briefs.map((b) => fulls.get(b.id)).filter((c) => c && c.image && isPaper(c))
     const modern = cards.filter((c) => /^sv/i.test(String(c?.set?.id)))
     const pick = (name === 'iono' ? cards.filter((c) => /special|ultra|full/i.test(String(c.rarity))) : modern).slice(-1)[0] ?? cards.slice(-1)[0]
     if (pick) picks.push({ key: `${name}-modern`, card: pick })
@@ -200,8 +204,10 @@ async function pokemon() {
     }
   }
 
-  // Primary API (pokemontcg.io) — stale/flaky in production; capture whatever it answers.
-  const primary = { alive: false, rowsByQueryName: {} }
+  // Primary API (pokemontcg.io) — stale/flaky in production; capture whatever
+  // it answers, and record which queries FAILED so the stub can answer those
+  // names with the same server error instead of a false empty result.
+  const primary = { alive: false, rowsByQueryName: {}, failedQueryNames: [] }
   for (const name of [...new Set(picks.map((p) => p.card?.name).filter(Boolean))]) {
     try {
       const res = await fetchRetry(`${PTCG}/cards?q=${encodeURIComponent(`name:"${name}"`)}&pageSize=60&orderBy=-set.releaseDate`, { tries: 2 })
@@ -210,6 +216,7 @@ async function pokemon() {
       primary.alive = true
       console.log(`  pokemontcg.io: ${rows.length} rows for “${name}”`)
     } catch (err) {
+      primary.failedQueryNames.push(name)
       fail(`pokemontcgio/${name}`, err)
     }
   }
@@ -390,7 +397,10 @@ async function mtg() {
         newestRegular(printsByName['Counterspell']),
     },
     {
-      key: 'elves-borderless',
+      // Whichever of the captured names has a borderless/full-art print —
+      // the KEY is honest about that (a prior run shipped a borderless
+      // Lightning Bolt under an "elves-" key).
+      key: 'borderless-any',
       card:
         NAMES.map((n) => withImage(printsByName[n]).find((p) => p.border_color === 'borderless' || p.full_art)).find(Boolean) ??
         newestRegular(printsByName['Llanowar Elves']),
@@ -426,8 +436,8 @@ async function mtg() {
 }
 
 function trimScryfall(raw) {
-  const pick = ({ id, name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
-    id, name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
+  const pick = ({ id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
+    id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
   })
   const out = pick(raw)
   if (Array.isArray(raw.card_faces)) {
