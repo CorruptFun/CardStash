@@ -3021,6 +3021,71 @@ button {
   color: var(--paper);
   font-weight: 600;
 }
+.gamegrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  padding: var(--s1) 0 var(--s2);
+}
+.gamepick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 11px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  text-align: left;
+  color: var(--paper-2);
+  transition:
+    background var(--t-1) var(--ease-out),
+    border-color var(--t-1) var(--ease-out),
+    color var(--t-1) var(--ease-out);
+}
+.gamepick__name {
+  max-width: 100%;
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gamepick__code {
+  font-style: normal;
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--paper-3);
+}
+.gamepick__tick {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  color: var(--signal);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--t-1) var(--ease-out),
+    transform var(--t-1) var(--ease-out);
+}
+.gamepick--on {
+  background: var(--ink-150);
+  border-color: var(--signal);
+  color: var(--paper);
+}
+.gamepick--on .gamepick__code {
+  color: var(--paper-2);
+}
+.gamepick--on .gamepick__tick {
+  opacity: 1;
+  transform: scale(1);
+}
 .setfield {
   display: flex;
   flex-direction: column;

@@ -28,7 +28,7 @@ import {
   type DeckStats,
 } from '../lib/deckstats'
 import { isAbort } from '../lib/fetchJson'
-import { GAME_LABEL, GAME_SHORT, GAMES } from '../lib/games'
+import { GAME_LABEL, GAME_SHORT } from '../lib/games'
 import { useSettings } from '../lib/settings'
 import type { Card, Deck, DeckBoard, Game } from '../lib/types'
 import { money } from '../lib/util'
@@ -145,8 +145,9 @@ function NewDeckModal({
   onClose: () => void
   onCreated: (deck: Deck) => void
 }) {
+  const games = useSettings((s) => s.enabledGames)
   const [name, setName] = useState('')
-  const [game, setGame] = useState<Game>('mtg')
+  const [game, setGame] = useState<Game>(() => (games.includes('mtg') ? 'mtg' : games[0]))
   const [format, setFormat] = useState('')
   const create = async () => {
     if (!name.trim()) return
@@ -163,7 +164,7 @@ function NewDeckModal({
       <div className="form">
         <input className="input" placeholder="Deck name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         <select className="select" value={game} onChange={(e) => setGame(e.target.value as Game)} aria-label="Game">
-          {GAMES.map((g) => (
+          {games.map((g) => (
             <option key={g} value={g}>
               {GAME_LABEL[g]}
             </option>

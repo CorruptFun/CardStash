@@ -84,7 +84,11 @@ export async function identifyFrame(
 ): Promise<IdentifyOutcome> {
   const mode = opts.mode ?? 'card'
   const config = settings()
-  const gameHint = config.gameFilter === 'auto' ? undefined : config.gameFilter
+  // The scan filter always sits inside the enabled games (the settings store
+  // keeps it there). A lone enabled game needs no sweep — treat it as a hint,
+  // which also buys it the exact collector-line crop and the longer budget.
+  const gameHint =
+    config.gameFilter !== 'auto' ? config.gameFilter : config.enabledGames.length === 1 ? config.enabledGames[0] : undefined
   const cached = cacheLookup(hash, mode)
   const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
   if (cacheUsable && cached.card) {
@@ -128,7 +132,7 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
   }
   let match
   try {
-    match = await identifySealedText(lines, gameHint ? [gameHint] : undefined)
+    match = await identifySealedText(lines, gameHint ? [gameHint] : settings().enabledGames)
   } catch {
     return { ok: false, reason: 'api', message: 'Couldn’t reach the product catalog', readName: lines[0] }
   }
@@ -165,10 +169,13 @@ const OCR_NAMES_PER_BAND = 4
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
 async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
-  // No hint: only sweep games with a cheap by-name API. Catalog-backed games
-  // (Riftbound & co.) are reachable by picking them in the scan game filter.
-  const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
   const config = settings()
+  // No hint: only sweep enabled games with a cheap by-name API. Catalog-backed
+  // games (Riftbound & co.) are reachable by picking them in the scan game
+  // filter — unless they're all the user keeps on, in which case their
+  // catalogs are exactly what was opted into and become the sweep.
+  const light = LIGHT_MATCH_GAMES.filter((game) => config.enabledGames.includes(game))
+  const games = gameHint ? [gameHint] : light.length ? light : config.enabledGames
   const timeoutMs = games.length === 1 ? OCR_MATCH_TIMEOUT_HINTED_MS : OCR_MATCH_TIMEOUT_MS
   const tried = new Set<string>()
   let firstRead: string | undefined
