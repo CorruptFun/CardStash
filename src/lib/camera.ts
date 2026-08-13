@@ -1,3 +1,17 @@
+export type CameraPermission = 'granted' | 'prompt' | 'denied' | 'unknown'
+
+/** Peek at the camera permission without triggering a prompt. */
+export async function cameraPermissionState(): Promise<CameraPermission> {
+  try {
+    const status = await navigator.permissions?.query({ name: 'camera' as PermissionName })
+    const state = status?.state
+    return state === 'granted' || state === 'prompt' || state === 'denied' ? state : 'unknown'
+  } catch {
+    // Firefox has no 'camera' permission name; older Safari has no query().
+    return 'unknown'
+  }
+}
+
 export interface CameraSession {
   stream: MediaStream
   track: MediaStreamTrack

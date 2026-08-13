@@ -4,14 +4,15 @@ import { Icon } from '../components/Icon'
 import { CardImg, Seg } from '../components/basics'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
+import { cameraPermissionState } from '../lib/camera'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome, ScanMode } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { headlineFinish, itemUnitPrice } from '../lib/prices'
 import { warmSealedIndex } from '../lib/sealed'
+import { settings, useSettings } from '../lib/settings'
 import { warmCatalog } from '../lib/tcgcsv'
-import { useSettings } from '../lib/settings'
 import type { Card, Finish } from '../lib/types'
 import { haptic, money } from '../lib/util'
 import { guarded, uiStore, useUi } from '../store/ui'
@@ -32,6 +33,12 @@ function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
   if (foil === false && options.includes('nonfoil')) return 'nonfoil'
   return headlineFinish(hit.card.prices, options)
 }
+
+/** iOS Safari (not installed to Home Screen) forgets camera grants per-visit. */
+const IOS_BROWSER =
+  typeof navigator !== 'undefined' &&
+  /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+  !window.matchMedia('(display-mode: standalone)').matches
 
 /** Collect mode: dedupe rapid re-scans of the same card. */
 const REPEAT_WINDOW_MS = 2500
@@ -164,7 +171,10 @@ export function ScanView({ active }: { active: boolean }) {
   const config = useSettings()
   const collectRef = useRef<CollectQueue | null>(null)
   collectRef.current ??= new CollectQueue()
-  const [started, setStarted] = useState(false)
+  /** Skip the start gate on launches after the camera was approved once. */
+  const [started, setStarted] = useState(() => settings().cameraApproved)
+  /** True only when the user tapped Start this session (vs a silent auto-start). */
+  const manualStartRef = useRef(false)
   /** Cards vs sealed products (packs, boxes, bundles). */
   const [scanMode, setScanMode] = useState<ScanMode>('card')
   /** Manual finish pick on the chip, per identified card. */
@@ -200,6 +210,35 @@ export function ScanView({ active }: { active: boolean }) {
     if (config.gameFilter !== 'auto') warmCatalog(config.gameFilter)
     if (scanMode === 'sealed') warmSealedIndex(config.gameFilter === 'auto' ? undefined : [config.gameFilter])
   }, [visible, config.gameFilter, scanMode])
+
+  /* Camera memory: approving once is enough. If the persisted flag was lost
+   * but the browser still remembers the grant, skip the gate anyway. */
+  useEffect(() => {
+    if (started) return
+    let live = true
+    cameraPermissionState().then((state) => {
+      if (live && state === 'granted') setStarted(true)
+    })
+    return () => {
+      live = false
+    }
+  }, [started])
+
+  useEffect(() => {
+    if (ACTIVE_SCAN_STATUSES.includes(scanner.status) && !config.cameraApproved) {
+      config.set({ cameraApproved: true })
+    }
+    if (scanner.status === 'denied') {
+      if (config.cameraApproved) config.set({ cameraApproved: false })
+      // A silent auto-start the browser refused shouldn't strand the user on
+      // the "Camera blocked" screen — fall back to the normal start gate.
+      if (!manualStartRef.current) {
+        scanner.stop()
+        setStarted(false)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanner.status])
 
   const searchInstead = () => {
     const miss = scanner.miss
@@ -303,6 +342,7 @@ export function ScanView({ active }: { active: boolean }) {
           <button
             className="btn btn--primary btn--big"
             onClick={() => {
+              manualStartRef.current = true
               setStarted(true)
             }}
           >
@@ -310,6 +350,12 @@ export function ScanView({ active }: { active: boolean }) {
           </button>
           <p className="scan__gatehint">
             Everything runs on this device — the card name, its collector number, even foil sheen. No account, no API.
+          </p>
+          <p className="scan__gatehint">
+            You'll be asked for the camera once; after that Cardstock opens it automatically.
+            {IOS_BROWSER
+              ? ' iPhone tip: in Safari tap aA → Website Settings → Camera → Allow (or add Cardstock to your Home Screen) so the permission sticks.'
+              : ''}
           </p>
         </div>
       )}
@@ -337,6 +383,12 @@ export function ScanView({ active }: { active: boolean }) {
           </div>
           <h2>{scanner.status === 'denied' ? 'Camera blocked' : 'Camera unavailable'}</h2>
           <p>{scanner.detail ?? 'Check permissions and try again.'}</p>
+          {scanner.status === 'denied' && IOS_BROWSER && (
+            <p className="scan__gatehint">
+              iPhone: in Safari tap aA → Website Settings → Camera → Allow — or add Cardstock to your Home Screen — and
+              the permission is remembered.
+            </p>
+          )}
           <button
             className="btn btn--primary"
             onClick={() => {
