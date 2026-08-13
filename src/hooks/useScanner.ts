@@ -13,6 +13,12 @@ const STILL_DELAY_SENSING_MS = 360
 const STILL_DELAY_BLIND_MS = 950
 const RETRY_MIN_GAP_MS = 1600
 const RETRY_MAX_GAP_MS = 60_000
+/** Focus gate: capture only near the recent sharpness peak (autofocus hunts
+ * right after motion stops), with a floor for flat scenes and a hard cap so
+ * the gate can never stall the scanner. */
+const FOCUS_RATIO = 0.62
+const FOCUS_FLOOR = 6
+const FOCUS_WAIT_MAX_MS = 1200
 
 interface ApiFailurePolicy {
   waitMs: number
@@ -137,6 +143,8 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   const stillSinceRef = useRef<number | null>(null)
   const lastAttemptRef = useRef(0)
   const failureRef = useRef<FailureState>(freshFailureState())
+  /** Focus tracking: rolling sharpness peak + how long the gate has blocked. */
+  const focusRef = useRef({ max: 0, blockedSince: 0 })
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null)
   const regionStreakRef = useRef(0)
   const senseCtxRef = useRef<CanvasRenderingContext2D | null>(null)
@@ -173,6 +181,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     prevGrayRef.current = null
     regionStreakRef.current = 0
     stillSinceRef.current = null
+    focusRef.current = { max: 0, blockedSince: 0 }
     stopOcr()
     patch({ torchAvailable: false, torchOn: false })
   }, [patch])
@@ -233,6 +242,9 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       return
     }
     prevGrayRef.current = analysis.gray
+    // Decaying peak: after a scene change the old peak fades in a few
+    // seconds, so the gate below always compares against CURRENT conditions.
+    focusRef.current.max = Math.max(analysis.sharpness, focusRef.current.max * 0.985)
     regionStreakRef.current = analysis.region
       ? Math.min(6, regionStreakRef.current + 1)
       : Math.max(0, regionStreakRef.current - 1)
@@ -253,12 +265,23 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
         const failure = failureRef.current
         const minGap = Math.max(RETRY_MIN_GAP_MS, failure.waitMs)
         if (heldLongEnough && failure.autoRetry && now - lastAttemptRef.current > minGap && prev.status !== 'found') {
-          attempt()
+          // Focus gate: phones hunt focus right after motion stops, and a
+          // frame grabbed mid-hunt is smeared before OCR ever sees it. Wait
+          // for sharpness near the rolling peak — briefly: a hard cap keeps
+          // low-texture scenes from stalling the scanner.
+          const focus = focusRef.current
+          const focused = analysis.sharpness >= Math.max(FOCUS_FLOOR, focus.max * FOCUS_RATIO)
+          if (!focused && !focus.blockedSince) focus.blockedSince = now
+          if (focused || now - focus.blockedSince > FOCUS_WAIT_MAX_MS) {
+            focus.blockedSince = 0
+            attempt()
+          }
         } else if (prev.status === 'searching' && sensing) {
           updates.status = 'locking'
         }
       } else {
         stillSinceRef.current = null
+        focusRef.current.blockedSince = 0
         if (prev.status !== 'searching' && analysis.motion > MOTION_STILL * 2.5) {
           updates.status = 'searching'
           updates.hit = prev.status === 'found' && sensing ? prev.hit : null

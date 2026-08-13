@@ -138,12 +138,14 @@ export function createStubs(fixturesDir) {
     const phrases = [...q.matchAll(/name:"([^"]+)"/g)].map((x) => x[1].toLowerCase())
     const prefixes = [...q.matchAll(/name:([^\s"*]+)\*/g)].map((x) => x[1].toLowerCase())
     const numbers = [...q.matchAll(/number:"([^"]+)"/g)].map((x) => x[1].toLowerCase())
+    const printedTotals = [...q.matchAll(/set\.printedTotal:(\d+)/g)].map((x) => Number(x[1]))
     let rows = ptcgioRows.filter((r) => {
       const name = String(r.name ?? '').toLowerCase()
       const words = name.split(/[^a-z0-9]+/)
       if (!phrases.every((p) => name.includes(p))) return false
       if (!prefixes.every((p) => words.some((w) => w.startsWith(p)))) return false
       if (numbers.length && !numbers.some((n) => String(r.number ?? '').toLowerCase() === n)) return false
+      if (printedTotals.length && !printedTotals.some((t) => Number(r.set?.printedTotal) === t)) return false
       return true
     })
     if ((url.searchParams.get('orderBy') ?? '').includes('-set.releaseDate')) {
