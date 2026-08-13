@@ -184,11 +184,12 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     for (const name of fresh) tried.add(name.toLowerCase())
     firstRead ??= fresh[0]
     if (!fresh.length) continue
-    // Queue the collector-line OCR now: the worker sits idle while the name
-    // candidates are out on the network, so the line is usually read "for
-    // free" by the time a match wants it. With a game hint the crop is that
-    // game's exact region; in auto mode the shared bottom strip covers every
-    // game but Yu-Gi-Oh, whose mid-card code refineFromCorner re-reads.
+    // Queue the collector-line OCR now: it runs on the secondary OCR worker
+    // (or on the primary, idle while the name candidates are out on the
+    // network), so the line is usually read "for free" by the time a match
+    // wants it. With a game hint the crop is that game's exact region; in
+    // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
+    // whose mid-card code refineFromCorner re-reads.
     cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
       const best = await bestMatchAcrossGames(name, games, {

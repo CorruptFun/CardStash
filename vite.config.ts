@@ -1,6 +1,49 @@
-import { readFileSync } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+/**
+ * The self-hosted OCR engine: Tesseract's worker, the two LSTM wasm cores
+ * (SIMD + plain — the only ones OEM 1 ever requests; the wasm is embedded in
+ * the .wasm.js, so nothing else is fetched) and the English traineddata
+ * (4.0.0_best_int — the exact variant tesseract.js v6 would pull from its
+ * CDN). Copied from node_modules into `ocr/`: middleware serves them in dev,
+ * builds emit them into dist. They are deliberately EXCLUDED from the
+ * service-worker precache — only devices that actually scan download them,
+ * and sw.js runtime-caches them in its ext cache.
+ */
+const OCR_ASSETS: Record<string, string> = {
+  'worker.min.js': 'tesseract.js/dist/worker.min.js',
+  'core/tesseract-core-lstm.wasm.js': 'tesseract.js-core/tesseract-core-lstm.wasm.js',
+  'core/tesseract-core-simd-lstm.wasm.js': 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js',
+  'eng.traineddata.gz': '@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz',
+}
+
+function ocrAssets(): Plugin {
+  const source = (route: string) => join(process.cwd(), 'node_modules', ...OCR_ASSETS[route].split('/'))
+  return {
+    name: 'cardstock-ocr-assets',
+    generateBundle() {
+      for (const route of Object.keys(OCR_ASSETS)) {
+        this.emitFile({ type: 'asset', fileName: `ocr/${route}`, source: readFileSync(source(route)) })
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use('/ocr', (req, res, next) => {
+        const route = decodeURIComponent((req.url ?? '').replace(/^\//, '').split('?')[0])
+        if (!OCR_ASSETS[route]) return next()
+        res.setHeader('Content-Type', route.endsWith('.js') ? 'text/javascript' : 'application/octet-stream')
+        createReadStream(source(route))
+          .on('error', () => {
+            res.statusCode = 404
+            res.end()
+          })
+          .pipe(res)
+      })
+    },
+  }
+}
 
 /**
  * Emits sw.js from src/sw.js with the build id and precache manifest stamped
@@ -14,7 +57,8 @@ function serviceWorker(): Plugin {
     enforce: 'post',
     generateBundle(_options, bundle) {
       const assets = Object.keys(bundle)
-        .filter((f) => f !== 'sw.js')
+        // ocr/ is the lazily-fetched OCR engine — runtime-cached, never precached.
+        .filter((f) => f !== 'sw.js' && !f.startsWith('ocr/'))
         .map((f) => `./${f}`)
       const precache = [...assets, './index.html', './manifest.webmanifest', './favicon.svg']
         .concat(['./icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png'])
@@ -30,6 +74,6 @@ function serviceWorker(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [react(), serviceWorker()],
+  plugins: [react(), ocrAssets(), serviceWorker()],
   build: { assetsInlineLimit: 0 },
 })

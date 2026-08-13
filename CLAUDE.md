@@ -21,7 +21,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 - `npm run dev` — dev server (use `?demo=1` to seed demo data, `?nosw=1` to skip SW)
 - `npm run build` — `tsc -b` then `vite build` (emits `sw.js` with a stamped
-  precache manifest via the plugin in `vite.config.ts`)
+  precache manifest via the plugin in `vite.config.ts`, and copies the
+  self-hosted OCR engine — Tesseract worker/wasm/eng data from npm — into
+  `dist/ocr/`, which is runtime-cached, never precached)
 - Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
   workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
   fallback only — don't use it when Actions works.

@@ -1,7 +1,8 @@
 /* Cardstock service worker — hand-rolled, three caches:
  *   shell : precached build assets (cache-first, versioned by build id)
  *   img   : card images from the data-source CDNs (stale-while-revalidate, capped)
- *   ext   : the lazily-loaded OCR engine (cache-first, small)
+ *   ext   : the lazily-loaded OCR engine, self-hosted under ocr/ (cache-first;
+ *           deliberately NOT precached so only devices that scan download it)
  * Price/search API calls are never cached — prices must be live.
  */
 
@@ -12,7 +13,9 @@ const SHELL = `cardstock-shell-${BUILD}`;
 // responses are unreadable — no status, no headers, no body length — so
 // whatever slips in is otherwise permanent; bumping the suffix is the cure.
 const IMG = 'cardstock-img-v2';
-const EXT = 'cardstock-ext-v2';
+// v3: the OCR engine moved from third-party CDNs to our own ocr/ directory —
+// the bump drops the orphaned CDN payloads (~10 MB) on activate.
+const EXT = 'cardstock-ext-v3';
 const KEEP = [SHELL, IMG, EXT];
 const PRECACHE = "__PRECACHE_MANIFEST__";
 const IMG_LIMIT = 480;
@@ -143,6 +146,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.origin === location.origin) {
+    // The self-hosted OCR engine (worker/wasm/traineddata under ocr/) is big
+    // and lazily fetched — runtime-cached like the CDN engine it replaces,
+    // and kept out of the precache so non-scanning devices never pay for it.
+    if (url.pathname.includes('/ocr/')) {
+      event.respondWith(cacheFirstExt(req));
+      return;
+    }
     event.respondWith(
       caches
         // ignoreVary: precache entries are stored from SW-made Requests, which
