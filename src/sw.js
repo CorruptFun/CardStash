@@ -23,6 +23,7 @@ const IMG_LIMIT = 480;
 const IMAGE_HOSTS = [
   'cards.scryfall.io',
   'images.pokemontcg.io',
+  'assets.tcgdex.net',
   'images.ygoprodeck.com',
   'tcgplayer-cdn.tcgplayer.com',
   'cards.lorcast.io',

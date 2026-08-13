@@ -193,6 +193,12 @@ export function nameCandidates(lines: string[]): string[] {
       push(cleanOcrLine(`${lines[i]} ${lines[i + 1]}`))
     }
     push(lines[i])
+    // Evolution/type labels share the name's visual row ("BASIC Tauros",
+    // "STAGE 2 Charizard") and OCR merges them — offer the row minus its
+    // short leading token as well. Long first words are left alone so real
+    // two-word names don't shed their first half.
+    const words = lines[i].split(' ')
+    if (words.length >= 2 && words[0].length <= 6) push(cleanOcrLine(words.slice(1).join(' ')))
   }
   return out.slice(0, 6)
 }
