@@ -1,3 +1,4 @@
+import { traceEvent } from './scandebug'
 import type { Game } from './types'
 
 /**
@@ -223,8 +224,12 @@ function candidatesFromText(text: string): string[] {
 export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): Promise<string[]> {
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
+  const started = Date.now()
   const { data } = await worker.recognize(region)
-  return candidatesFromText(String(data?.text ?? ''))
+  const raw = String(data?.text ?? '')
+  const candidates = candidatesFromText(raw)
+  traceEvent('ocr-band', { y: band.y, h: band.h, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
+  return candidates
 }
 
 /**
@@ -236,6 +241,7 @@ export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): P
 export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<string[]> {
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 700)
+  const started = Date.now()
   await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
   let text = ''
   try {
@@ -244,7 +250,9 @@ export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<
   } finally {
     await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
   }
-  return candidatesFromText(text)
+  const candidates = candidatesFromText(text)
+  traceEvent('ocr-anywhere', { ms: Date.now() - started, raw: text.slice(0, 400), candidates })
+  return candidates
 }
 
 /**
@@ -290,8 +298,11 @@ export async function readRegionText(canvas: HTMLCanvasElement, rect: OcrRect): 
   ensureCornerWorker()
   const worker = cornerWorker ?? (await getWorker())
   const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)))
+  const started = Date.now()
   const { data } = await worker.recognize(region)
-  return String(data?.text ?? '')
+  const raw = String(data?.text ?? '')
+  traceEvent('ocr-region', { ...rect, ms: Date.now() - started, raw: raw.slice(0, 200) })
+  return raw
 }
 
 function cleanOcrLine(line: string): string | null {
