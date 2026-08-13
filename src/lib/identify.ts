@@ -508,11 +508,11 @@ async function identifyViaOcr(
       }
       // A bare champion lead cannot tell siblings apart, and `nameScore`
       // forgives the missing epithet by design — which parks EVERY lead-only
-      // read at exactly 0.95, clearing every bar. Riftbound files 65 leads
-      // under more than one epithet ("Ahri - Alluring" vs "Ahri -
-      // Inquisitive", four Teemos, four Viktors), and the epithet shares the
-      // same hard-to-read plate as the name, so a half-read plate is the
-      // COMMON case rather than the rare one. Measured: "Ambessa" off a
+      // read at exactly 0.95, clearing every bar. Measured over the captured
+      // Riftbound catalogue, 48 of its 98 champion leads carry more than one
+      // epithet ("Ahri - Alluring" vs "Ahri - Inquisitive"; Vi carries four),
+      // and the epithet shares the same hard-to-read plate as the name, so a
+      // half-read plate is the COMMON case rather than the rare one. Measured: "Ambessa" off a
       // clipped plate answered "Ambessa - The Wolf" for a "Respected and
       // Feared" card — a confident wrong card, wrong price, auto-collected.
       // Refuse it here and the printed collector line, which CAN separate

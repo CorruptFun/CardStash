@@ -15,8 +15,9 @@ import { bundleImport } from './bundle.mjs'
  * happened to rank first: measured, a clipped plate on "Ambessa - Respected
  * and Feared" came back as "Ambessa - The Wolf" with confidence.
  *
- * The catalogue makes this the common case, not a corner: 65 champion leads
- * carry more than one epithet (four Teemos, four Viktors, two Ahris).
+ * The catalogue makes this the common case, not a corner: of the 98 champion
+ * leads in the captured Riftbound catalogue, 48 carry more than one epithet
+ * (Vi has four; Ahri, Teemo, Jinx and Viktor have three each).
  *
  * These tests pin the mechanism and the guard that stops it.
  */
