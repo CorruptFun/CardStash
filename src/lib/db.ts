@@ -11,11 +11,17 @@ import type {
   DeckBoard,
   DeckCard,
   Finish,
+  Friend,
   Game,
   PricePoint,
+  ProfilePayload,
+  ReplyPayload,
   ScanRecord,
+  TradeRecord,
+  TradeStatus,
 } from './types'
 import { CONDITIONS } from './games'
+import { friendFromProfile, sanitizeFriendRecord, sanitizeTradeRecord, sharedCardToCard } from './social'
 import { uid, ymd } from './util'
 
 class CardstockDB extends Dexie {
@@ -26,6 +32,8 @@ class CardstockDB extends Dexie {
   scans!: Table<ScanRecord, string>
   catalogs!: Table<CatalogCache, Game>
   cache!: Table<KvCacheRow, string>
+  friends!: Table<Friend, string>
+  trades!: Table<TradeRecord, string>
 
   constructor() {
     super('cardstock')
@@ -50,6 +58,11 @@ class CardstockDB extends Dexie {
     this.version(3).stores({ catalogs: 'game' })
     // v4: small keyed caches (TCGplayer group lists for sealed products).
     this.version(4).stores({ cache: 'key' })
+    // v5: social — followed friends (imported binder snapshots) and trades.
+    this.version(5).stores({
+      friends: 'id, addedAt',
+      trades: 'id, friendId, status, createdAt',
+    })
   }
 }
 
@@ -81,6 +94,14 @@ export interface AddOptions {
   note?: string
   /** Sealed products: false = still sealed (the default when card.sealed). */
   opened?: boolean
+  /** Copies of the new row offered for trade. */
+  forTrade?: number
+}
+
+/** Normalize a for-trade count against a row's qty (0 stores as absent). */
+function tradeCount(forTrade: number | undefined, qty: number): number | undefined {
+  const clamped = Math.max(0, Math.min(qty, Math.floor(forTrade ?? 0)))
+  return clamped > 0 ? clamped : undefined
 }
 
 /** Same printing = same set + collector number (YGO reprints share one card id). */
@@ -113,7 +134,13 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
         opts.purchasePrice != null
           ? averagePrice(existing.purchasePrice, existing.qty, opts.purchasePrice, qty)
           : existing.purchasePrice
-      const merged: CollectionItem = { ...existing, qty: existing.qty + qty, purchasePrice, card }
+      const merged: CollectionItem = {
+        ...existing,
+        qty: existing.qty + qty,
+        forTrade: tradeCount((existing.forTrade ?? 0) + (opts.forTrade ?? 0), existing.qty + qty),
+        purchasePrice,
+        card,
+      }
       await db.collection.put(merged)
       return merged
     }
@@ -130,6 +157,7 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
       condition,
       qty,
       opened,
+      forTrade: tradeCount(opts.forTrade, qty),
       purchasePrice: opts.purchasePrice,
       note: opts.note,
       addedAt: Date.now(),
@@ -141,8 +169,24 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
 }
 
 export async function setItemQty(id: string, qty: number): Promise<void> {
-  if (qty <= 0) await db.collection.delete(id)
-  else await db.collection.update(id, { qty })
+  if (qty <= 0) {
+    await db.collection.delete(id)
+    return
+  }
+  await db.transaction('rw', db.collection, async () => {
+    const item = await db.collection.get(id)
+    if (!item) return
+    await db.collection.update(id, { qty, forTrade: tradeCount(item.forTrade, qty) })
+  })
+}
+
+/** Set how many copies of a row are up for trade (clamped to its qty). */
+export async function setItemForTrade(id: string, forTrade: number): Promise<void> {
+  await db.transaction('rw', db.collection, async () => {
+    const item = await db.collection.get(id)
+    if (!item) return
+    await db.collection.update(id, { forTrade: tradeCount(forTrade, item.qty) })
+  })
 }
 
 export async function removeCopies(id: string, count: number): Promise<void> {
@@ -151,7 +195,7 @@ export async function removeCopies(id: string, count: number): Promise<void> {
     if (!item) return
     const left = item.qty - count
     if (left <= 0) await db.collection.delete(id)
-    else await db.collection.update(id, { qty: left })
+    else await db.collection.update(id, { qty: left, forTrade: tradeCount(item.forTrade, left) })
   })
 }
 
@@ -162,12 +206,13 @@ export async function removeCopies(id: string, count: number): Promise<void> {
  */
 export async function updateItem(
   id: string,
-  patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card'>>,
+  patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade'>>,
 ): Promise<CollectionItem | null> {
   return db.transaction('rw', db.collection, async () => {
     const item = await db.collection.get(id)
     if (!item) return null
     const edited: CollectionItem = { ...item, ...patch }
+    edited.forTrade = tradeCount(edited.forTrade, edited.qty)
     const collision = await db.collection
       .where('cardId')
       .equals(item.cardId)
@@ -187,6 +232,7 @@ export async function updateItem(
     const merged: CollectionItem = {
       ...collision,
       qty: collision.qty + edited.qty,
+      forTrade: tradeCount((collision.forTrade ?? 0) + (edited.forTrade ?? 0), collision.qty + edited.qty),
       purchasePrice: averagePrice(collision.purchasePrice, collision.qty, edited.purchasePrice, edited.qty),
       note: edited.note ?? collision.note,
       card: edited.card ?? collision.card,
@@ -200,6 +246,112 @@ export async function updateItem(
 export async function removeItems(ids: string[]): Promise<void> {
   await db.collection.bulkDelete(ids)
 }
+
+/* --- friends & trades (social) ------------------------------------------- */
+
+/** Import/refresh a friend from a profile snapshot; keeps addedAt + sourceUrl. */
+export async function upsertFriendFromProfile(
+  payload: ProfilePayload,
+  sourceUrl?: string,
+): Promise<{ friend: Friend; created: boolean }> {
+  return db.transaction('rw', db.friends, async () => {
+    const existing = await db.friends.get(payload.id)
+    const friend = friendFromProfile(payload, existing, sourceUrl)
+    await db.friends.put(friend)
+    return { friend, created: !existing }
+  })
+}
+
+export async function removeFriend(id: string): Promise<void> {
+  // Trades keep their own copy of the name/cards, so they survive the friend.
+  await db.friends.delete(id)
+}
+
+export async function saveTrade(trade: TradeRecord): Promise<void> {
+  await db.trades.put(trade)
+}
+
+/** Store an incoming proposal; a copy that was already answered stays put. */
+export async function recordIncomingTrade(trade: TradeRecord): Promise<'saved' | 'kept'> {
+  return db.transaction('rw', db.trades, async () => {
+    const existing = await db.trades.get(trade.id)
+    if (existing && existing.status !== 'proposed') return 'kept'
+    await db.trades.put(existing ? { ...trade, createdAt: existing.createdAt } : trade)
+    return 'saved'
+  })
+}
+
+export async function setTradeStatus(id: string, status: TradeStatus): Promise<TradeRecord | null> {
+  return db.transaction('rw', db.trades, async () => {
+    const trade = await db.trades.get(id)
+    if (!trade) return null
+    const next: TradeRecord = { ...trade, status, updatedAt: Date.now() }
+    await db.trades.put(next)
+    return next
+  })
+}
+
+export async function deleteTrade(id: string): Promise<void> {
+  await db.trades.delete(id)
+}
+
+/** Apply a reply link; null when no matching trade exists on this device. */
+export async function applyTradeReply(reply: ReplyPayload): Promise<TradeRecord | null> {
+  return db.transaction('rw', db.trades, async () => {
+    const trade = await db.trades.get(reply.id)
+    if (!trade) return null
+    // A settled trade doesn't reopen because a stale link got tapped twice.
+    if (trade.status === 'completed' || trade.status === 'canceled') return trade
+    const next: TradeRecord = { ...trade, status: reply.status, updatedAt: Date.now() }
+    await db.trades.put(next)
+    return next
+  })
+}
+
+export interface TradeApplyResult {
+  added: number
+  removed: number
+  /** Given copies the collection no longer held (left untouched, not blocked on). */
+  short: number
+}
+
+/**
+ * Book a settled trade into the collection: given copies leave (matching
+ * rows decremented — exact printing and for-trade rows first), received
+ * copies arrive as normal rows. The trade flips to completed.
+ */
+export async function applyTradeToCollection(trade: TradeRecord): Promise<TradeApplyResult> {
+  const result: TradeApplyResult = { added: 0, removed: 0, short: 0 }
+  await db.transaction('rw', db.collection, db.trades, async () => {
+    for (const row of trade.give) {
+      let left = row.qty
+      const candidates = (await db.collection.where('cardId').equals(row.cardId).toArray())
+        .filter((item) => item.finish === row.finish && item.condition === row.condition)
+        .sort(
+          (a, b) =>
+            Number(samePrinting(b, row)) - Number(samePrinting(a, row)) ||
+            (b.forTrade ?? 0) - (a.forTrade ?? 0),
+        )
+      for (const item of candidates) {
+        if (left <= 0) break
+        const take = Math.min(left, item.qty)
+        const qty = item.qty - take
+        if (qty <= 0) await db.collection.delete(item.id)
+        else await db.collection.update(item.id, { qty, forTrade: tradeCount((item.forTrade ?? 0) - take, qty) })
+        left -= take
+        result.removed += take
+      }
+      result.short += left
+    }
+    for (const row of trade.get) {
+      await addToCollection(sharedCardToCard(row), { finish: row.finish, condition: row.condition, qty: row.qty })
+      result.added += row.qty
+    }
+    await db.trades.put({ ...trade, status: 'completed', updatedAt: Date.now(), appliedAt: Date.now() })
+  })
+  return result
+}
+
 
 /* Small keyed cache (TCGplayer group lists etc.). Best-effort: quota noise
  * must never break a lookup, so failures read as cache misses. */
@@ -354,6 +506,8 @@ export interface Backup {
   decks: Deck[]
   deckCards: DeckCard[]
   history: PricePoint[]
+  friends: Friend[]
+  trades: TradeRecord[]
 }
 
 export async function exportBackup(): Promise<Backup> {
@@ -365,6 +519,8 @@ export async function exportBackup(): Promise<Backup> {
     decks: await db.decks.toArray(),
     deckCards: await db.deckCards.toArray(),
     history: await db.history.toArray(),
+    friends: await db.friends.toArray(),
+    trades: await db.trades.toArray(),
   }
 }
 
@@ -405,6 +561,7 @@ export function sanitizeBackup(raw: unknown): Backup {
     const card = entry.card
     if (!id || !cardId || !isRecord(card)) continue
     const qty = Number(entry.qty)
+    const cleanQty = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0
     const addedAt = Number(entry.addedAt)
     const game = GAMES.includes(entry.game as Game) ? (entry.game as Game) : ((card.game as Game) ?? 'mtg')
     collection.push({
@@ -415,8 +572,9 @@ export function sanitizeBackup(raw: unknown): Backup {
       name: asString(entry.name) ?? asString(card.name) ?? 'Unknown card',
       finish: typeof entry.finish === 'string' && entry.finish in FINISH_LABEL ? (entry.finish as Finish) : 'nonfoil',
       condition: CONDITIONS.includes(entry.condition as Condition) ? (entry.condition as Condition) : 'NM',
-      qty: Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0,
+      qty: cleanQty,
       opened: typeof entry.opened === 'boolean' ? entry.opened : undefined,
+      forTrade: tradeCount(asPositive(entry.forTrade), cleanQty),
       purchasePrice: asPositive(entry.purchasePrice),
       addedAt: Number.isFinite(addedAt) && addedAt > 0 ? addedAt : Date.now(),
       card: card as unknown as Card,
@@ -471,6 +629,18 @@ export function sanitizeBackup(raw: unknown): Backup {
     history.push(point)
   }
 
+  const friends: Friend[] = []
+  for (const entry of asArray(raw.friends)) {
+    const friend = sanitizeFriendRecord(entry)
+    if (friend) friends.push(friend)
+  }
+
+  const trades: TradeRecord[] = []
+  for (const entry of asArray(raw.trades)) {
+    const trade = sanitizeTradeRecord(entry)
+    if (trade) trades.push(trade)
+  }
+
   return {
     app: 'cardstock',
     version: 1,
@@ -479,28 +649,38 @@ export function sanitizeBackup(raw: unknown): Backup {
     decks,
     deckCards,
     history,
+    friends,
+    trades,
   }
 }
 
 export async function importBackup(raw: unknown): Promise<void> {
   const backup = sanitizeBackup(raw)
-  await db.transaction('rw', db.collection, db.decks, db.deckCards, db.history, async () => {
+  await db.transaction('rw', [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades], async () => {
     await db.collection.bulkPut(backup.collection)
     await db.decks.bulkPut(backup.decks)
     await db.deckCards.bulkPut(backup.deckCards)
     await db.history.bulkPut(backup.history)
+    await db.friends.bulkPut(backup.friends)
+    await db.trades.bulkPut(backup.trades)
   })
 }
 
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs], async () => {
-    await Promise.all([
-      db.collection.clear(),
-      db.decks.clear(),
-      db.deckCards.clear(),
-      db.history.clear(),
-      db.scans.clear(),
-      db.catalogs.clear(),
-    ])
-  })
+  await db.transaction(
+    'rw',
+    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades],
+    async () => {
+      await Promise.all([
+        db.collection.clear(),
+        db.decks.clear(),
+        db.deckCards.clear(),
+        db.history.clear(),
+        db.scans.clear(),
+        db.catalogs.clear(),
+        db.friends.clear(),
+        db.trades.clear(),
+      ])
+    },
+  )
 }

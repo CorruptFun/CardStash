@@ -27,6 +27,14 @@ export function dateTime(at: number): string {
   })
 }
 
+/** Compact age: "5m", "3h", "12d". */
+export function relativeAge(at: number): string {
+  const ms = Math.max(0, Date.now() - at)
+  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`
+  if (ms < 48 * 3_600_000) return `${Math.round(ms / 3_600_000)}h`
+  return `${Math.round(ms / 86_400_000)}d`
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

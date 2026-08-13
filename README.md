@@ -22,9 +22,16 @@ storage all work from there.
 - **AI builder** — bring a free Gemini key; it researches the current meta with
   live search and proposes decks from your collection, optionally built around
   specific seed cards you pick.
+- **Friends & trades** — mark copies "for trade", share your binder (or whole
+  collection) as a link or file, follow friends' binders the same way (host the
+  file at a stable URL — e.g. a GitHub Gist — and refresh anytime), then
+  propose trades card-by-card with both sides priced; accept/decline travels
+  back as a reply link, and booking a completed trade updates both inventories.
 
 Everything is stored locally (IndexedDB). No accounts, no server — API keys live
-on-device and are sent only to their own services.
+on-device and are sent only to their own services. Social works serverlessly:
+a share link *is* the data (compressed into the URL), so nothing is published
+anywhere unless you send it to someone.
 
 ## Development
 

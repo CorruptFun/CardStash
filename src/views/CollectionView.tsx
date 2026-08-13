@@ -16,6 +16,7 @@ import {
   importBackup,
   removeCopies,
   removeItems,
+  setItemForTrade,
   updateDeck,
 } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
@@ -42,7 +43,7 @@ const HISTORY_DAYS = 32
 const FILTER_DEBOUNCE_MS = 120
 const PRICED_STALE_MS = 48 * 3_600_000
 
-type SortMode = 'value' | 'name' | 'newest' | 'spares'
+type SortMode = 'value' | 'name' | 'newest' | 'spares' | 'trade'
 
 function unitPriceMap(items: CollectionItem[]): Map<string, number> {
   const map = new Map<string, number>()
@@ -60,6 +61,25 @@ function sparesSummary(items: CollectionItem[], units: Map<string, number>) {
     if (item.qty <= 1) continue
     summary.count += item.qty - 1
     summary.value += spareValue(item, units.get(item.id) ?? 0)
+  }
+  return summary
+}
+
+function tradeQty(item: CollectionItem): number {
+  return Math.min(item.qty, item.forTrade ?? 0)
+}
+
+function tradeValue(item: CollectionItem, unit: number): number {
+  return tradeQty(item) * unit
+}
+
+function tradeSummary(items: CollectionItem[], units: Map<string, number>) {
+  const summary = { count: 0, value: 0 }
+  for (const item of items) {
+    const qty = tradeQty(item)
+    if (!qty) continue
+    summary.count += qty
+    summary.value += tradeValue(item, units.get(item.id) ?? 0)
   }
   return summary
 }
@@ -129,10 +149,13 @@ export function CollectionView() {
         (item) => item.name.toLowerCase().includes(needle) || item.setCode?.toLowerCase().includes(needle),
       )
     if (sort === 'spares') rows = rows.filter((item) => item.qty > 1)
+    if (sort === 'trade') rows = rows.filter((item) => tradeQty(item) > 0)
     const sorted = rows === all ? [...rows] : rows
     if (sort === 'value') sorted.sort((a, b) => unitOf(b.id) * b.qty - unitOf(a.id) * a.qty)
     else if (sort === 'spares')
       sorted.sort((a, b) => spareValue(b, unitOf(b.id)) - spareValue(a, unitOf(a.id)) || b.qty - a.qty)
+    else if (sort === 'trade')
+      sorted.sort((a, b) => tradeValue(b, unitOf(b.id)) - tradeValue(a, unitOf(a.id)) || tradeQty(b) - tradeQty(a))
     else if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     else sorted.sort((a, b) => b.addedAt - a.addedAt)
     return sorted
@@ -147,6 +170,7 @@ export function CollectionView() {
     if (gameFilter !== 'all' && items && !ownedGames.includes(gameFilter)) setGameFilter('all')
   }, [gameFilter, items, ownedGames])
   const spares = useMemo(() => sparesSummary(all, units), [all, units])
+  const trades = useMemo(() => tradeSummary(all, units), [all, units])
   const priced = useMemo(() => pricedBadge(all), [all])
   const window = useMemo(() => valueWindow(all, points), [all, points])
 
@@ -185,6 +209,24 @@ export function CollectionView() {
         setSelected((prev) => new Set([...prev].filter((id) => !gone.has(id))))
       }
       toast(bulkQtyToast(direction, rows.length, emptied.length), 'success')
+    }
+  }
+
+  /* Flag every selected row fully for trade — or clear if all are flagged. */
+  const bulkTrade = async () => {
+    const rows = selectedItems.filter((item) => item.opened !== true)
+    if (!rows.length) {
+      toast('Opened products can’t be listed for trade', 'info')
+      return
+    }
+    const allMarked = rows.every((item) => tradeQty(item) === item.qty)
+    const done = await guarded(async () => {
+      for (const item of rows) await setItemForTrade(item.id, allMarked ? 0 : item.qty)
+      return true
+    }, 'Mark for trade')
+    if (done) {
+      const noun = rows.length === 1 ? 'row' : 'rows'
+      toast(allMarked ? `Cleared the trade flag on ${rows.length} ${noun}` : `Marked ${rows.length} ${noun} for trade`, 'success')
     }
   }
 
@@ -298,6 +340,7 @@ export function CollectionView() {
                 condition: csvRow.condition,
                 qty: csvRow.qty,
                 purchasePrice: csvRow.purchasePrice,
+                forTrade: csvRow.forTrade,
               }),
             'Import',
           )
@@ -471,6 +514,7 @@ export function CollectionView() {
           <option value="name">By name</option>
           <option value="newest">Newest</option>
           <option value="spares">Spares</option>
+          <option value="trade">For trade</option>
         </select>
         <button
           className={`btn btn--ghost btn--sm ${editMode ? 'btn--on' : ''}`}
@@ -492,6 +536,14 @@ export function CollectionView() {
           {spares.count} SPARES · {money(spares.value)}
         </div>
       )}
+      {sort === 'trade' && trades.count > 0 && (
+        <div className="sparesline">
+          {trades.count} FOR TRADE · {money(trades.value)} ·{' '}
+          <a className="sparesline__link" href="#/friends">
+            share binder
+          </a>
+        </div>
+      )}
       {items && shown.length === 0 && (
         <Empty
           icon="search"
@@ -501,7 +553,9 @@ export function CollectionView() {
               ? `Nothing in the collection matches “${filter.trim()}”.`
               : sort === 'spares'
                 ? 'No duplicates yet — spares are the copies past the first of each row.'
-                : 'No cards in that game yet.'
+                : sort === 'trade'
+                  ? 'Nothing marked for trade yet — select rows and tap Trade, or set a For-trade count on a card’s copies.'
+                  : 'No cards in that game yet.'
           }
         />
       )}
@@ -540,6 +594,14 @@ export function CollectionView() {
               <Icon name="plus" size={16} />
             </button>
           </span>
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() => {
+              bulkTrade()
+            }}
+          >
+            <Icon name="swap" size={15} /> Trade
+          </button>
           <button className="btn btn--ghost btn--sm" onClick={() => setDeckPickOpen(true)}>
             <Icon name="decks" size={15} /> Deck
           </button>
@@ -609,6 +671,12 @@ const CollectionCell = memo(function CollectionCell({
     <button className={`cardcell ${selected ? 'cardcell--selected' : ''}`} onClick={() => onPick(item)}>
       <CardImg card={item.card} />
       {item.qty > 1 && <span className="cardcell__qty">×{item.qty}</span>}
+      {tradeQty(item) > 0 && (
+        <span className="cardcell__trade">
+          <Icon name="swap" size={11} />
+          {tradeQty(item) < item.qty ? ` ${tradeQty(item)}` : ''}
+        </span>
+      )}
       {item.finish !== 'nonfoil' && <span className="cardcell__finish">{FINISH_LABEL[item.finish]}</span>}
       <span className="cardcell__price">{money(unit * item.qty)}</span>
       <span className="cardcell__name">{item.name}</span>
