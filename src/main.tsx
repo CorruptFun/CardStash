@@ -66,19 +66,21 @@ async function boot(): Promise<void> {
   if (params.get('demo') === '1' && !(await hasAnyData().catch(() => true))) {
     await seedDemoData().catch(() => {})
   }
+  // Both ahead of the first render: error hooks so a crash on mount is
+  // recorded rather than missed, the session so the screen view React fires
+  // on mount lands inside one. The flusher stays last, so a session_end is
+  // written before the flush that the same visibility change triggers.
+  installErrorHooks()
+  installSessionTracking(async () => {
+    const [cards, decks, friends] = await Promise.all([db.collection.count(), db.decks.count(), db.friends.count()])
+    return { cards, decks, friends, games: settings().enabledGames.length }
+  })
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />
     </StrictMode>,
   )
   pruneHistory().catch(() => {})
-  installErrorHooks()
-  // Before the flusher, so a session_end is written ahead of the flush that
-  // the same visibility change triggers.
-  installSessionTracking(async () => {
-    const [cards, decks, friends] = await Promise.all([db.collection.count(), db.decks.count(), db.friends.count()])
-    return { cards, decks, friends, games: settings().enabledGames.length }
-  })
   installTelemetryFlusher()
   startSyncLoop()
   if ('serviceWorker' in navigator && params.get('nosw') !== '1') {

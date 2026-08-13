@@ -141,20 +141,6 @@ function fnv1a(text: string): string {
   return hash.toString(16).padStart(8, '0')
 }
 
-/* Sessions: one visit's worth of events, so opens, screens and scans can be
- * counted per person rather than per event. */
-
-const DAY_MS = 86_400_000
-/** Foreground gap that ends a visit — glancing at another app doesn't. */
-const SESSION_GAP_MS = 30 * 60_000
-
-let sessionId = ''
-let sessionStartedAt = 0
-let sessionScreens = 0
-let sessionScans = 0
-let sessionOpen = false
-let hiddenAt = 0
-
 /**
  * Grouping key for text the scanner read — a hash, never the text. Repeat
  * failures of one card collapse into a single bucket, so "this card fails
@@ -169,6 +155,20 @@ export function hashToken(text: string): string {
     .replace(/[^a-z0-9]+/g, '')
   return normal ? fnv1a(normal) : ''
 }
+
+/* Sessions: one visit's worth of events, so opens, screens and scans can be
+ * counted per person rather than per event. */
+
+const DAY_MS = 86_400_000
+/** Foreground gap that ends a visit — glancing at another app doesn't. */
+const SESSION_GAP_MS = 30 * 60_000
+
+let sessionId = ''
+let sessionStartedAt = 0
+let sessionScreens = 0
+let sessionScans = 0
+let sessionOpen = false
+let hiddenAt = 0
 
 let queue: Promise<void> = Promise.resolve()
 
@@ -363,7 +363,9 @@ async function openSession(kind: 'boot' | 'resume', loadCohort?: () => Promise<C
   hiddenAt = 0
   const [identity, cohort] = await Promise.all([
     bumpIdentity().catch(() => null),
-    (loadCohort?.() ?? Promise.resolve({})).catch(() => ({}) as Cohort),
+    Promise.resolve()
+      .then(() => loadCohort?.() ?? {})
+      .catch(() => ({}) as Cohort),
   ])
   track('app_open', {
     ...describeDevice(typeof navigator === 'undefined' ? {} : navigator, typeof window === 'undefined' ? {} : window),
@@ -376,6 +378,11 @@ async function openSession(kind: 'boot' | 'resume', loadCohort?: () => Promise<C
     returning: (identity?.sessions ?? 1) > 1,
     sw: typeof navigator !== 'undefined' && !!navigator.serviceWorker?.controller,
   })
+}
+
+/** Diagnostics must never take the app down with them. */
+function beginSession(kind: 'boot' | 'resume', loadCohort?: () => Promise<Cohort>): void {
+  openSession(kind, loadCohort).catch(() => {})
 }
 
 function closeSession(): void {
@@ -405,7 +412,7 @@ let sessionInstalled = false
 export function installSessionTracking(loadCohort?: () => Promise<Cohort>): void {
   if (sessionInstalled || typeof window === 'undefined') return
   sessionInstalled = true
-  openSession('boot', loadCohort)
+  beginSession('boot', loadCohort)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       closeSession()
@@ -414,7 +421,7 @@ export function installSessionTracking(loadCohort?: () => Promise<Cohort>): void
     // Never hidden yet — nothing to resume.
     if (!hiddenAt) return
     if (Date.now() - hiddenAt > SESSION_GAP_MS) {
-      openSession('resume', loadCohort)
+      beginSession('resume', loadCohort)
       return
     }
     // Same visit continuing: only foreground time is counted towards it.
@@ -480,7 +487,7 @@ function countByType(events: AnalyticsEvent[]): Record<EventType, number> {
 
 export interface FailureStats {
   total: number
-  /** Where the pipeline gave up: no-text, no-match, api, repeat. */
+  /** Where the pipeline gave up: no-text, no-match, api. */
   byStage: Record<string, number>
   byGame: Record<string, number>
   /** Repeat offenders, hashed, most-failed first. */

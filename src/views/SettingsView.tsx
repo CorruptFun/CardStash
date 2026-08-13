@@ -392,16 +392,15 @@ export function SettingsView() {
             </div>
             {Object.entries(stats.usage.screens)
               .sort((a, b) => b[1] - a[1])
-              .map(([screen, count]) => {
-                const seen = Object.values(stats.usage.screens).reduce((sum, n) => sum + n, 0)
-                return (
-                  <div key={screen} className="diag__row">
-                    <span className="diag__cell">{SCREEN_LABEL[screen] ?? screen}</span>
-                    <span className="num">{count}</span>
-                    <span className="num num--quiet">{Math.round((count / Math.max(1, seen)) * 100)}%</span>
-                  </div>
-                )
-              })}
+              .map(([screen, count]) => (
+                <div key={screen} className="diag__row">
+                  <span className="diag__cell">{SCREEN_LABEL[screen] ?? screen}</span>
+                  <span className="num">{count}</span>
+                  <span className="num num--quiet">
+                    {Math.round((count / Math.max(1, stats.counts.screen_view)) * 100)}%
+                  </span>
+                </div>
+              ))}
           </div>
         )}
         {stats && stats.total === 0 && (
