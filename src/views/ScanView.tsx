@@ -211,6 +211,17 @@ export function ScanView({ active }: { active: boolean }) {
     if (visible) warmOcr()
   }, [visible])
 
+  /* The scanner lit the torch itself (sustained dark scene) — say so, once
+   * per lighting, so the sudden light isn't a mystery. */
+  const autoTorchAnnounced = useRef(false)
+  useEffect(() => {
+    if (scanner.autoTorch && !autoTorchAnnounced.current) {
+      autoTorchAnnounced.current = true
+      toast('Dark scene — flash is on (tap ⚡ to turn it off)', 'info')
+    }
+    if (!scanner.autoTorch) autoTorchAnnounced.current = false
+  }, [scanner.autoTorch, toast])
+
   // The game filter names intent: preload that game's catalog (Riftbound &
   // co. have no search API, so the first match otherwise downloads it all),
   // and in pack mode the set indexes sealed scans match against.
@@ -275,8 +286,11 @@ export function ScanView({ active }: { active: boolean }) {
     (scanner.status === 'paused' && scanner.needsResume)
   // One voice: while the chip is up (thinking/found/nomatch) it does the
   // talking — the reticle hint only fills the chip-less states.
-  const hint =
-    scanner.status === 'locking' || scanner.sensing
+  const hint = scanner.lowLight
+    ? scanner.torchAvailable && !scanner.torchOn
+      ? 'Dark — tap the flash'
+      : 'Dark — more light helps'
+    : scanner.status === 'locking' || scanner.sensing
       ? 'Hold steady…'
       : scanMode === 'sealed'
         ? 'Fill the frame with the pack or box front'

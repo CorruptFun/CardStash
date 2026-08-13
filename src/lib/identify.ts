@@ -3,7 +3,7 @@ import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
 import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
+import { nameBands, ocrTimeouts, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon, pokemonByCollector } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
@@ -235,6 +235,11 @@ async function identifyViaOcr(
   // The reticle crop is a fixed window; the card in it is regularly smaller,
   // off-center or slightly rolled. Tighten to the detected card and deskew
   // before any OCR — every band below assumes card-relative geometry.
+  // (No global pre-lift for dark frames: the OCR prep's per-tile stretch is
+  // already a local exposure adaptation, and pre-amplifying defeats its
+  // flat-tile noise guard — measured as a net loss on the matrix. Dark
+  // frames are instead handled inside detection and at the camera.)
+  const darkFrame = frameLuma(frame) < DARK_FRAME_LUMA
   const refined = refineCardCrop(frame)
   const canvas = refined.canvas
   traceEvent('crop', {
@@ -270,6 +275,13 @@ async function identifyViaOcr(
   let slowLookupsLeft = 4
   const lookupDeadline = Date.now() + 20_000
   const SLOW_LOOKUP_MS = 1_500
+  // OCR escalation budget: two watchdog kills, or 18s of attempt, means this
+  // frame's texture is pathological — more band passes won't read it, they
+  // only stretch "Identifying…". Remaining OCR is skipped; the (small,
+  // bounded) collector-line path still gets its chance.
+  const timeoutsAtStart = ocrTimeouts()
+  const attemptStarted = Date.now()
+  const outOfOcrRoad = () => ocrTimeouts() - timeoutsAtStart >= 2 || Date.now() - attemptStarted > 18_000
 
   /** Candidates not yet consumed by a lookup; remember the first plausible read. */
   const freshOf = (names: string[]): string[] => {
@@ -349,6 +361,7 @@ async function identifyViaOcr(
   // in the first band skips the rest of the work entirely.
   for (const band of nameBands(gameHint)) {
     bail()
+    if (outOfOcrRoad()) break
     let names: string[]
     try {
       names = await readCardNames(canvas, band)
@@ -365,8 +378,15 @@ async function identifyViaOcr(
   // binarized at higher resolution — in both polarities, since ornate glyph
   // faces routinely defeat the mean-luma polarity heuristic. A different
   // failure surface, so it regularly cracks what the first pass mangled.
-  for (const variant of ['binary', 'binary-flip'] as const) {
+  // On a genuinely dark frame that has produced NO plausible text at all,
+  // one binarized retry is the last realistic chance — the flip and the
+  // whole-card sweep never rescue pure noise, they just grind for seconds
+  // while the user watches "Identifying…". Fail fast toward the actionable
+  // fix (light) instead.
+  const bandVariants = darkFrame && !firstRead ? (['binary'] as const) : (['binary', 'binary-flip'] as const)
+  for (const variant of bandVariants) {
     bail()
+    if (outOfOcrRoad()) break
     try {
       const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })))
       if (hit) return hit
@@ -379,13 +399,15 @@ async function identifyViaOcr(
   // The bands assume a standard frame, but promos, full-art specials and
   // custom cards put names in unexpected places. Before giving up, sweep the
   // whole card once with automatic layout detection and mine every line.
-  bail()
-  try {
-    const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
-    if (hit) return hit
-  } catch (err) {
-    if (isAbort(err)) throw err
-    /* the band sweep's verdict below stands */
+  if (!(darkFrame && !firstRead) && !outOfOcrRoad()) {
+    bail()
+    try {
+      const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
+      if (hit) return hit
+    } catch (err) {
+      if (isAbort(err)) throw err
+      /* the band sweep's verdict below stands */
+    }
   }
 
   // Name reading is out of road (ornate faces, foil sheen over the title).
@@ -431,10 +453,34 @@ async function identifyViaOcr(
   return {
     ok: false,
     reason: 'ocr-miss',
-    message: firstRead ? `Read “${firstRead}” but couldn’t match it` : 'Couldn’t read the card name — more light helps',
+    message: firstRead
+      ? `Read “${firstRead}” but couldn’t match it`
+      : darkFrame
+        ? 'Too dark to read — add light or turn on the flash'
+        : 'Couldn’t read the card name — more light helps',
     readName: firstRead,
   }
 }
+
+/** Mean luma of a capture, sampled small. */
+function frameLuma(canvas: HTMLCanvasElement): number {
+  try {
+    const probe = document.createElement('canvas')
+    probe.width = 32
+    probe.height = 32
+    const ctx = probe.getContext('2d', { willReadFrequently: true })!
+    ctx.drawImage(canvas, 0, 0, 32, 32)
+    const data = ctx.getImageData(0, 0, 32, 32).data
+    let sum = 0
+    for (let i = 0; i < data.length; i += 4) sum += (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+    return sum / (data.length / 4)
+  } catch {
+    return 255
+  }
+}
+
+/** Under this mean luma the frame counts as dark for the fail-fast path. */
+const DARK_FRAME_LUMA = 55
 
 function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false

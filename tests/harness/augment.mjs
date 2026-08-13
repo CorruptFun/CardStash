@@ -217,5 +217,12 @@ export const DEGRADATIONS = {
   perspective: { tilt: 0.13, fill: 0.88 },
   glare: { glare: 1 },
   lowlight: { brightness: 0.42, noise: 7 },
+  // Real phone low light is far harsher than 'lowlight': an evening room
+  // ('dim') and a genuinely dark table ('dark' — sensor gain noise plus the
+  // softness of a slow shutter). Kept OUT of the standard battery totals so
+  // per-game regression gates stay comparable across reports; run them via
+  // --degradations=dim,dark (or lowlight,dim,dark for the low-light suite).
+  dim: { brightness: 0.26, noise: 10, downscale: 0.85 },
+  dark: { brightness: 0.15, noise: 15, blurPx: 0.7, downscale: 0.75 },
   worst: { fill: 0.62, dx: 0.05, rotate: 3, downscale: 0.65, blurPx: 0.8, glare: 0.55, brightness: 0.55, noise: 5 },
 }
