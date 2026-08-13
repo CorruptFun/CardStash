@@ -4,11 +4,11 @@ import { App } from './App'
 import { installErrorHooks, installTelemetryFlusher } from './lib/analytics'
 import { requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
+import { APP_VERSION } from './lib/version'
 import { uiStore } from './store/ui'
 import './fonts.css'
 import './styles.css'
 
-const APP_VERSION = '0.4.0'
 const params = new URLSearchParams(location.search)
 
 /* Service-worker update flow: new worker waits; a toast offers the restart. */
