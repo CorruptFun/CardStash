@@ -110,7 +110,16 @@ result seems absurd, check this list before writing code.
     policy-blocked; CI runners have open egress — hence fetch-in-CI +
     data-branch. npm/registry traffic bypasses the proxy. Probe with curl
     before assuming.
-15. **Real failure messages are the user's diagnostic.** "Read “X” but
+15. **A verification pass takes ~5 minutes; `main` can move in that time.**
+    Another session shipped 0.8.0→0.10.0 (and refactored the version into
+    `src/lib/version.ts`) while the low-light matrix runs were going. Always
+    `git fetch origin main` before merging, expect version files to be the
+    conflict, take the NEWER structure rather than reasserting yours, and
+    re-run the full gate on the merged tree — the merge is a new tree, and
+    the rule is about trees, not diffs. (Their work touched no pipeline
+    file, which the diff confirmed in seconds; check that before assuming a
+    re-baseline is needed.)
+16. **Real failure messages are the user's diagnostic.** "Read “X” but
     couldn't match it" = match layer (trace shows scores); "Couldn't read
     the card name" = OCR + corner both empty. Keep messages honest about
     which stage gave up — the eye-icon trace panel depends on it.
