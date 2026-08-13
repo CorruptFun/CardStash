@@ -62,9 +62,11 @@ class CollectQueue {
   }
 
   private async add(card: Card, finish: Finish): Promise<void> {
-    this.recent = { cardId: card.id, at: Date.now() }
     const item = await guarded(() => addToCollection(card, { finish }), 'Add')
     if (!item) return
+    // Marked only AFTER the write lands — a quota failure must not make the
+    // retry read as "repeat" and get skipped.
+    this.recent = { cardId: card.id, at: Date.now() }
     track('card_added', { game: card.game, source: 'scan' })
     // Price the copy that was actually filed (finish-specific).
     const probe = { finish, condition: 'NM' as const, qty: 1, card }
@@ -140,14 +142,6 @@ function ScanChip({
       <div className="chip chip--thinking">
         <span className="chip__spinner" />
         <span className="chip__label">Identifying…</span>
-      </div>
-    )
-  }
-  if (status === 'locking') {
-    return (
-      <div className="chip chip--locking">
-        <span className="chip__dot" />
-        <span className="chip__label">Hold steady</span>
       </div>
     )
   }

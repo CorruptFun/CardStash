@@ -19,6 +19,9 @@ let primaryPromise: Promise<any> | null = null
 let cornerPromise: Promise<any | null> | null = null
 /** The resolved secondary — corner reads use it the moment it's ready. */
 let cornerWorker: any | null = null
+/** Bumped by stopOcr so an in-flight secondary spawn can't resurrect a
+ * terminated worker into the module slots. */
+let generation = 0
 
 async function spawnWorker(): Promise<any> {
   // The prebuilt ESM bundle's only export is `default` (the namespace).
@@ -53,9 +56,15 @@ function getWorker(): Promise<any> {
  * spawn failed, corner reads share the primary worker.
  */
 function ensureCornerWorker(): void {
+  const spawnedIn = generation
   cornerPromise ??= getWorker()
     .then(() => spawnWorker())
     .then((worker) => {
+      if (spawnedIn !== generation) {
+        // stopOcr ran while this spawned — don't resurrect into the slots.
+        worker.terminate().catch(() => {})
+        return null
+      }
       cornerWorker = worker
       return worker
     })
@@ -502,6 +511,7 @@ function cleanOcrLine(line: string): string | null {
 }
 
 export async function stopOcr(): Promise<void> {
+  generation++
   const pending = [primaryPromise, cornerPromise]
   primaryPromise = null
   cornerPromise = null

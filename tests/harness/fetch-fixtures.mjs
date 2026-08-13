@@ -456,17 +456,37 @@ async function yugioh() {
   console.log('\nYu-Gi-Oh (YGOPRODeck)…')
   const NAMES = ['Blue-Eyes White Dragon', 'Dark Magician', 'Ash Blossom & Joyous Spring']
   const rows = []
+  const seen = new Set()
+  const push = (raw) => {
+    if (raw && !seen.has(raw.id)) {
+      seen.add(raw.id)
+      rows.push(trimYgo(raw))
+    }
+  }
+  const named = []
   for (const name of NAMES) {
     try {
       const res = await fetchRetry(`${YGO}/cardinfo.php?name=${encodeURIComponent(name)}`)
-      const raw = res?.data?.[0]
-      if (raw) rows.push(trimYgo(raw))
-      else fail(`yugioh/${name}`, 'no data')
+      if (res?.data?.[0]) {
+        push(res.data[0])
+        named.push(trimYgo(res.data[0]))
+      } else fail(`yugioh/${name}`, 'no data')
     } catch (err) {
       fail(`yugioh/${name}`, err)
     }
   }
-  for (const raw of rows) {
+  // A stub universe of 3 cards flatters substring retrieval — capture the
+  // realistic fname pools the app's longest-word fallback would face.
+  for (const word of ['dragon', 'magician', 'blossom']) {
+    try {
+      const res = await fetchRetry(`${YGO}/cardinfo.php?fname=${encodeURIComponent(word)}&num=60&offset=0`)
+      for (const raw of res?.data ?? []) push(raw)
+      console.log(`  fname pool “${word}”: ${res?.data?.length ?? 0} rows`)
+    } catch (err) {
+      fail(`yugioh/pool-${word}`, err)
+    }
+  }
+  for (const raw of named) {
     const key = norm(raw.name).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24)
     const url = raw.card_images?.[0]?.image_url
     if (!url) {
