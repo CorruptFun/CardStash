@@ -19,8 +19,15 @@ Real card photographs + the REAL `identifyFrame()` pipeline in headless
 Chromium, graded against ground truth, with per-stage failure attribution.
 Built and battle-tested in the v0.7.0 overhaul that took the matrix from 36%
 to 67% (Pokémon 3%→32%, Riftbound 48%→74%, One Piece 39%→100%, MTG 73%→88%,
-YGO 31%→81%). Everything below exists because synthetic tests passed while
+YGO 31%→81%), then extended in v0.7.1 for harsh low light (dark scenes
+6/21 → 17/21). Everything below exists because synthetic tests passed while
 real cards failed on-device — only real imagery finds these bugs.
+
+Two paths the matrix CANNOT reach, so they have their own checks: the
+camera itself (`npm run test:capture` drives the real stacked capture
+against a live video element) and the built bundle
+(`node tests/harness/smoke-app.mjs`). Anything you change in `camera.ts` or
+the scan screen needs those, not just the matrix.
 
 ## Quick commands
 
@@ -33,8 +40,10 @@ git fetch origin harness-fixtures
 mkdir -p tests/harness/fixtures
 git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
 
-npm run test:unit          # 28 node tests: corner parsing, candidates, stubs
+npm run test:unit          # node tests: corner parsing, candidates, stubs
 npm run test:scan          # full matrix (~5 min, 228 cells, 3 pages)
+npm run test:lowlight      # harsh low light (lowlight/dim/dark) + 3-frame stack
+npm run test:capture       # real captureFrameStacked in a browser (noise ↓)
 node tests/harness/run-matrix.mjs \
   --games=pokemon,riftbound --degradations=clean,glare --mode=hinted \
   --keys=tauros-fa-secret --pages=3 --verbose          # fast slice (~1 min)
@@ -78,6 +87,12 @@ keep `baseline.json` from before your change to gate against.
    fan out reviewer subagents per lens (pipeline correctness, phone
    perf/battery, UI, harness integrity) and have separate agents try to
    REFUTE each finding against the working tree before acting on it.
+   **Reproduce every verdict twice.** Marginal cells flap ±1–2 between
+   identical runs, so a single run cannot tell a real regression from noise
+   — but don't hide behind that either: track the specific cell across runs
+   (`node -e` over the reports) and if it flipped the same way every time
+   after your change, it IS your change. That check is what separated a
+   genuine auto-mode tradeoff from noise in the low-light round.
 6. **Suspect the harness too.** Several "pipeline bugs" were fixture/stub
    artifacts (see `references/lessons.md`). When a failure makes no sense,
    verify the stub answered what the real API would, and LOOK at the actual
@@ -110,5 +125,15 @@ keep `baseline.json` from before your change to gate against.
   BEFORE changing any constant in identify.ts/ocr.ts/useScanner.ts.
 - `references/lessons.md` — the war stories as transferable rules: fixture
   artifacts that masqueraded as pipeline bugs, the tolerance→wrong-card
-  seesaw, why corner-first demands a printed slash, and more. Read when a
-  result seems absurd — the explanation is probably in there.
+  seesaw, why corner-first demands a printed slash, why pre-amplifying dark
+  frames backfires, and more. Read when a result seems absurd — the
+  explanation is probably in there.
+
+## Cost asymmetry worth remembering
+
+Auto mode fans out across four games in one shared budget, so a per-game
+recovery retry there taxes every other game's wait — the same retry is
+cheap when the user has committed to one game via the scan filter. That's
+what `ApiKeys.thorough` expresses (set only when `games.length === 1`).
+When adding any retry to a matcher, ask which mode pays for it: the
+low-light round both lost and regained a cell learning this.

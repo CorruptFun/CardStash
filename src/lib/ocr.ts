@@ -50,6 +50,52 @@ function getWorker(): Promise<any> {
   return primaryPromise
 }
 
+/** No single recognition may run away: amplified sensor noise makes
+ * Tesseract dwell for MINUTES on speckle it keeps trying to segment.
+ * Calibrated above the SUCCESSFUL noisy reads (measured at 4.5–5s on dark
+ * frames) and far below the runaway ones (20–60s). */
+const RECOGNIZE_TIMEOUT_MS = 6_500
+const RECOGNIZE_TIMEOUT_WIDE_MS = 8_000
+
+let ocrTimeoutCount = 0
+/** Monotonic count of watchdog kills — attempts snapshot it to notice when
+ * the current frame keeps producing pathological OCR input. */
+export const ocrTimeouts = (): number => ocrTimeoutCount
+
+/**
+ * Recognize with a hard timeout. On expiry the worker is terminated (the
+ * only way to interrupt the wasm) and its slot cleared so the next read
+ * respawns fresh from cache; the pass reports empty text — for the inputs
+ * that trigger this, that IS the honest reading.
+ */
+async function recognizeBounded(worker: any, image: HTMLCanvasElement, timeoutMs: number): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs)
+  })
+  try {
+    const result = await Promise.race([worker.recognize(image), timedOut])
+    if (result === 'timeout') {
+      ocrTimeoutCount++
+      traceEvent('ocr-timeout', { ms: timeoutMs })
+      try {
+        await worker.terminate()
+      } catch {
+        /* already dying */
+      }
+      if ((await primaryPromise?.catch(() => null)) === worker) primaryPromise = null
+      if (cornerWorker === worker) {
+        cornerWorker = null
+        cornerPromise = null
+      }
+      return ''
+    }
+    return String((result as any)?.data?.text ?? '')
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * Start the secondary worker once the primary is up (its assets then come
  * straight from cache). Purely an optimization: while it's missing or its
@@ -247,6 +293,41 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
     }
   }
 
+  // Amplified sensor noise reads as dense salt-and-pepper after the
+  // stretch — the exact texture Tesseract dwells on for tens of seconds
+  // trying to segment. When a DARK crop measures as speckle (a large share
+  // of strong pixel-to-pixel jumps — printed text is structured, never
+  // this), damp it with a small box blur AFTER amplification. The dark
+  // requirement matters: bright glare texture also jumps, but blurring it
+  // measurably cost legible reads, while dark-noise speckle only ever cost
+  // time.
+  if (lumaSum / pixels < 96) {
+    let jumps = 0
+    let samples = 0
+    for (let p = 0; p < pixels - 1; p += 3) {
+      if (p % width === width - 1) continue
+      if (Math.abs(values[p] - values[p + 1]) > 96) jumps++
+      samples++
+    }
+    if (samples && jumps / samples > 0.38) {
+      const blurred = new Uint8ClampedArray(pixels)
+      for (let y = 0; y < height; y++) {
+        const up = Math.max(0, y - 1) * width
+        const row = y * width
+        const down = Math.min(height - 1, y + 1) * width
+        for (let x = 0; x < width; x++) {
+          const l = Math.max(0, x - 1)
+          const r = Math.min(width - 1, x + 1)
+          blurred[row + x] =
+            (values[up + l] + values[up + x] + values[up + r] +
+              values[row + l] + values[row + x] + values[row + r] +
+              values[down + l] + values[down + x] + values[down + r]) / 9
+        }
+      }
+      values.set(blurred)
+    }
+  }
+
   if (variant === 'binary' || variant === 'binary-flip') {
     // Otsu threshold over the normalized values → pure ink on paper.
     const hist = new Uint32Array(256)
@@ -406,8 +487,7 @@ export async function readCardNames(
   // edges, and the extra pixels are what let it crack stylized type.
   const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'normal' ? OCR_WIDTH : 960, variant)
   const started = Date.now()
-  const { data } = await worker.recognize(region)
-  const raw = String(data?.text ?? '')
+  const raw = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_MS)
   const candidates = candidatesFromText(raw)
   traceEvent('ocr-band', { y: band.y, h: band.h, variant, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
   return candidates
@@ -426,8 +506,7 @@ export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<
   await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
   let text = ''
   try {
-    const { data } = await worker.recognize(region)
-    text = String(data?.text ?? '')
+    text = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
   } finally {
     await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
   }
@@ -447,8 +526,7 @@ export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string
   await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
   let text = ''
   try {
-    const { data } = await worker.recognize(region)
-    text = String(data?.text ?? '')
+    text = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
   } finally {
     await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
   }
@@ -485,8 +563,7 @@ export async function readRegionText(
   const variant = opts.variant ?? 'normal'
   const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)), variant)
   const started = Date.now()
-  const { data } = await worker.recognize(region)
-  const raw = String(data?.text ?? '')
+  const raw = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_MS)
   traceEvent('ocr-region', { ...rect, variant, ms: Date.now() - started, raw: raw.slice(0, 200) })
   return raw
 }

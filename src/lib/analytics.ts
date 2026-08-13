@@ -289,7 +289,7 @@ const KEEPALIVE_BYTES = 60_000
 const FLUSH_MIN_GAP_MS = 30_000
 let flushing = false
 
-const APP_VERSION = '0.7.0'
+const APP_VERSION = '0.7.1'
 
 function payload(events: AnalyticsEvent[], device: string) {
   return {

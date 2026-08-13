@@ -9,7 +9,7 @@ import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
 import { useUi } from '../store/ui'
 
-const APP_VERSION = '0.7.0'
+const APP_VERSION = '0.7.1'
 const INSIGHT_DAYS = 30
 
 const ENGINE_LABEL: Record<string, string> = {

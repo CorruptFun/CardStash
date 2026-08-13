@@ -150,6 +150,27 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
     ctx.drawImage(source, 0, 0, sw, sh)
     const image = ctx.getImageData(0, 0, sw, sh)
     const gray = grayscale(image)
+    // The Sobel magnitude thresholds below are calibrated for a normally-lit
+    // frame. In low light real card edges fall under them while the vignette
+    // and noise survive — which is how dark frames got cropped INTO the
+    // card. Stretch a low-contrast buffer to full range first (the 192px
+    // downscale has already averaged away most sensor noise, so this
+    // amplifies edges, not speckle).
+    {
+      const histogram = new Uint32Array(256)
+      for (let i = 0; i < gray.length; i++) histogram[gray[i]]++
+      const clip = gray.length * 0.02
+      let lo = 0
+      for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
+      let hi = 255
+      for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
+      if (hi - lo < 110 && hi > lo) {
+        const span = hi - lo
+        for (let i = 0; i < gray.length; i++) {
+          gray[i] = Math.max(0, Math.min(255, Math.round(((gray[i] - lo) * 255) / span)))
+        }
+      }
+    }
 
     const colEdges = new Float64Array(sw)
     const rowEdges = new Float64Array(sh)

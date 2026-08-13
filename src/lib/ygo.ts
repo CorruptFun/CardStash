@@ -110,7 +110,7 @@ export async function searchYgo(query: string, signal?: AbortSignal): Promise<Ca
   return (await runSearch(query, 30, signal)).map(toCard)
 }
 
-export async function matchYgo(name: string): Promise<Card | null> {
+export async function matchYgo(name: string, thorough = false): Promise<Card | null> {
   try {
     const res = await fetchJson(`${API}/cardinfo.php?name=${encodeURIComponent(name)}`)
     if (res.data?.length) return toCard(res.data[0])
@@ -121,17 +121,28 @@ export async function matchYgo(name: string): Promise<Card | null> {
   if (results.length) return toCard(results[0])
   // fname is a substring filter with zero tolerance — one OCR-eaten hyphen
   // ("BLUEEYES WHITE DRAGON") finds nothing. Retry on the longest clean
-  // word and let name similarity pick the right card from that pool.
-  const longest = name
+  // words — plural: the longest token is regularly the garbled one
+  // ("Buue-Eves Write Dragon" must recover via "Dragon") — and let name
+  // similarity pick the right card from the pooled results.
+  // One recovery query is affordable anywhere (it is what v0.7.0 shipped);
+  // the second is only for a committed game filter — inside the auto
+  // fan-out each extra serial request taxes every other game's wait.
+  const words = name
     .split(/\s+/)
     .filter((word) => (word.match(/[A-Za-z]/g) ?? []).length >= 4)
-    .sort((a, b) => b.length - a.length)[0]
-  if (!longest || longest.toLowerCase() === name.trim().toLowerCase()) return null
-  const pool = await runSearch(longest, 30).catch(() => [])
+    .sort((a, b) => b.length - a.length)
+    .slice(0, thorough ? 2 : 1)
+  if (!words.length || (words.length === 1 && words[0].toLowerCase() === name.trim().toLowerCase())) return null
   let best: { raw: any; score: number } | null = null
-  for (const raw of pool) {
-    const score = nameScore(name, String(raw.name ?? ''))
-    if (!best || score > best.score) best = { raw, score }
+  for (const word of words) {
+    const pool = await runSearch(word, 30).catch(() => [])
+    for (const raw of pool) {
+      const score = nameScore(name, String(raw.name ?? ''))
+      if (!best || score > best.score) best = { raw, score }
+    }
+    // A confident fit ends the fan-out — the second query is for when the
+    // first word was the garbled one.
+    if (best && best.score >= 0.85) break
   }
   return best && best.score >= 0.62 ? toCard(best.raw) : null
 }
