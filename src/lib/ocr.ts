@@ -115,7 +115,7 @@ export interface OcrRect {
   h: number
 }
 
-export type PrepVariant = 'normal' | 'binary'
+export type PrepVariant = 'normal' | 'binary' | 'binary-flip'
 
 /**
  * Crop a region (fractions of the source), rescale toward `targetWidth`
@@ -210,8 +210,10 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
 
   // Light type on a dark plate (Riftbound's name bar, collector lines on
   // dark frames) reads far worse than dark-on-light: flip the polarity of a
-  // clearly dark crop so Tesseract always sees dark text on paper.
-  const invert = lumaSum / pixels < 112
+  // clearly dark crop so Tesseract always sees dark text on paper. The
+  // 'binary-flip' variant forces the OPPOSITE call — full-art glyphs over
+  // busy art regularly defeat the mean-luma heuristic.
+  const invert = variant === 'binary-flip' ? lumaSum / pixels >= 112 : lumaSum / pixels < 112
   const values = new Uint8ClampedArray(pixels)
   for (let y = 0; y < height; y++) {
     const fy = Math.min(T - 1, Math.max(0, y / tileH - 0.5))
@@ -236,7 +238,7 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
     }
   }
 
-  if (variant === 'binary') {
+  if (variant === 'binary' || variant === 'binary-flip') {
     // Otsu threshold over the normalized values → pure ink on paper.
     const hist = new Uint32Array(256)
     for (let p = 0; p < pixels; p++) hist[values[p]]++
@@ -271,13 +273,70 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
 /** A pair of short lines can be one split name — long lines are rules text. */
 const JOINABLE_LINE_LEN = 20
 
+/** Suffixes that LOOK like junk but are load-bearing card-name endings. */
+const NAME_SUFFIX = /^(?:ex|gx|v|vmax|vstar|x)$/i
+
+/** A token that plausibly belongs to a printed name. */
+function wordish(token: string): boolean {
+  if (NAME_SUFFIX.test(token)) return true
+  const letters = (token.match(/[A-Za-z]/g) ?? []).length
+  return letters >= 3 && letters / token.length >= 0.7
+}
+
 /**
- * Card-name candidates from a band's OCR lines, best first. Champions and
- * characters often split the name across two printed lines — Riftbound's
- * "JINX" over "Loose Cannon" is catalogued as "Jinx, Loose Cannon", Lorcana
- * stacks name over version — so each adjacent pair of short lines is also
- * offered joined, ahead of its halves: an exact full-name hit outranks a
- * partial one.
+ * How much a candidate looks like a card name — used to rank candidates so
+ * the lookup budget goes to the likeliest reads first, not to whatever
+ * plate/art garbage OCR'd above the name.
+ */
+function plausibility(candidate: string): number {
+  const tokens = candidate.split(' ')
+  const letters = (candidate.match(/[A-Za-z]/g) ?? []).length
+  const wordishShare = tokens.filter(wordish).length / tokens.length
+  const caps = tokens.filter((t) => /^[A-Z]/.test(t)).length / tokens.length
+  let score = (letters / candidate.length) * 2 + wordishShare * 2 + caps * 0.5
+  // A fuller clean read carries more signal than its own lead fragment —
+  // "JINX Loose Cannon" must outrank bare "JINX" (nameScore's lead-segment
+  // tolerance still lets the fragment win the match if only it is real).
+  score += Math.min(tokens.length, 3) * 0.15
+  if (tokens.length === 1 && candidate.length <= 6) score -= 0.5
+  if (candidate.length < 4) score -= 1
+  if (candidate.length > 30) score -= (candidate.length - 30) / 20
+  if (tokens.length > 5) score -= (tokens.length - 5) * 0.3
+  return score
+}
+
+/** The longest run of name-plausible tokens ("=e Tauros ex, - w40" → "Tauros ex"). */
+function wordishWindow(line: string): string | null {
+  const tokens = line.split(' ')
+  let best: string[] = []
+  let run: string[] = []
+  for (const token of tokens) {
+    if (wordish(token)) {
+      run.push(token)
+      if (run.join(' ').length > best.join(' ').length) best = [...run]
+    } else run = []
+  }
+  const window = best.join(' ').replace(/^["'.,]+|["'.,]+$/g, '')
+  return (window.match(/[A-Za-z]/g) ?? []).length >= 4 ? window : null
+}
+
+/** Drop trailing junk tokens ("Lightning Bolt ek e)" → "Lightning Bolt"). */
+function trimTrailingJunk(line: string): string | null {
+  const tokens = line.split(' ')
+  let end = tokens.length
+  while (end > 1 && !wordish(tokens[end - 1])) end--
+  return end < tokens.length ? tokens.slice(0, end).join(' ') : null
+}
+
+/**
+ * Card-name candidates from a band's OCR lines, likeliest first. Beyond the
+ * raw lines this offers: adjacent short lines joined (Riftbound's "JINX"
+ * over "Loose Cannon" is catalogued as "Jinx, Loose Cannon"), the line minus
+ * a short leading label ("BASIC Tauros" → "Tauros"), the line minus trailing
+ * junk ("Lightning Bolt ek e)" → "Lightning Bolt"), and the longest
+ * name-plausible token window ("AKALI 101A SEN" → "AKALI"). Candidates are
+ * ranked by name-plausibility, not reading order — the lookup budget is
+ * finite and art garbage above the name must not consume it.
  */
 export function nameCandidates(lines: string[]): string[] {
   const out: string[] = []
@@ -289,14 +348,25 @@ export function nameCandidates(lines: string[]): string[] {
       push(cleanOcrLine(`${lines[i]} ${lines[i + 1]}`))
     }
     push(lines[i])
+    push(trimTrailingJunk(lines[i]))
     // Evolution/type labels share the name's visual row ("BASIC Tauros",
     // "STAGE 2 Charizard") and OCR merges them — offer the row minus its
     // short leading token as well. Long first words are left alone so real
     // two-word names don't shed their first half.
     const words = lines[i].split(' ')
-    if (words.length >= 2 && words[0].length <= 6) push(cleanOcrLine(words.slice(1).join(' ')))
+    if (words.length >= 2 && words[0].length <= 6) {
+      const stripped = cleanOcrLine(words.slice(1).join(' '))
+      push(stripped)
+      if (stripped) push(trimTrailingJunk(stripped))
+    }
+    push(wordishWindow(lines[i]))
   }
-  return out.slice(0, 6)
+  // Stable rank: plausibility first, original order as the tiebreak.
+  return out
+    .map((candidate, at) => ({ candidate, at, score: plausibility(candidate) }))
+    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .map((row) => row.candidate)
+    .slice(0, 8)
 }
 
 function candidatesFromText(text: string): string[] {
@@ -325,7 +395,7 @@ export async function readCardNames(
   const variant = opts.variant ?? 'normal'
   // The binary retry runs at higher resolution: thresholding sharpens glyph
   // edges, and the extra pixels are what let it crack stylized type.
-  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'binary' ? 960 : OCR_WIDTH, variant)
+  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'normal' ? OCR_WIDTH : 960, variant)
   const started = Date.now()
   const { data } = await worker.recognize(region)
   const raw = String(data?.text ?? '')
@@ -396,14 +466,19 @@ export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string
 const CORNER_OCR_WIDTH = 1200
 
 /** OCR an arbitrary card region (e.g. the collector line) and return raw text. */
-export async function readRegionText(canvas: HTMLCanvasElement, rect: OcrRect): Promise<string> {
+export async function readRegionText(
+  canvas: HTMLCanvasElement,
+  rect: OcrRect,
+  opts: { variant?: PrepVariant } = {},
+): Promise<string> {
   ensureCornerWorker()
   const worker = cornerWorker ?? (await getWorker())
-  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)))
+  const variant = opts.variant ?? 'normal'
+  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)), variant)
   const started = Date.now()
   const { data } = await worker.recognize(region)
   const raw = String(data?.text ?? '')
-  traceEvent('ocr-region', { ...rect, ms: Date.now() - started, raw: raw.slice(0, 200) })
+  traceEvent('ocr-region', { ...rect, variant, ms: Date.now() - started, raw: raw.slice(0, 200) })
   return raw
 }
 
@@ -411,13 +486,17 @@ function cleanOcrLine(line: string): string | null {
   let cleaned = line
     .replace(/[|_~`!@#%^*=<>{}[\]\\]/g, ' ')
     .replace(/\b(HP|hp)\s*\d+\b/g, ' ')
+    .replace(/\s(HP|hp)$/g, ' ')
     .replace(/\b\d{2,4}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   cleaned = cleaned.replace(/^[^A-Za-z"']+/, '').replace(/[^A-Za-z"'.!?)]+$/, '')
   if (cleaned.length < 3) return null
   const letters = (cleaned.match(/[A-Za-z]/g) ?? []).length
-  if (letters < 3 || letters / cleaned.length < 0.55) return null
+  if (letters < 3) return null
+  // A noisy line can still carry the name — salvage its best token window
+  // ("=e | Tauros ex, - w40 od" → "Tauros ex") instead of dropping the line.
+  if (letters / cleaned.length < 0.55) return wordishWindow(cleaned)
   if (cleaned.length > 40) cleaned = cleaned.slice(0, 40)
   return cleaned
 }

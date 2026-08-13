@@ -1,6 +1,6 @@
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
-import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
+import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon } from './pokemon'
@@ -10,7 +10,7 @@ import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import type { Card, Game } from './types'
 import { detectFoil, hammingDistance, refineCardCrop } from './vision'
-import { similarity } from './util'
+import { normalizeName, similarity } from './util'
 import { ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed'
@@ -177,13 +177,31 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
   }
 }
 
-const OCR_MATCH_THRESHOLD = 0.62
+const OCR_MATCH_THRESHOLD = 0.66
+/** Short reads need a higher bar: one edit on 4 letters already scores 0.75,
+ * which is how "loli" became Loki and "son" became Sona. Genuine short reads
+ * (champion leads like "JINX") score ≈1 and clear it comfortably. */
+const OCR_MATCH_THRESHOLD_SHORT = 0.8
+const SHORT_READ_LEN = 8
+/** Reads still carrying junk tokens get a middle bar — their inflated edit
+ * distance otherwise squeaks wrong cards past the base threshold. */
+const OCR_MATCH_THRESHOLD_NOISY = 0.72
+
+function matchThresholdFor(read: string): number {
+  const normalized = read.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  if (normalized.length < SHORT_READ_LEN) return OCR_MATCH_THRESHOLD_SHORT
+  const tokens = read.split(/\s+/)
+  const junk = tokens.filter((t) => (t.match(/[A-Za-z]/g) ?? []).length < 3 && !/^(?:ex|gx|v|x)$/i.test(t)).length
+  return junk / tokens.length > 0.3 ? OCR_MATCH_THRESHOLD_NOISY : OCR_MATCH_THRESHOLD
+}
 /** Per-game budget for a name lookup: one slow card API mustn't stall the frame. */
 const OCR_MATCH_TIMEOUT_MS = 6_000
 /** A single hinted game has no four-way fan-out — its API gets longer (the keyless Pokémon API needs it). */
 const OCR_MATCH_TIMEOUT_HINTED_MS = 9_000
-/** Candidates tried per band — the name is usually the first line or the first joined pair. */
-const OCR_NAMES_PER_BAND = 4
+/** Candidates tried per band. Candidates arrive plausibility-ranked, but a
+ * fused plate row (name + faction + type) can still push the clean name a few
+ * slots down — the budget must reach it. */
+const OCR_NAMES_PER_BAND = 6
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
@@ -197,7 +215,20 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
     applied: refined.applied,
     angle: refined.angle,
     ...(refined.region ? { x: refined.region.x, y: refined.region.y, w: refined.region.w, h: refined.region.h } : {}),
+    ...(refined.cardRegion ? { card: refined.cardRegion } : {}),
   })
+  // The tiny collector-line crops need card-relative precision even when the
+  // frame wasn't worth cropping — map them through the detected card region.
+  const mapRect = (rect: OcrRect): OcrRect => {
+    const card = refined.cardRegion
+    if (!card) return rect
+    return {
+      x: card.x + rect.x * card.w,
+      y: card.y + rect.y * card.h,
+      w: rect.w * card.w,
+      h: rect.h * card.h,
+    }
+  }
   // No hint: only sweep games with a cheap by-name API. Catalog-backed games
   // (Riftbound & co.) are reachable by picking them in the scan game filter.
   const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
@@ -224,7 +255,7 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
     // wants it. With a game hint the crop is that game's exact region; in
     // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
     // whose mid-card code refineFromCorner re-reads.
-    cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
+    cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
       const lookupStarted = Date.now()
       const best = await bestMatchAcrossGames(name, games, {
@@ -239,10 +270,10 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
         score: best ? Number(best.score.toFixed(3)) : null,
         ms: Date.now() - lookupStarted,
       })
-      if (!best || best.score < OCR_MATCH_THRESHOLD) continue
+      if (!best || best.score < matchThresholdFor(name)) continue
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
-      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
+      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(() => null)
       let card = refined?.card ?? best.card
       const foil = detectFoil(canvas)
       traceEvent('refine', {
@@ -292,13 +323,16 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
 
   // The contrast-stretched pass misreads stylized type over busy art (full
   // arts, foils). Before the heavier sweeps, re-read the game's primary band
-  // binarized at higher resolution — a different failure surface, so it
-  // regularly cracks what the first pass mangled.
-  try {
-    const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant: 'binary' })))
-    if (hit) return hit
-  } catch {
-    /* fall through to the full sweep */
+  // binarized at higher resolution — in both polarities, since ornate glyph
+  // faces routinely defeat the mean-luma polarity heuristic. A different
+  // failure surface, so it regularly cracks what the first pass mangled.
+  for (const variant of ['binary', 'binary-flip'] as const) {
+    try {
+      const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })))
+      if (hit) return hit
+    } catch {
+      /* fall through to the full sweep */
+    }
   }
 
   // The bands assume a standard frame, but promos, full-art specials and
@@ -340,12 +374,22 @@ async function refineFromCorner(
   canvas: HTMLCanvasElement,
   cornerText: Promise<string> | null,
   cornerIsExact: boolean,
+  mapRect: (rect: OcrRect) => OcrRect,
   pokemonKey?: string,
 ): Promise<{ card: Card; read: CornerRead } | null> {
   let read = parseCornerInfo(card.game, cornerText ? await cornerText : '')
+  if (!read.setCode && !read.number && !cornerIsExact) {
+    read = parseCornerInfo(card.game, await readRegionText(canvas, mapRect(CORNER_REGION[card.game])))
+  }
   if (!read.setCode && !read.number) {
-    if (cornerIsExact) return null
-    read = parseCornerInfo(card.game, await readRegionText(canvas, CORNER_REGION[card.game]))
+    // The collector line is tiny type that drowns beside rules text at strip
+    // scale — retry narrow slivers at full magnification, binarized. This
+    // read is what tells "Tauros" from "Tauros ex", so it earns the work.
+    const retries = CORNER_RETRY_REGIONS[card.game] ?? [CORNER_REGION[card.game]]
+    for (const rect of retries) {
+      read = parseCornerInfo(card.game, await readRegionText(canvas, mapRect(rect), { variant: 'binary' }))
+      if (read.setCode || read.number) break
+    }
     if (!read.setCode && !read.number) return null
   }
   let exact: Card | null = null
@@ -360,6 +404,19 @@ async function refineFromCorner(
   } else {
     exact = await matchGame(card.game, card.name, read.setCode, read.number, { pokemonKey })
   }
-  if (!exact || similarity(exact.name, card.name) < 0.7) return null
+  if (!exact || !relatedNames(exact.name, card.name)) return null
   return { card: exact, read }
+}
+
+/**
+ * May a corner-pinned card replace the name-matched one? Guards against a
+ * misread collector line swapping in an unrelated card — while still letting
+ * the number upgrade across suffix variants ("Tauros" → "Tauros ex": the
+ * printed 183/226 is exactly how the right variant is told apart).
+ */
+function relatedNames(a: string, b: string): boolean {
+  if (similarity(a, b) >= 0.7) return true
+  const na = normalizeName(a)
+  const nb = normalizeName(b)
+  return na.length >= 4 && nb.length >= 4 && (na.startsWith(nb) || nb.startsWith(na))
 }

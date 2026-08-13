@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, Finish, PriceEntry } from './types'
-import { ebaySoldLink, normalizeName, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, nameScore, normalizeName, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.pokemontcg.io/v2'
 
@@ -71,12 +71,22 @@ function stripLucene(term: string): string {
   return term.replace(/[+\-!(){}[\]^"~*?:\\/&|]/g, '').trim()
 }
 
-/** Exact-name query first, then a per-word prefix query. */
+/** A read token worth querying by — OCR junk ANDed into a query kills it. */
+function queryWord(word: string): boolean {
+  if (/^(?:ex|gx|v|vmax|vstar)$/i.test(word)) return true
+  if (/^hp$/i.test(word)) return false
+  const letters = (word.match(/[A-Za-z]/g) ?? []).length
+  return letters >= 3 && letters / word.length >= 0.7
+}
+
+/** Exact-name query first, then a per-word prefix query over the clean words. */
 function nameQueries(name: string): string[] {
   const clean = stripQuotes(name)
   if (!clean) return []
   const queries = [`name:"${clean}"`]
-  const words = clean.split(' ').map(stripLucene).filter(Boolean)
+  // "Charizard HP" or "Pikachu ? 4)" must still find the card: one junk
+  // token in an AND-of-prefixes query returns nothing, so junk stays out.
+  const words = clean.split(' ').filter(queryWord).map(stripLucene).filter(Boolean)
   if (words.length) {
     const prefix = words.map((w) => `name:${w}*`).join(' ')
     if (!queries.includes(prefix)) queries.push(prefix)
@@ -209,8 +219,20 @@ function dexBriefToCard(brief: DexBrief): Card {
 async function dexBriefs(name: string, signal?: AbortSignal): Promise<DexBrief[]> {
   const clean = stripQuotes(name)
   if (!clean) return []
-  const rows = await fetchJson(`${DEX_API}/cards?name=${encodeURIComponent(clean)}`, { signal, timeoutMs: 10_000 })
-  return Array.isArray(rows) ? rows.filter((row: DexBrief) => row?.id && row?.name) : []
+  const query = async (value: string) => {
+    const rows = await fetchJson(`${DEX_API}/cards?name=${encodeURIComponent(value)}`, { signal, timeoutMs: 10_000 })
+    return Array.isArray(rows) ? rows.filter((row: DexBrief) => row?.id && row?.name) : []
+  }
+  const exact = await query(clean)
+  if (exact.length) return exact
+  // The contains-search has zero tolerance: "Charizard HP" finds nothing.
+  // Retry with the longest clean word — the species name usually survives OCR.
+  const longest = clean
+    .split(' ')
+    .filter(queryWord)
+    .sort((a, b) => b.length - a.length)[0]
+  if (!longest || longest.length < 4 || longest.toLowerCase() === clean.toLowerCase()) return []
+  return query(longest)
 }
 
 const plainDigits = (value: unknown) =>
@@ -232,13 +254,28 @@ async function dexMatch(
   const briefs = await dexBriefs(name, signal)
   if (!briefs.length) return null
   const target = normalizeName(name)
-  let named = briefs.filter((brief) => normalizeName(String(brief.name)) === target)
-  if (!named.length) named = briefs.filter((brief) => normalizeName(String(brief.name)).startsWith(target))
-  if (!named.length) return null
+  const exact = briefs.filter((brief) => normalizeName(String(brief.name)) === target)
+  const starts = briefs.filter((brief) => normalizeName(String(brief.name)).startsWith(target) && !exact.includes(brief))
+  // OCR junk tolerance: when nothing matches structurally, rank the briefs
+  // by name score and keep the clear fits ("Charizard HP" → the Charizards).
+  // Ascending on purpose: pools keep their TAIL, so best must sit last.
+  const scored =
+    exact.length || starts.length
+      ? []
+      : briefs
+          .map((brief) => ({ brief, score: nameScore(name, String(brief.name)) }))
+          .filter((row) => row.score >= 0.72)
+          .sort((a, b) => a.score - b.score)
+          .map((row) => row.brief)
   const digits = plainDigits(number)
-  const numbered = digits ? named.filter((brief) => plainDigits(brief.localId) === digits) : []
+  // The printed collector number outranks name tiers: a read of "Tauros" off
+  // a Tauros ex must still land on the ex when 183/226 narrows to it — the
+  // exact-name tier alone would lock in the plain card first.
+  const numbered = digits ? [...exact, ...starts, ...scored].filter((brief) => plainDigits(brief.localId) === digits) : []
+  const named = numbered.length ? numbered : exact.length ? exact : starts.length ? starts : scored
+  if (!named.length) return null
   // Newest last in practice — hydrate the tail few and let the set size decide.
-  const pool = (numbered.length ? numbered : named).slice(-6)
+  const pool = named.slice(-6)
   const fulls = (
     await Promise.all(
       pool.map((brief) => fetchJson(`${DEX_API}/cards/${brief.id}`, { signal, timeoutMs: 10_000 }).catch(() => null)),
@@ -314,7 +351,13 @@ export async function matchPokemon(
     )
     if (exact) return toCard(exact)
   }
-  return toCard(pool[0])
+  // Best NAME fit wins, newest as the tiebreak — the raw list is newest-first
+  // and the query is prefix-tolerant, so taking the head blindly returned
+  // "Mega Charizard Y ex" for a read of "Charizard".
+  const ranked = [...pool].sort(
+    (a: any, b: any) => nameScore(name, String(b.name ?? '')) - nameScore(name, String(a.name ?? '')),
+  )
+  return toCard(ranked[0])
 }
 
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {

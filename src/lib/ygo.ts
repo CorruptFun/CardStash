@@ -1,7 +1,7 @@
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, PriceEntry, Printing } from './types'
-import { ebaySoldLink, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, nameScore, tcgplayerSearchLink } from './util'
 
 const API = 'https://db.ygoprodeck.com/api/v7'
 
@@ -118,7 +118,22 @@ export async function matchYgo(name: string): Promise<Card | null> {
     /* fall back to fuzzy search */
   }
   const results = await runSearch(name, 5).catch(() => [])
-  return results.length ? toCard(results[0]) : null
+  if (results.length) return toCard(results[0])
+  // fname is a substring filter with zero tolerance — one OCR-eaten hyphen
+  // ("BLUEEYES WHITE DRAGON") finds nothing. Retry on the longest clean
+  // word and let name similarity pick the right card from that pool.
+  const longest = name
+    .split(/\s+/)
+    .filter((word) => (word.match(/[A-Za-z]/g) ?? []).length >= 4)
+    .sort((a, b) => b.length - a.length)[0]
+  if (!longest || longest.toLowerCase() === name.trim().toLowerCase()) return null
+  const pool = await runSearch(longest, 30).catch(() => [])
+  let best: { raw: any; score: number } | null = null
+  for (const raw of pool) {
+    const score = nameScore(name, String(raw.name ?? ''))
+    if (!best || score > best.score) best = { raw, score }
+  }
+  return best && best.score >= 0.62 ? toCard(best.raw) : null
 }
 
 export async function ygoById(id: string): Promise<Card | null> {

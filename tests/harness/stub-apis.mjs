@@ -123,6 +123,11 @@ export function createStubs(fixturesDir) {
   /* ------------------------------------------------------- pokemontcg.io - */
   function pokemontcgio(url) {
     if (!ptcgio.alive) return json({ error: 'service unavailable' }, 503)
+    // Queries whose capture 500'd get the same server error, not a false [].
+    const q0 = url.searchParams.get('q') ?? ''
+    for (const name of ptcgio.failedQueryNames ?? []) {
+      if (q0.toLowerCase().includes(`"${name.toLowerCase()}"`)) return json({ error: 'internal server error' }, 500)
+    }
     let m = url.pathname.match(/^\/v2\/cards\/([^/]+)$/)
     if (m) {
       const row = ptcgioRows.find((r) => r.id === decodeURIComponent(m[1]))
@@ -149,7 +154,16 @@ export function createStubs(fixturesDir) {
   }
 
   /* ------------------------------------------------------------ scryfall - */
+  // Real /cards/named resolves FLAVOR names too ("Khan, Engineered Evil" →
+  // the Sheoldred print carrying it) — mirror that from the captured prints.
+  const flavorIndex = new Map()
+  for (const print of allPrints) {
+    if (print.flavor_name) flavorIndex.set(norm(print.flavor_name), print)
+  }
+  const namedUniverse = [...scryfallNames, ...[...flavorIndex.keys()]]
   const namedPrint = (name) => {
+    const flavored = flavorIndex.get(norm(name))
+    if (flavored) return flavored
     const key = Object.keys(scryfallPrints).find((n) => norm(n) === norm(name))
     return key ? scryfallPrints[key][0] : null
   }
@@ -163,12 +177,12 @@ export function createStubs(fixturesDir) {
       const set = url.searchParams.get('set')
       let resolved = null
       if (exact) {
-        resolved = scryfallNames.find((n) => norm(n) === norm(exact)) ?? null
+        resolved = namedUniverse.find((n) => norm(n) === norm(exact)) ?? null
       } else if (fuzzy) {
         // Approximation of Scryfall's fuzzy rule: best unambiguous near-match.
         let best = null
         let second = 0
-        for (const n of scryfallNames) {
+        for (const n of namedUniverse) {
           const s = similarity(fuzzy, n)
           if (!best || s > best.s) {
             second = best?.s ?? 0
@@ -226,7 +240,9 @@ export function createStubs(fixturesDir) {
     const fname = url.searchParams.get('fname')
     const name = url.searchParams.get('name')
     let rows = ygoRows
-    if (name != null) rows = rows.filter((r) => norm(r.name) === norm(name))
+    // Live name= is EXACT (case-insensitive, punctuation significant) — a
+    // laxer stub was flattering junk-suffixed reads the real API rejects.
+    if (name != null) rows = rows.filter((r) => String(r.name).toLowerCase() === name.trim().toLowerCase())
     else if (fname != null) rows = rows.filter((r) => String(r.name).toLowerCase().includes(fname.toLowerCase()))
     // Real API answers "nothing matched" with HTTP 400 + an error body.
     if (!rows.length) return json({ error: 'No card matching your query was found in the database.' }, 400)
