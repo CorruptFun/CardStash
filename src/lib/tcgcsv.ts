@@ -3,7 +3,7 @@ import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
 import { settings } from './settings'
 import type { Card, CatalogCache, Finish, Game, PriceEntry } from './types'
-import { ebaySoldLink, normalizeName, similarity, sleep, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, nameLead, normalizeName, similarity, sleep, tcgplayerSearchLink } from './util'
 
 /**
  * TCGCSV (tcgcsv.com) mirrors TCGplayer's catalog + daily prices as static
@@ -545,6 +545,26 @@ export async function catalogByCollector(game: Game, number: string, printedTota
         (b.releasedAt ?? '').localeCompare(a.releasedAt ?? ''),
     )
   return hits[0] ?? null
+}
+
+/**
+ * How many DIFFERENT cards this catalog files under one champion lead —
+ * "Ahri" covers both "Ahri - Alluring" and "Ahri - Inquisitive". Alternate
+ * printings of the SAME card ("(Alternate Art)", "(Signature)") are one
+ * answer, not two, so parentheticals collapse; only a genuinely different
+ * epithet counts. Reads off the in-memory day cache, so this is an array
+ * scan, not a fetch.
+ */
+export async function catalogLeadVariants(game: Game, lead: string): Promise<number> {
+  const needle = normalizeName(lead)
+  if (!needle) return 0
+  const cards = await catalog(game)
+  const distinct = new Set<string>()
+  for (const card of cards) {
+    if (normalizeName(nameLead(card.name) ?? card.name) !== needle) continue
+    distinct.add(normalizeName(card.name.replace(/\s*\([^)]*\)/g, '')))
+  }
+  return distinct.size
 }
 
 export async function catalogById(game: Game, apiId: string): Promise<Card | null> {

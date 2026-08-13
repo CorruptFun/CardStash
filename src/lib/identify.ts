@@ -29,10 +29,10 @@ import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgBySetNumber, mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
-import { catalogByCollector, isCatalogGame } from './tcgcsv'
+import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv'
 import type { Card, Game } from './types'
 import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
-import { normalizeName, similarity } from './util'
+import { isLeadOnlyMatch, nameLead, normalizeName, similarity } from './util'
 import { ygoById, ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed'
@@ -505,6 +505,26 @@ async function identifyViaOcr(
       if (games.length > 1 && !collectorLineAllows(best.card.game, await cornerText)) {
         traceEvent('game-reject', { read: name, card: best.card.name, game: best.card.game, score: Number(best.score.toFixed(3)) })
         continue
+      }
+      // A bare champion lead cannot tell siblings apart, and `nameScore`
+      // forgives the missing epithet by design — which parks EVERY lead-only
+      // read at exactly 0.95, clearing every bar. Riftbound files 65 leads
+      // under more than one epithet ("Ahri - Alluring" vs "Ahri -
+      // Inquisitive", four Teemos, four Viktors), and the epithet shares the
+      // same hard-to-read plate as the name, so a half-read plate is the
+      // COMMON case rather than the rare one. Measured: "Ambessa" off a
+      // clipped plate answered "Ambessa - The Wolf" for a "Respected and
+      // Feared" card — a confident wrong card, wrong price, auto-collected.
+      // Refuse it here and the printed collector line, which CAN separate
+      // them, gets its turn instead. (Same reasoning as
+      // TURNED_MATCH_THRESHOLD, which exists for this exact loophole.)
+      if (isCatalogGame(best.card.game) && isLeadOnlyMatch(name, best.card.name)) {
+        const lead = nameLead(best.card.name)
+        const variants = lead ? await catalogLeadVariants(best.card.game, lead).catch(() => 0) : 0
+        if (variants > 1) {
+          traceEvent('lead-ambiguous', { read: name, card: best.card.name, variants, score: Number(best.score.toFixed(3)) })
+          continue
+        }
       }
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.

@@ -168,6 +168,13 @@ const DEFAULT_BANDS: readonly OcrBand[] = [...TOP_BANDS, MID_BAND]
  * fine, so leading with the tight one spent an OCR pass on every scan and
  * cost two degraded cells to the attempt budget. Second, it is only paid by
  * the cards the wide band actually loses.
+ *
+ * The plate FLOATS: it is pushed up by the rules box under it, so a card
+ * with two keywords and flavour text wears it higher than a card with one
+ * line. Measured off real cards — Nilah, Joyful Ascetic (UNL, three rules
+ * lines + flavour) sits at 0.53–0.60, while Akali/Ambessa/Masa (VEN) sit at
+ * 0.57–0.65. The band spans the union with margin rather than the average,
+ * because half a plate reads as neither name nor epithet.
  */
 const RIFT_PLATE_BAND: OcrBand = { y: 0.55, h: 0.13, width: 1280 }
 

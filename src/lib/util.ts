@@ -75,11 +75,32 @@ export function similarity(a: string, b: string): number {
  */
 export function nameScore(read: string, cardName: string): number {
   let score = similarity(read, cardName)
-  const lead = cardName.split(/,|:|\s[-–—]\s/)[0]?.trim()
-  if (lead && lead.length >= 3 && lead.length < cardName.length) {
+  const lead = nameLead(cardName)
+  if (lead) {
     score = Math.max(score, similarity(read, lead) - 0.05)
   }
   return score
+}
+
+/**
+ * The card name's leading segment, when it HAS one distinct from the whole:
+ * "Ahri - Inquisitive" → "Ahri", "Jinx, Loose Cannon" → "Jinx". Null for a
+ * name that is all lead, which is what makes it usable as a test for
+ * "did this read stop at the champion's name?".
+ */
+export function nameLead(cardName: string): string | null {
+  const lead = cardName.split(/,|:|\s[-–—]\s/)[0]?.trim()
+  return lead && lead.length >= 3 && lead.length < cardName.length ? lead : null
+}
+
+/**
+ * The read only accounted for the name's leading segment — the epithet went
+ * unread, so `nameScore` cleared its bar on lead-forgiveness alone. Such a
+ * read cannot tell one sibling printing from another.
+ */
+export function isLeadOnlyMatch(read: string, cardName: string): boolean {
+  const lead = nameLead(cardName)
+  return !!lead && similarity(read, cardName) < similarity(read, lead) - 0.05
 }
 
 export function normalizeName(name: string): string {
