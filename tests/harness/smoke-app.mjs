@@ -74,9 +74,59 @@ await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/search`, { waitUntil: 'load' 
 await page.waitForTimeout(300)
 if ((await page.locator('input').count()) === 0) await fail('search screen did not render an input')
 
+/*
+ * Scan tray: a misidentified card lands there looking as certain as a good
+ * one, so removing it has to work. Seeded straight into Dexie because the
+ * headless browser has no camera to scan with.
+ */
+await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/scan`, { waitUntil: 'load' })
+await page.waitForTimeout(600)
+const seeded = await page.evaluate(async () => {
+  const open = () => new Promise((res) => {
+    const req = indexedDB.open('cardstock')
+    req.onsuccess = () => res(req.result)
+    req.onerror = () => res(null)
+  })
+  let handle = null
+  for (let i = 0; i < 40 && !handle?.objectStoreNames?.contains('scans'); i++) {
+    handle?.close()
+    handle = await open()
+    if (!handle?.objectStoreNames.contains('scans')) await new Promise((r) => setTimeout(r, 250))
+  }
+  if (!handle?.objectStoreNames.contains('scans')) return 0
+  const tx = handle.transaction('scans', 'readwrite')
+  const store = tx.objectStore('scans')
+  const rows = [
+    ['pokemon:smoke-1', 'pokemon', 'Geodude', 'SVP'],
+    ['yugioh:smoke-2', 'yugioh', 'Flock Together', 'PHM'],
+  ]
+  let at = Date.now() - 2000
+  for (const [id, game, name, setCode] of rows)
+    store.put({ id: `s-${id}`, cardId: id, at: (at += 1000), card: { id, game, apiId: id, name, setCode, prices: { best: 0.1, entries: [] }, links: {} } })
+  await new Promise((res) => { tx.oncomplete = res; tx.onerror = res })
+  handle.close()
+  return rows.length
+})
+if (seeded !== 2) await fail('could not seed the scan tray')
+await page.reload({ waitUntil: 'load' })
+await page.waitForTimeout(1200)
+const tiles = () => page.locator('.tray__item').count()
+if ((await tiles()) !== 2) await fail(`scan tray rendered ${await tiles()} tiles, expected 2`)
+if ((await page.locator('.tray__remove').count()) !== 2) await fail('scan tray tiles have no remove button')
+// dispatchEvent, not click: with no camera the start gate stays up over the
+// tray, and this is about the handler, not the overlay's z-order.
+await page.locator('.tray__remove').first().dispatchEvent('click')
+await page.waitForTimeout(800)
+if ((await tiles()) !== 1) await fail(`remove left ${await tiles()} tiles, expected 1`)
+const undo = page.getByRole('button', { name: /undo/i }).first()
+if (!(await undo.count())) await fail('removing a scan offered no undo')
+await undo.dispatchEvent('click')
+await page.waitForTimeout(800)
+if ((await tiles()) !== 2) await fail(`undo restored ${await tiles()} tiles, expected 2`)
+
 const fatal = errors.filter((e) => !/favicon|manifest|Failed to load resource/i.test(e))
 if (fatal.length) await fail('console errors during smoke')
 
-console.log(`SMOKE OK — gate, no shutter, v${pkg.version} in Settings, search renders, console clean.`)
+console.log(`SMOKE OK — gate, no shutter, v${pkg.version} in Settings, search renders, scan tray removes + undoes, console clean.`)
 await browser.close()
 process.exit(0)

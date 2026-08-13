@@ -489,6 +489,30 @@ export async function recordScan(card: Card): Promise<void> {
   await recordPricePoint(card)
 }
 
+/**
+ * Drop one scan from the tray. Returns the removed row so the caller can put
+ * it back verbatim — an undo has to restore the original `at`, or the tile
+ * would reappear at the head of the tray instead of where it was.
+ */
+export async function removeScan(id: string): Promise<ScanRecord | null> {
+  const scan = await db.scans.get(id)
+  if (!scan) return null
+  await db.scans.delete(id)
+  return scan
+}
+
+/** Empty the tray, returning what was in it so the undo can restore it. */
+export async function clearScans(): Promise<ScanRecord[]> {
+  const scans = await db.scans.toArray()
+  await db.scans.clear()
+  return scans
+}
+
+/** Put removed scans back exactly as they were (the undo side of both above). */
+export async function restoreScans(scans: ScanRecord[]): Promise<void> {
+  await db.scans.bulkPut(scans)
+}
+
 export async function createDeck(game: Game, name: string, format?: string): Promise<Deck> {
   const deck: Deck = {
     id: uid(),

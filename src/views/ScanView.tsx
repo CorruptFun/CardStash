@@ -6,7 +6,7 @@ import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
 import { CAMERA_REPROMPTS_EACH_ACQUIRE, cameraPermissionState, IS_STANDALONE } from '../lib/camera'
-import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
+import { addToCollection, clearScans, db, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome, ScanMode } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
@@ -14,7 +14,7 @@ import { headlineFinish, itemUnitPrice } from '../lib/prices'
 import { warmSealedIndex } from '../lib/sealed'
 import { settings, useSettings } from '../lib/settings'
 import { warmCatalog } from '../lib/tcgcsv'
-import type { Card, Finish } from '../lib/types'
+import type { Card, Finish, ScanRecord } from '../lib/types'
 import { haptic, money } from '../lib/util'
 import { guarded, uiStore, useUi } from '../store/ui'
 
@@ -207,6 +207,39 @@ export function ScanView({ active }: { active: boolean }) {
   const scanner = useScanner(onHit, scanMode)
   const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
   const visible = active && !sheetOpen
+
+  /**
+   * Scans are a log of what the camera thought it saw, not a collection — so
+   * dropping one only clears the tray. A card collect mode already filed stays
+   * filed, and is removed in Collection; saying so in the toast is what keeps
+   * the two from being confused.
+   */
+  const dropScan = useCallback(
+    async (scan: ScanRecord) => {
+      const removed = await guarded(() => removeScan(scan.id), 'Remove scan')
+      if (!removed) return
+      haptic(settings().haptics ? 10 : 0)
+      toast(`Removed ${removed.card.name} from scans`, 'success', {
+        label: 'Undo',
+        fn: () => {
+          guarded(() => restoreScans([removed]), 'Undo')
+        },
+      })
+    },
+    [toast],
+  )
+
+  const clearTray = useCallback(async () => {
+    const removed = await guarded(() => clearScans(), 'Clear scans')
+    if (!removed?.length) return
+    haptic(settings().haptics ? 10 : 0)
+    toast(`Cleared ${removed.length} ${removed.length === 1 ? 'scan' : 'scans'}`, 'success', {
+      label: 'Undo',
+      fn: () => {
+        guarded(() => restoreScans(removed), 'Undo')
+      },
+    })
+  }, [toast])
 
   useEffect(() => {
     if (visible && started && scanner.status === 'idle') scanner.start()
@@ -515,14 +548,32 @@ export function ScanView({ active }: { active: boolean }) {
       {(tray?.length ?? 0) > 0 && (
         <div className="tray">
           {tray!.map((scan) => (
-            <button key={scan.id} className="tray__item" onClick={() => openSheet({ card: scan.card, origin: 'scan' })}>
-              <span className="tray__thumb">
-                <CardImg card={scan.card} className="tray__img" />
-                <span className="tray__price">{money(scan.card.prices.best ?? scan.card.prices.bestFoil)}</span>
-              </span>
-              <span className="tray__set">{scan.card.setCode ?? GAME_SHORT[scan.card.game]}</span>
-            </button>
+            <div key={scan.id} className="tray__item">
+              <button className="tray__open" onClick={() => openSheet({ card: scan.card, origin: 'scan' })}>
+                <span className="tray__thumb">
+                  <CardImg card={scan.card} className="tray__img" />
+                  <span className="tray__price">{money(scan.card.prices.best ?? scan.card.prices.bestFoil)}</span>
+                </span>
+                <span className="tray__set">{scan.card.setCode ?? GAME_SHORT[scan.card.game]}</span>
+              </button>
+              {/* A misread lands here looking exactly as certain as a good
+                * scan, so getting rid of it has to be one tap away — and
+                * undoable, since the × sits on a small tile beside a
+                * scrolling gesture. */}
+              <button
+                className="tray__remove"
+                aria-label={`Remove ${scan.card.name} from scans`}
+                onClick={() => dropScan(scan)}
+              >
+                <Icon name="x" size={11} />
+              </button>
+            </div>
           ))}
+          {(tray?.length ?? 0) > 1 && (
+            <button className="tray__clear" onClick={clearTray}>
+              Clear
+            </button>
+          )}
         </div>
       )}
     </div>

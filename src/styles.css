@@ -1362,6 +1362,49 @@ button {
 .tray__item:active {
   opacity: 0.65;
 }
+.tray__open {
+  display: block;
+  width: 100%;
+}
+/* The × overhangs the tile's top-right corner: the tiles are 58px wide and
+ * sit in a horizontal scroller, so an inset control would eat the artwork
+ * and crowd the swipe. 28px of touch target around an 11px glyph. */
+.tray__remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--rule-strong);
+  color: var(--text-2);
+  box-shadow: var(--lift-1);
+  z-index: 1;
+}
+.tray__remove:active {
+  transform: scale(0.9);
+  color: var(--text);
+}
+.tray__clear {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 14px;
+  padding: 6px 10px;
+  border-radius: var(--r-1);
+  background: var(--bg-elev);
+  border: 1px solid var(--rule-strong);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tray__clear:active {
+  opacity: 0.65;
+}
 .tray__img {
   width: 100%;
   border-radius: 4px;
