@@ -264,6 +264,36 @@ result seems absurd, check this list before writing code.
     `fetch-fixtures.mjs`, let CI regenerate, re-baseline (lesson 3), and the
     VMAX/VSTAR rescue becomes measurable.
 
+## What the first real photographs said (and they said something new)
+
+32. **The synthetic backdrop was hiding the dominant real-world failure.**
+    Eight real phone photos, graded: 1/8. That number is mostly a fixture
+    artifact — seven of the eight cards are not in the captured API universe,
+    so the stubs cannot return them however well they read (the `Duel Tower`
+    cell read "DUEL TOWER" **perfectly** and still failed). Check that BEFORE
+    concluding anything from a photo run. What the photos do show, once you
+    read the traces instead of the score, is a failure class the matrix
+    structurally cannot produce: **card-region detection over-reaching on
+    cluttered backgrounds.** `compose()` always lays the card on a plain
+    vignetted backdrop, so detection is trivially right in every one of the
+    246 synthetic cells. A real photo has a Yu-Gi-Oh box, a wood table, other
+    cards and high-contrast packaging text, all of which throw Sobel edges.
+    Measured, the correlation is clean: the cells whose detection came back
+    TIGHT (area 0.42, 0.65) read their foil names; the ones where detection
+    swallowed 0.71–0.74 of the frame read nothing at all — and at that size it
+    is over the 0.66 area gate, so the crop is not even applied and every band
+    then sits on background rather than on the card. Fixing detection is worth
+    more on real photos than any further OCR work, and it is the same
+    primitive multi-card/binder scanning needs.
+33. **chroma-sat held up on real foil, which is the point of having photos.**
+    On the two flat, well-lit secret rares it is decisively the best
+    projection — "CO ENIGMASTER FPAURDBIHT" where every level projection gives
+    noise, and on I:P Masquerena it is the ONLY variant that read anything at
+    all ("[:P ag] EREN"). The synthetic `foil-text` model pointed at the right
+    mechanism even though it got the gold/silver ORDERING wrong (lesson 26).
+    A model can be wrong in its details and still be right about the physics;
+    what it cannot do is tell you which failure dominates in the field.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review

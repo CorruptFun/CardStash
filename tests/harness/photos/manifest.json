@@ -1,3 +1,95 @@
 {
-  "photos": []
+  "photos": [
+    {
+      "key": "pkm-blastoise-ex-fullart",
+      "file": "pkm-blastoise-ex-fullart.jpg",
+      "game": "pokemon",
+      "name": "Blastoise EX",
+      "label": "photo-pkm",
+      "note": "XY122 promo full art, silver-stamped name over art; held in hand",
+      "source": "32afdc51-IMG_0347.jpeg"
+    },
+    {
+      "key": "pkm-charizard-in-binder",
+      "file": "pkm-charizard-in-binder.jpg",
+      "game": "pokemon",
+      "name": "Charizard",
+      "label": "photo-pkm",
+      "note": "Evolutions 11/108 inside a binder sleeve — neighbouring cards visible on all four sides, plastic glare",
+      "source": "47a9aed6-IMG_1167.jpeg"
+    },
+    {
+      "key": "pkm-machamp-revholo",
+      "file": "pkm-machamp-revholo.jpg",
+      "game": "pokemon",
+      "name": "Machamp",
+      "label": "photo-pkm",
+      "note": "reverse holo, held in hand over a cluttered desk",
+      "source": "b538b217-IMG_9844.jpeg"
+    },
+    {
+      "key": "ygo-blue-eyes-alt-gold",
+      "file": "ygo-blue-eyes-alt-gold.jpg",
+      "game": "yugioh",
+      "name": "Blue-Eyes Alternative White Dragon",
+      "label": "photo-ygo-foil",
+      "note": "RA02-EN010 quarter century, GOLD foil name on the beige bar — the gold case; handheld, angled, box art behind",
+      "source": "a90a5629-IMG_1255.jpeg"
+    },
+    {
+      "key": "ygo-blue-eyes-spirit-silver",
+      "file": "ygo-blue-eyes-spirit-silver.jpg",
+      "game": "yugioh",
+      "name": "Blue-Eyes Spirit Dragon",
+      "label": "photo-ygo-foil",
+      "note": "RA03-EN030, SILVER foil name on a silver frame — the near-neutral case chroma-sat targets; handheld, angled",
+      "source": "3960478e-IMG_1256.jpeg"
+    },
+    {
+      "key": "ygo-duel-tower-prismatic",
+      "file": "ygo-duel-tower-prismatic.jpg",
+      "game": "yugioh",
+      "name": "Duel Tower",
+      "label": "photo-ygo-foil",
+      "note": "MP22-EN269 prismatic secret, BLUE foil name on teal — coloured text on coloured ground; flat, evenly lit",
+      "source": "881bca2b-IMG_9297.jpeg"
+    },
+    {
+      "key": "ygo-enigmaster-packbit-secret",
+      "file": "ygo-enigmaster-packbit-secret.jpg",
+      "game": "yugioh",
+      "name": "Enigmaster Packbit",
+      "label": "photo-ygo-foil",
+      "note": "PHNI-EN042 secret rare, silver/blue foil name on a silver frame; flat, evenly lit",
+      "source": "235afb8a-IMG_9352.jpeg"
+    },
+    {
+      "key": "ygo-ip-masquerena-secret",
+      "file": "ygo-ip-masquerena-secret.jpg",
+      "game": "yugioh",
+      "name": "I:P Masquerena",
+      "label": "photo-ygo-foil",
+      "note": "RA02-EN042 secret rare, rainbow holo across the whole card incl. the name; held in palm, dim indoor",
+      "source": "ccf64152-IMG_1257.jpeg"
+    }
+  ],
+  "binders": [
+    {
+      "key": "ygo-binder-horus",
+      "file": "ygo-binder-horus.jpg",
+      "game": "yugioh",
+      "cards": [
+        "Imsety, Glory of Horus",
+        "Imsety, Glory of Horus",
+        "Imsety, Glory of Horus",
+        "Qebehsenuef, Protection of Horus",
+        "Duamutef, Blessing of Horus",
+        "Hapi, Guidance of Horus",
+        "King's Sarcophagus",
+        "King's Sarcophagus"
+      ],
+      "note": "9-slot binder page, 8 identifiable cards + 1 face-down/blank gold card in the top-right slot; sleeved, angled, ceiling-light glare across the top row",
+      "source": "77954042-IMG_1265.jpeg"
+    }
+  ]
 }
