@@ -31,11 +31,22 @@ storage all work from there.
   wants travel with your binder share, so both sides see matches highlighted:
   cards of theirs you're hunting, cards of yours they're hunting, one-tap
   select in the trade composer, and +added/−removed diffs on every refresh.
+- **Live sync (optional)** — run `npm run sync` on any computer and point a
+  group at the address it prints: binders then refresh in the background and
+  trades arrive in-app instead of by link. Off by default, one tap to leave.
+  See [`server/README.md`](server/README.md).
 
-Everything is stored locally (IndexedDB). No accounts, no server — API keys live
-on-device and are sent only to their own services. Social works serverlessly:
-a share link *is* the data (compressed into the URL), so nothing is published
-anywhere unless you send it to someone.
+Everything is stored locally (IndexedDB). No accounts, no server required — API
+keys live on-device and are sent only to their own services. Social works
+serverlessly by default: a share link *is* the data (compressed into the URL),
+so nothing is published anywhere unless you send it to someone.
+
+## Commands
+
+- `npm run dev` — dev server
+- `npm run build` — typecheck + production build
+- `npm run sync` — optional live-sync server (see `server/README.md`)
+- `npm run test:unit` / `npm run test:scan` — unit tests / scan matrix
 
 ## Development
 
