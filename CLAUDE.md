@@ -48,7 +48,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
   an `opened` flag and stop counting at the sealed price once opened),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
-  import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
+  import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
+  serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
+  the Dexie writes for friends/trades live in `db.ts`).
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
 - `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
   `builderSeeds` (cards handed to the AI builder to design around).
@@ -73,3 +75,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
   pickers in `prices.ts` and history readers filter them out; don't reintroduce
   them into math or UI.
+- Social is serverless by design — do NOT add a backend for it. Profiles,
+  trade proposals and replies travel as deflate+base64url payloads in
+  `#/x?d=…` links (or plain-JSON files); friends/trades are local Dexie
+  tables; `forTrade` on a collection row is the count of copies offered
+  (≤ qty — every write clamps via `tradeCount` in db.ts). Everything decoded
+  from a link/file/backup is untrusted: route it through the sanitizers in
+  `social.ts`. `SharedCard.price` is the finish's market unit with condition
+  NOT applied — viewers multiply by condition factor.
