@@ -531,7 +531,15 @@ export async function catalogByCollector(game: Game, number: string, printedTota
       const total = card.number?.split('/')[1]?.replace(/\D+/g, '')
       return !!total && total.replace(/^0+(?=\d)/, '') === printedTotal.replace(/^0+(?=\d)/, '')
     })
-    .sort((a, b) => (b.releasedAt ?? '').localeCompare(a.releasedAt ?? ''))
+    // Variants share the collector number as separate products ("Akali -
+    // Silent (Alternate Art)") — with number-only evidence the BASE printing
+    // is the honest pick, so parenthetical variants rank behind it.
+    .sort(
+      (a, b) =>
+        Number(/\(/.test(a.name)) - Number(/\(/.test(b.name)) ||
+        a.name.length - b.name.length ||
+        (b.releasedAt ?? '').localeCompare(a.releasedAt ?? ''),
+    )
   return hits[0] ?? null
 }
 

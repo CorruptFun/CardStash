@@ -182,7 +182,7 @@ const OCR_MATCH_THRESHOLD = 0.66
 /** Short reads need a higher bar: one edit on 4 letters already scores 0.75,
  * which is how "loli" became Loki and "son" became Sona. Genuine short reads
  * (champion leads like "JINX") score ≈1 and clear it comfortably. */
-const OCR_MATCH_THRESHOLD_SHORT = 0.8
+const OCR_MATCH_THRESHOLD_SHORT = 0.82
 const SHORT_READ_LEN = 8
 /** Reads still carrying junk tokens get a middle bar — their inflated edit
  * distance otherwise squeaks wrong cards past the base threshold. */
