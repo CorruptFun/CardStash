@@ -8,6 +8,8 @@ import {
   looksLikeCollectorLine,
   parseCornerInfo,
   parsePasscode,
+  parsePokemonVariant,
+  pokemonNameSuffix,
   sameYgoCode,
   SOLE_EVIDENCE_REGIONS,
   YGO_PASSCODE_REGION,
@@ -472,7 +474,7 @@ async function identifyViaOcr(
       // stay eligible for the next pass instead of being silently dropped.
       tried.add(name.toLowerCase())
       const lookupStarted = Date.now()
-      const best = await bestMatchAcrossGames(name, games, {
+      let best = await bestMatchAcrossGames(name, games, {
         pokemonKey: config.pokemonKey,
         timeoutMs,
       }).catch(() => null)
@@ -524,6 +526,33 @@ async function identifyViaOcr(
         if (variants > 1) {
           traceEvent('lead-ambiguous', { read: name, card: best.card.name, variants, score: Number(best.score.toFixed(3)) })
           continue
+        }
+      }
+      // The read matched a bare species, but the card's own rules box names a
+      // suffix variant — "Pokémon-GX rule" under a card answered as "Tauros".
+      // A dropped two-letter suffix hits a real card EXACTLY, so this arrives
+      // as a 1.0 score that no threshold can question; only other evidence
+      // can. Prefer the variant the card declares when that card exists, and
+      // when it does not, refuse rather than answer with the species: the
+      // frame says the two disagree, and a confident wrong card is the
+      // costlier way to be wrong (wrong price, auto-collected in collect
+      // mode). Strictly narrowing — it only ever fires when the matched name
+      // carries no suffix at all, so a name band that DID read one is left
+      // alone.
+      if (best.card.game === 'pokemon' && !pokemonNameSuffix(best.card.name)) {
+        const declared = parsePokemonVariant(await cornerText)
+        if (declared) {
+          const wanted = `${best.card.name} ${declared}`
+          const variant = await matchPokemon(wanted, undefined, undefined, config.pokemonKey).catch(() => null)
+          const ok = variant && normalizeName(variant.name) === normalizeName(wanted)
+          traceEvent('variant-declared', {
+            read: name,
+            card: best.card.name,
+            declared,
+            resolved: ok ? variant.name : null,
+          })
+          if (!ok) continue
+          best = { ...best, card: variant }
         }
       }
       // Name pinned the card; now read the printed collector line to pin
@@ -600,20 +629,25 @@ async function identifyViaOcr(
       // whole-card sweep never rescue pure noise, they just grind for seconds
       // while the user watches "Identifying…". Fail fast toward the actionable
       // fix (light) instead.
-      // On a card whose surface actually MEASURES as foil, add the two
-      // chroma projections. A holographic sheen is saturated light, and the
-      // luma every pass above uses averages it straight into the ink — the
-      // contrast is gone before any stretch or threshold runs, which is why
-      // an ordinary phone photo of a foil is the pipeline's worst case
-      // (measured: Pokémon 1/7, Riftbound 1/6 on the foil-worst battery).
-      // Dropping the colour instead of averaging it separates neutral text
-      // from a coloured sheen. Gated on detectFoil so a non-foil scan never
-      // pays for these passes, and last in the ladder so a foil that reads
-      // normally never reaches them.
+      // Then the three chroma projections, which throw the colour away
+      // instead of averaging it in. A holographic sheen is saturated light,
+      // and the luma every pass above uses averages it straight into the ink
+      // — the contrast is gone before any stretch or threshold runs, which is
+      // why an ordinary phone photo of a foil was the pipeline's worst case.
+      // NOT gated on detectFoil: that detector is tuned conservatively for
+      // PRICING ("false means unknown, not non-foil") and does not fire on a
+      // sheen at all, and the win turned out to be much wider than foil
+      // anyway, because card art is saturated in general.
+      //
+      // chroma-min/max split by the text's own polarity over a coloured
+      // ground. chroma-sat answers the opposite layout — a metallic NAME on a
+      // comparatively neutral bar, which is what a Yu-Gi-Oh Ultra or Secret
+      // Rare actually prints. It is last because it is the narrowest: a card
+      // whose name reads at any rung above never reaches it.
       const bandVariants =
         darkFrame && !firstRead
           ? (['binary'] as const)
-          : (['binary', 'binary-flip', 'chroma-min', 'chroma-max'] as const)
+          : (['binary', 'binary-flip', 'chroma-min', 'chroma-max', 'chroma-sat'] as const)
       for (const variant of bandVariants) {
         bail()
         if (outOfOcrRoad()) break

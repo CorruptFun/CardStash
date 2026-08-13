@@ -28,18 +28,35 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
 4. **Binary retries** — primary band at 960px, Otsu-binarized, BOTH
    polarities (`binary`, `binary-flip`) — ornate faces defeat the mean-luma
    polarity heuristic; this pass cracks stylized type the stretch pass
-   mangles. Then BOTH chroma projections (`chroma-min` = min(R,G,B),
-   `chroma-max` = max(R,G,B)), which throw the colour away instead of
-   averaging it in: card text is very nearly neutral even on a foil while a
-   sheen or a coloured plate is not, so the extreme channels separate what
-   Rec.601 luma fuses. min for light text on colour, max for dark text on
-   colour — complementary, same reason both binarization polarities are.
+   mangles. Then the THREE chroma projections (`chroma-min` = min(R,G,B),
+   `chroma-max` = max(R,G,B), `chroma-sat` = max−min), which throw the colour
+   away instead of averaging it in: card text is very nearly neutral even on a
+   foil while a sheen or a coloured plate is not, so the extreme channels
+   separate what Rec.601 luma fuses. min for light text on colour, max for
+   dark text on colour — complementary, same reason both binarization
+   polarities are.
    Measured +16 cells on the standard battery and +4 on the foil battery,
    with zero new wrong cards, and the run got FASTER (a hit here skips the
    whole-card PSM-3 sweep). Not gated on `detectFoil`: that detector is tuned
    conservatively for PRICING ("false means unknown") and does not fire on
    sheen at all — and the win is much wider than foil anyway, because card
    art is saturated in general.
+
+   `chroma-sat` answers the opposite LAYOUT: a metallic name on a
+   comparatively neutral bar (Yu-Gi-Oh Ultra/Secret Rares), where the TEXT is
+   the coloured thing. Level projections lose that case structurally — a metal
+   is a RANGE, shadow → base → highlight, and the range straddles the bar's
+   own level, so contrast changes SIGN inside a single glyph and no downstream
+   stretch or threshold can undo it. Saturation holds one polarity across the
+   whole range, because a metal's colourfulness barely moves while its
+   brightness swings. Silver has no other answer at all: near-neutral by
+   construction, so every intensity projection collapses onto the paper, and
+   that same neutrality is what makes it stand out here. Measured +4 on the
+   foil-text battery and YGO 34/36 → 36/36 on the standard one. LAST in the
+   ladder because it is the narrowest — a name that reads at any rung above
+   never reaches it. Its polarity comes from histogram SKEW, not mean
+   brightness: in a saturation channel a low mean means desaturated, which
+   says nothing about which side the text is on (lesson 28).
 5. **Anywhere sweep** — whole card at 700px, PSM 3 (promos/full-arts put
    names anywhere).
 6. **Corner-first ID** (last resort, hinted only) — escalating collector
@@ -114,7 +131,20 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    directional — it only rules a game OUT, only on the shape it cannot print,
    and a strip that read nothing rules out nothing. Measured over the matrix:
    fires on 41/81 Pokémon cells, **0/36 Yu-Gi-Oh** ones.
-8. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
+8. **A bare Pokémon species must survive its own rules box**
+   (`parsePokemonVariant`, corner.ts). Dropping a two-letter suffix leaves a
+   name that matches a real card EXACTLY — "Tauros" for a Tauros GX, score
+   1.0 — so no threshold can reject it and the answer is a confident wrong
+   card at the wrong price. The card declares the suffix a second time in the
+   rules box, in sentence-sized type, inside the bottom strip already read for
+   the collector line. When the matched name carries NO suffix and the strip
+   declares one, the declared variant must resolve to a real card or the match
+   is refused. Strictly narrowing: a name band that DID read a suffix is left
+   alone, and the parser is anchored on "Pokémon"/"rule"/"power" beside the
+   marker so a stray "ex" in flavour text is not a declaration. Measured over
+   162 captured Pokémon cells: 60 fires, 60 correct, 0 false, silent on every
+   cell of the one no-suffix fixture.
+9. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
    `trimTrailingJunk` could shed everything but a two-letter head ("gr ee" →
    "gr"); the matrix spent 119 lookups on such fragments and not one ever
    identified a card, while each was a chance to hit a real name exactly in a

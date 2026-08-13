@@ -34,7 +34,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `npm run test:unit` — node tests (corner parsing, name candidates, harness
   stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
-  machine-generated `harness-fixtures` branch — never merge it). **Never
+  machine-generated `harness-fixtures` branch — never merge it).
+  `npm run test:photos` runs the hand-curated real photographs in
+  `tests/harness/photos/` — those ARE committed here, because CI force-pushes
+  the fixtures branch and a photograph can't be regenerated. **Never
   change scan-pipeline code without running the matrix before and after** —
   the workflow, thresholds, guard invariants and hard-won gotchas live in
   the `scan-harness` skill (`.claude/skills/scan-harness/`); read it first.

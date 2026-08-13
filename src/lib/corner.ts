@@ -312,3 +312,72 @@ export function looksLikeCollectorLine(text: string): boolean {
   if (/(?:^|\D)\d{8}(?!\d)/.test(upper)) return true
   return false
 }
+
+/**
+ * Pokémon suffix variants, longest first so "VMAX" is never read as "V".
+ * Lowercase because every comparison here runs on flattened text.
+ */
+const POKEMON_VARIANTS = ['vmax', 'vstar', 'gx', 'ex', 'v'] as const
+
+/** Flatten OCR text to bare lowercase words — accents and punctuation gone. */
+function flattenText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/** The variant suffix a card NAME already carries, if any. */
+export function pokemonNameSuffix(name: string): string | null {
+  const words = flattenText(name).split(' ')
+  const last = words[words.length - 1]
+  return (POKEMON_VARIANTS as readonly string[]).includes(last) ? last : null
+}
+
+/**
+ * Rules-box phrasings, in an order that resolves the prefix collisions:
+ * "Pokémon VMAX" and "Pokémon VSTAR" both start with "Pokémon V".
+ * Matched against flattened text, so "Pokémon-GX rule" and the OCR's
+ * "Pokémon-G Xx" both reduce to something these accept.
+ */
+const POKEMON_VARIANT_RULES: readonly (readonly [RegExp, string])[] = [
+  [/pokemon\s*v\s*max/, 'VMAX'],
+  [/v\s*max\s*rule/, 'VMAX'],
+  [/pokemon\s*v\s*star/, 'VSTAR'],
+  [/v\s*star\s*(rule|power)/, 'VSTAR'],
+  [/pokemon\s*g\s*x/, 'GX'],
+  [/g\s*x\s*rule/, 'GX'],
+  [/pokemon\s*ex(\s|$)/, 'ex'],
+  [/pokemon\s*v(\s|$)/, 'V'],
+]
+
+/**
+ * Which suffix variant does the card DECLARE about itself?
+ *
+ * Pokémon's suffix variants are the pipeline's most expensive confusion.
+ * "Tauros" and "Tauros GX" are different cards at different prices, and when
+ * the OCR drops a two-letter suffix the bare species matches a real card
+ * EXACTLY — score 1.0, every threshold cleared, answered with full
+ * confidence. No bar can catch that, because nothing about the read is weak;
+ * it is precisely correct about a card that is not the one in frame.
+ *
+ * The collector line is the designed arbiter and it is also the smallest type
+ * on the card, so it fails exactly when it is most needed (measured: on the
+ * cell that produced this wrong card it read nothing at all). But a suffix
+ * card says what it is a SECOND time, in sentence-sized type, in the rules
+ * box: "Pokémon-GX rule", "When your Pokémon VMAX is Knocked Out, your
+ * opponent takes 3 Prize cards." That text is already read — it shares the
+ * bottom strip the collector line is scraped from — and was being discarded.
+ *
+ * Strictly evidence, never tolerance: it can only ever say that a card
+ * carries a suffix the matched name lacks. Measured over 162 Pokémon cells of
+ * captured traces it fired 60 times, every one correct, and stayed silent on
+ * all 24 cells of the one fixture whose card genuinely has no suffix.
+ */
+export function parsePokemonVariant(text: string): string | null {
+  const flat = flattenText(text)
+  for (const [pattern, suffix] of POKEMON_VARIANT_RULES) if (pattern.test(flat)) return suffix
+  return null
+}

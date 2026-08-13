@@ -9,6 +9,8 @@
  *
  *   node tests/harness/run-matrix.mjs                    # full matrix
  *     --games=pokemon,riftbound   --degradations=clean,glare
+ *     --photos            also run the real-photo cells (tests/harness/photos)
+ *     --photos-only       run ONLY those
  *     --keys=tauros-fa-secret     --mode=hinted|auto|both
  *     --pages=3                   # parallel browser pages
  *     --out=tests/harness/report/run.json
@@ -152,7 +154,7 @@ async function main() {
   const fixtures = manifest.fixtures.filter(
     (f) => (!gamesFilter || gamesFilter.includes(f.game)) && (!keysFilter || keysFilter.includes(f.key)),
   )
-  if (!fixtures.length) {
+  if (!fixtures.length && !photosOnly) {
     console.error('Nothing matches the filters.')
     process.exit(2)
   }
@@ -163,9 +165,12 @@ async function main() {
   // An explicit --degradations filter may also select the opt-in extras
   // (dim/dark); the default battery stays the standard, comparable set.
   const cells = []
+  // --photos runs the photo cells IN ADDITION to the battery; --photos-only
+  // runs just them (the fast loop when new photos land).
+  const photosOnly = !!args['photos-only']
   const degradations = (all) =>
     degFilter ? [...all, ...EXTRA_DEGRADATION_KEYS].filter((d) => degFilter.includes(d)) : all
-  for (const fixture of fixtures) {
+  for (const fixture of photosOnly ? [] : fixtures) {
     const imageUrl = `/tests/harness/fixtures/${fixture.image}`
     for (const degradation of degradations(DEGRADATION_KEYS)) {
       if (mode !== 'auto') cells.push({ fixture, degradation, hint: fixture.game, imageUrl })
@@ -174,7 +179,48 @@ async function main() {
       }
     }
   }
-  console.log(`${fixtures.length} fixtures → ${cells.length} cells on ${pages} page(s)\n`)
+  // Photo cells: real photographs, graded against a hand-written manifest.
+  //
+  // They exist because every fixture is a flat SCAN. TCGplayer and TCGdex
+  // both shoot cards flat and evenly lit, which is what kills the diffraction
+  // a phone sees live — so the foil degradations are a MODEL of foil, and a
+  // model can only ever confirm the failure it was built to show. A real
+  // photo is the only evidence that the model is honest.
+  //
+  // Two consequences shape the plumbing. A photo already contains the camera
+  // degradation, so it bypasses compose() entirely (see page.html). And it
+  // cannot be machine-regenerated, so it CANNOT live on harness-fixtures,
+  // which CI force-pushes — these are committed under tests/harness/photos/
+  // with their ground truth beside them.
+  if (args.photos || photosOnly) {
+    const dir = join(HERE, 'photos')
+    const file = join(dir, 'manifest.json')
+    if (!existsSync(file)) {
+      console.error(`No photo manifest at ${file} — see tests/harness/photos/README.md`)
+      process.exit(2)
+    }
+    const photos = JSON.parse(readFileSync(file, 'utf8')).photos ?? []
+    if (!photos.length) {
+      console.log(`No photos yet in ${dir} — see its README for how to add one.`)
+    }
+    for (const photo of photos) {
+      if (gamesFilter && !gamesFilter.includes(photo.game)) continue
+      if (keysFilter && !keysFilter.includes(photo.key)) continue
+      cells.push({
+        fixture: { game: photo.game, key: photo.key, name: photo.name },
+        degradation: photo.label ?? 'photo',
+        hint: photo.game,
+        imageUrl: `/tests/harness/photos/${photo.file}`,
+        photo: true,
+      })
+    }
+  }
+
+  if (!cells.length) {
+    console.error('Nothing matches the filters.')
+    process.exit(2)
+  }
+  console.log(`${cells.length} cells on ${pages} page(s)\n`)
 
   // --- dev server -----------------------------------------------------------
   const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
@@ -235,7 +281,14 @@ async function main() {
           const run = (p) =>
             p.evaluate(
               (c) => window.__harness.runCell(c),
-              { imageUrl: cell.imageUrl, degradation: cell.degradation, hint: cell.hint, stack: Number(args.stack) || 1 },
+              {
+                imageUrl: cell.imageUrl,
+                degradation: cell.degradation,
+                hint: cell.hint,
+                game: cell.fixture.game,
+                photo: cell.photo ?? false,
+                stack: Number(args.stack) || 1,
+              },
             )
           let result
           try {
@@ -379,6 +432,9 @@ async function main() {
  * --degradations so per-game regression gates stay comparable across
  * reports that predate them. */
 const DEGRADATION_KEYS = ['clean', 'small-offset', 'soft-focus', 'rot+5', 'rot-5', 'perspective', 'glare', 'lowlight', 'worst']
-const EXTRA_DEGRADATION_KEYS = ['dim', 'dark', 'sideways', 'sideways-ccw', 'foil', 'foil-worst']
+const EXTRA_DEGRADATION_KEYS = [
+  'dim', 'dark', 'sideways', 'sideways-ccw',
+  'foil', 'foil-worst', 'foil-text', 'foil-text-silver', 'foil-text-worst',
+]
 
 main()

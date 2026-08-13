@@ -97,13 +97,158 @@ export function trimToCard(img) {
  *   seed?           PRNG seed (defaults from the numeric params)
  * }
  */
+/**
+ * Where each game prints the card NAME itself, as a rect in card fractions.
+ *
+ * Deliberately TIGHTER than `nameBands` in ocr.ts: those are generous search
+ * bands for the reader, this is the printed name line, because `foilText`
+ * re-inks the glyphs it finds inside the rect. A rect that spilled onto art
+ * would metallize art edges too — the mask keys on dark-stroke-over-lighter-
+ * ground, and art is full of that. The horizontal bounds earn their keep the
+ * same way: they keep Magic's mana cost and Yu-Gi-Oh's attribute orb out.
+ *
+ * Calibrated by rendering each game's fixture and LOOKING at it
+ * (tests/harness/preview.mjs) — the same rule that caught the first foil
+ * model's full-card rainbow.
+ */
+const NAME_RECTS = {
+  mtg: { x: 0.06, y: 0.038, w: 0.72, h: 0.048 },
+  pokemon: { x: 0.08, y: 0.038, w: 0.66, h: 0.052 },
+  yugioh: { x: 0.04, y: 0.028, w: 0.78, h: 0.062 },
+  riftbound: { x: 0.08, y: 0.560, w: 0.72, h: 0.055 },
+  lorcana: { x: 0.14, y: 0.468, w: 0.70, h: 0.050 },
+  starwars: { x: 0.10, y: 0.468, w: 0.72, h: 0.050 },
+  onepiece: { x: 0.10, y: 0.850, w: 0.76, h: 0.048 },
+  gundam: { x: 0.10, y: 0.850, w: 0.76, h: 0.048 },
+  digimon: { x: 0.08, y: 0.042, w: 0.70, h: 0.050 },
+}
+
+/**
+ * Metals as (shadow, base, highlight). A foil is not a colour, it is the
+ * RANGE a glyph sweeps as the card tilts, and the difference between the two
+ * metals is the whole problem: gold keeps a hue at every stop in that range,
+ * silver does not.
+ */
+const METALS = {
+  // Yu-Gi-Oh Ultra Rare: gold name on the beige name bar. Luma contrast
+  // against that bar is ~50 where black ink gives ~180 — but min(R,G,B)
+  // contrast is ~150, because blue is where gold is dark and beige is not.
+  // Coloured text on neutral ground: the exact inverse of the case the
+  // chroma projections were added for, and already served by chroma-min.
+  gold: { shadow: [92, 66, 14], base: [201, 163, 52], highlight: [255, 241, 186] },
+  // Secret Rare: silver/mirror. Near-neutral at every stop (R≈G≈B), so every
+  // intensity projection collapses — luma, chroma-min, chroma-max and
+  // saturation all read it as roughly the bar it sits on. What survives is
+  // that it goes BRIGHTER than the bar in places and DARKER in others: the
+  // signal is local variation, not level.
+  silver: { shadow: [72, 74, 82], base: [178, 180, 186], highlight: [252, 252, 255] },
+}
+
+/** Separable box blur over a scalar plane — the local-background estimate. */
+function boxBlur(src, w, h, r) {
+  const tmp = new Float32Array(w * h)
+  const out = new Float32Array(w * h)
+  const norm = 1 / (2 * r + 1)
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    let sum = 0
+    for (let x = -r; x <= r; x++) sum += src[row + Math.min(w - 1, Math.max(0, x))]
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum * norm
+      sum += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)]
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0
+    for (let y = -r; y <= r; y++) sum += tmp[Math.min(h - 1, Math.max(0, y)) * w + x]
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum * norm
+      sum += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]
+    }
+  }
+  return out
+}
+
+/**
+ * Foil applied to the NAME'S GLYPHS rather than to the whole card.
+ *
+ * `foil` above sheens the card uniformly, which models a holo surface but not
+ * what Yu-Gi-Oh Ultra and Secret Rares actually do: print the name itself in
+ * metal and leave the bar under it matte. That inverts the problem the chroma
+ * projections were built for — there the text was neutral and the background
+ * saturated, here the background is a comparatively neutral beige bar and the
+ * TEXT is the coloured thing. Without this degradation nothing about that
+ * case is measurable, because the fixtures are flat scans of ordinary prints.
+ *
+ * Which is also how it works: the name arrives as dark ink on the bar, so
+ * metallizing means finding those strokes and re-inking them. A soft mask of
+ * pixels darker than their local surround (that is what text IS at this
+ * scale), then a directional specular field carrying each stroke through the
+ * metal's shadow→base→highlight range. Feathered rather than hard-cut so
+ * glyph edges keep their antialiasing — a hard mask would hand Tesseract
+ * crisper edges than any real photo has and flatter the result.
+ */
+function applyFoilText(card, rand, strength, metal, rect) {
+  const palette = METALS[metal] ?? METALS.gold
+  const x0 = Math.max(0, Math.floor(rect.x * card.width))
+  const y0 = Math.max(0, Math.floor(rect.y * card.height))
+  const bw = Math.min(card.width - x0, Math.round(rect.w * card.width))
+  const bh = Math.min(card.height - y0, Math.round(rect.h * card.height))
+  if (bw < 8 || bh < 8) return
+
+  const cctx = card.getContext('2d', { willReadFrequently: true })
+  const image = cctx.getImageData(x0, y0, bw, bh)
+  const d = image.data
+  const luma = new Float32Array(bw * bh)
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    luma[p] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) / 256
+  }
+  // Local background at roughly a glyph's height: wider than a stroke so a
+  // stroke never averages itself away, narrower than the bar so a gradient
+  // plate is still tracked.
+  const blurred = boxBlur(luma, bw, bh, Math.max(2, Math.round(bh * 0.42)))
+
+  // Two harmonics. The coarse one is how the card is tilted to the light
+  // (which letters catch it); the fine one is the mirror-foil texture inside
+  // a single stroke. That finer scale is most of what lets a human read a
+  // silver name and is invisible to any projection that looks at level alone.
+  const angle = 0.35 + rand() * 0.5
+  const ux = Math.cos(angle)
+  const uy = Math.sin(angle)
+  const coarse = bw * (0.20 + rand() * 0.12)
+  const fine = bw * 0.035
+  const phase0 = rand() * Math.PI * 2
+
+  for (let y = 0, p = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++, p++) {
+      // 6→26 grey levels: ramps through a stroke's antialiased skirt and
+      // saturates on its core.
+      const mask = Math.min(1, Math.max(0, (blurred[p] - luma[p] - 6) / 20)) * strength
+      if (mask <= 0.002) continue
+      const t = x * ux + y * uy
+      const s = Math.min(
+        1,
+        Math.max(0, 0.5 + 0.34 * Math.sin((t / coarse) * Math.PI * 2 + phase0) + 0.16 * Math.sin((t / fine) * Math.PI * 2)),
+      )
+      const from = s < 0.5 ? palette.shadow : palette.base
+      const to = s < 0.5 ? palette.base : palette.highlight
+      const k = s < 0.5 ? s * 2 : (s - 0.5) * 2
+      const i = p * 4
+      for (let c = 0; c < 3; c++) d[i + c] = d[i + c] * (1 - mask) + (from[c] + (to[c] - from[c]) * k) * mask
+    }
+  }
+  cctx.putImageData(image, x0, y0)
+}
+
 export function compose(img, spec = {}) {
   const {
     fill = 0.92, dx = 0, dy = 0, rotate = 0, tilt = 0,
     downscale = 1, blurPx = 0, glare = 0, brightness = 1, noise = 0, foil = 0,
+    foilText = 0, foilTextMetal = 'gold', game,
   } = spec
   const seed =
-    spec.seed ?? Math.round(fill * 97 + rotate * 13 + tilt * 57 + glare * 31 + brightness * 71 + noise * 7 + foil * 41 + 1)
+    spec.seed ??
+    Math.round(fill * 97 + rotate * 13 + tilt * 57 + glare * 31 + brightness * 71 + noise * 7 + foil * 41 + foilText * 23 + 1)
   const rand = mulberry32(seed)
 
   const src = trimToCard(img)
@@ -126,6 +271,13 @@ export function compose(img, spec = {}) {
     } else {
       ctx.drawImage(img, src.sx, src.sy, src.sw, src.sh, 0, 0, cardW, cardH)
     }
+  }
+
+  // Foil on the name's glyphs. Before the tilt warp and before the frame is
+  // composited, because the metal is part of the PRINT: the camera's geometry
+  // and softness happen to it afterwards, not the other way round.
+  if (foilText > 0 && NAME_RECTS[game]) {
+    applyFoilText(card, rand, foilText, foilTextMetal, NAME_RECTS[game])
   }
 
   // Perspective tilt: top edge narrower + rows compressed toward the top,
@@ -298,4 +450,18 @@ export const DEGRADATIONS = {
   // phone photo of one — sheen plus a soft, slightly glared hand-held frame.
   foil: { fill: 0.92, foil: 0.62 },
   'foil-worst': { fill: 0.8, foil: 0.78, downscale: 0.7, blurPx: 0.9, glare: 0.4 },
+  // Foil on the NAME rather than on the card — the Yu-Gi-Oh Ultra/Secret Rare
+  // case, which inverts what `foil` models. `foil` leaves neutral text on a
+  // saturated ground; these put a metallic name on a comparatively neutral
+  // bar. 'foil-text' is an Ultra Rare (gold name, matte card, well lit).
+  // 'foil-text-silver' is a Secret Rare: a silver name, which is near-neutral
+  // at every tilt and therefore collapses every intensity projection, over
+  // the mild whole-card holo those cards carry. 'foil-text-worst' is the
+  // ordinary hand-held photo of one.
+  'foil-text': { fill: 0.92, foilText: 0.95, foilTextMetal: 'gold' },
+  'foil-text-silver': { fill: 0.92, foilText: 0.95, foilTextMetal: 'silver', foil: 0.3 },
+  'foil-text-worst': {
+    fill: 0.8, foilText: 0.95, foilTextMetal: 'silver', foil: 0.42,
+    downscale: 0.7, blurPx: 0.9, glare: 0.35,
+  },
 }

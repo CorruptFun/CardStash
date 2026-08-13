@@ -22,7 +22,10 @@ to 67% (Pokémon 3%→32%, Riftbound 48%→74%, One Piece 39%→100%, MTG 73%→
 YGO 31%→81%), then extended in v0.7.1 for harsh low light (dark scenes
 6/21 → 17/21) and again for FOIL, which took the standard battery 71% → 77%
 (Riftbound 83%→94%, YGO 81%→94%, MTG 90%→96%) — see lesson 23, the single
-highest-yield change since the overhaul. Everything below exists because
+highest-yield change since the overhaul — and again for foil on the NAME's
+glyphs (`chroma-sat`, YGO 94%→100% standard and 11%→56% on the new foil-text
+battery) plus the rules-box variant guard that removed the last wrong card
+(lessons 26–29). Everything below exists because
 synthetic tests passed while real cards failed on-device — only real imagery
 finds these bugs.
 
@@ -47,6 +50,8 @@ npm run test:unit          # node tests: corner parsing, candidates, stubs
 npm run test:scan          # full matrix (~5 min, 228 cells, 3 pages)
 npm run test:lowlight      # harsh low light (lowlight/dim/dark) + 3-frame stack
 npm run test:foil          # holographic foil sheen (foil/foil-worst)
+npm run test:foiltext      # foil on the NAME's glyphs (Ultra/Secret Rare)
+npm run test:photos        # real photographs (tests/harness/photos/)
 npm run test:capture       # real captureFrameStacked in a browser (noise ↓)
 node tests/harness/run-matrix.mjs \
   --games=pokemon,riftbound --degradations=clean,glare --mode=hinted \
@@ -54,6 +59,8 @@ node tests/harness/run-matrix.mjs \
 node tests/harness/run-matrix.mjs \
   --baseline=tests/harness/report/baseline.json        # exit 1 on any
                                                        # per-game regression
+node tests/harness/preview.mjs \
+  --keys=dark-magician --degradations=foil-text        # LOOK at a degradation
 npm run build && node tests/harness/smoke-app.mjs      # built-bundle smoke
 ```
 

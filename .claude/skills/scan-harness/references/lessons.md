@@ -162,6 +162,73 @@ result seems absurd, check this list before writing code.
     fixtures). Note the fixtures can never supply foil themselves: TCGplayer
     and TCGdex ship flat SCANS, which kill the diffraction a phone sees live.
 
+## Foil on the GLYPHS (the round after)
+
+26. **A metal is not a colour, it is a RANGE — and the range straddles the
+    background.** Yu-Gi-Oh Ultra Rares print the card NAME in gold foil and
+    Secret Rares in silver, on a comparatively neutral beige bar: coloured
+    text on plain ground, the exact inverse of lesson 23. The obvious move is
+    to reuse the chroma pair, and a worked example on a single gold value
+    (212,175,55 on 235,225,205) says chroma-min should win by a mile —
+    contrast 150 against luma's 46. It does not. Model the metal properly,
+    with the shadow → base → highlight range a stroke actually sweeps as the
+    card tilts, and that range CROSSES the bar's own level: within one glyph
+    some strokes read darker than the bar and some lighter. Measured on the
+    new battery, luma, chroma-min AND chroma-max all change sign across the
+    range for both metals, and all three read as mush. A projection whose
+    contrast changes sign inside the text cannot be rescued by any stretch or
+    threshold downstream — that is the whole failure, and a flat-colour
+    worked example cannot show it.
+27. **Saturation is the projection that survives, because a metal's
+    colourfulness barely moves while its brightness swings.** `chroma-sat` =
+    max−min holds ONE polarity across the whole specular range for both
+    metals — gold stays more colourful than the bar at every stop (78/149/69
+    vs 52), silver stays less at every stop (10/8/3 vs 52). Silver is the case
+    with no other answer: it is near-neutral by construction, so every
+    intensity projection collapses onto the paper, and that same neutrality is
+    exactly what makes it stand out in a saturation channel. The property that
+    defeats the others is the signal. Measured: YGO 1/9 → 5/9 on the foil-text
+    battery and 34/36 → **36/36** on the standard one, zero new wrong cards,
+    +3% wall clock. It does NOT subsume the chroma pair, which was the
+    hypothesis worth testing — gold's one win came from chroma-max, so all
+    three ship.
+28. **The polarity heuristic has to be re-derived per projection.** Every
+    other variant decides "is the text light or dark" from the crop's
+    brightness, because a dark plate carries light type. In a saturation
+    channel a low mean means DESATURATED, which says nothing about the text,
+    and the heuristic silently gets silver backwards. The right question there
+    is only "is the text more colourful than its surround, or less", and the
+    histogram's SKEW answers it without knowing which pixels are text: text is
+    always the minority population, so it pulls the mean off the median in its
+    own direction. Don't port a heuristic to a new channel because the code
+    compiles.
+29. **A perfect match to the wrong card is invisible to every threshold.**
+    Drop "GX" off a read and what remains — "Tauros" — is a real card, matched
+    EXACTLY, score 1.0. Every quality-scaled bar in the matcher exists to
+    reject weak fits; this is a flawless fit to the wrong card, so no bar can
+    see it, and lesson 6's instinct (tighten something) has nothing to bite
+    on. Only other evidence can. The collector line is the designed arbiter
+    and is also the smallest type on the card — on the cell that produced this
+    wrong card it read nothing at all — but a suffix card declares itself a
+    SECOND time in sentence-sized type, in the rules box ("Pokémon-GX rule",
+    "When your Pokémon VMAX is Knocked Out"). That text was already being read
+    in the same bottom strip and thrown away. Validate a parser like this
+    against the traces you already have before touching the pipeline: over 162
+    captured Pokémon cells it fired 60 times, every one correct, and stayed
+    silent on all 24 cells of the only fixture whose card has no suffix. The
+    silence is the half that matters — a false "ex" would manufacture exactly
+    the wrong-card class the guard removes.
+30. **A synthetic degradation is a model, and the fixtures can never supply
+    the real thing.** TCGplayer and TCGdex both ship flat SCANS, so no fixture
+    is or can be a foil. `foil-text` metallizes the name band's glyphs by
+    finding strokes darker than their local surround and re-inking them
+    through a specular field — a faithful-LOOKING model built by the same
+    person who then measures against it. Real photographs bypass `compose()`
+    entirely (they already contain the lens, sensor and shake it simulates)
+    and live in `tests/harness/photos/`, committed, NOT on `harness-fixtures`
+    — CI force-pushes that branch and a photograph cannot be regenerated.
+    Where a photo disagrees with the model, the photo wins.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review

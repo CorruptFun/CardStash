@@ -35,6 +35,26 @@
       return loaded
     }
 
+    /**
+     * A real photograph, scaled to what the app's capture would produce.
+     * captureFrame() in lib/camera.ts caps the long edge at CAPTURE_MAX_EDGE
+     * and hands identifyFrame the result, so a photo cell that skipped this
+     * would be testing the pipeline at a resolution the app never sees.
+     */
+    function fitPhoto(img, maxEdge) {
+      const w = img.naturalWidth ?? img.width
+      const h = img.naturalHeight ?? img.height
+      const scale = Math.min(1, maxEdge / Math.max(w, h))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(w * scale))
+      canvas.height = Math.max(1, Math.round(h * scale))
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      return canvas
+    }
+
     window.__harness = {
       degradations: Object.keys(DEGRADATIONS),
 
@@ -44,30 +64,43 @@
       },
 
       /**
-       * cell: { imageUrl, degradation, hint ('auto' | game), overrides?, stack? }
+       * cell: { imageUrl, degradation, hint ('auto' | game), game, overrides?,
+       *         stack?, photo? }
        * stack: N simulates the phone's dark-scene temporal averaging —
        * N composes of the SAME cell with different noise seeds, averaged.
        * Sensor noise is independent per frame; the augment noise is seeded,
        * so varying the seed per "frame" reproduces the same physics.
+       * photo: the image is a REAL photograph, so it already contains
+       * everything compose() exists to simulate — lens, sensor, lighting,
+       * hand shake, and a genuine foil's diffraction, which a flat scan can
+       * never show. Composing it again would degrade a degraded frame and
+       * measure a camera nobody owns, so a photo cell bypasses compose()
+       * entirely and is only resized to what the app's own capture would
+       * hand identifyFrame (camera.ts CAPTURE_MAX_EDGE).
        * Returns { outcome, ms, trace }.
        */
       async runCell(cell) {
         useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
         const img = await loadImage(cell.imageUrl)
-        const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), ...(cell.overrides ?? {}) }
-        let canvas = compose(img, spec)
-        if ((cell.stack ?? 1) > 1) {
-          const ctx = canvas.getContext('2d', { willReadFrequently: true })
-          const base = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          const sum = new Float32Array(base.data.length)
-          for (let i = 0; i < base.data.length; i++) sum[i] = base.data[i]
-          for (let n = 1; n < cell.stack; n++) {
-            const frame = compose(img, { ...spec, seed: (spec.seed ?? 1) + n * 7919 })
-            const data = frame.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data
-            for (let i = 0; i < data.length; i++) sum[i] += data[i]
+        let canvas
+        if (cell.photo) {
+          canvas = fitPhoto(img, cell.maxEdge ?? 1600)
+        } else {
+          const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), game: cell.game, ...(cell.overrides ?? {}) }
+          canvas = compose(img, spec)
+          if ((cell.stack ?? 1) > 1) {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+            const base = ctx.getImageData(0, 0, canvas.width, canvas.height)
+            const sum = new Float32Array(base.data.length)
+            for (let i = 0; i < base.data.length; i++) sum[i] = base.data[i]
+            for (let n = 1; n < cell.stack; n++) {
+              const frame = compose(img, { ...spec, seed: (spec.seed ?? 1) + n * 7919 })
+              const data = frame.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data
+              for (let i = 0; i < data.length; i++) sum[i] += data[i]
+            }
+            for (let i = 0; i < base.data.length; i++) base.data[i] = sum[i] / cell.stack
+            ctx.putImageData(base, 0, 0)
           }
-          for (let i = 0; i < base.data.length; i++) base.data[i] = sum[i] / cell.stack
-          ctx.putImageData(base, 0, 0)
         }
         clearScanCache()
         clearScanTraces()
@@ -99,6 +132,19 @@
               }
             : { ok: false, reason: outcome.reason, message: outcome.message, readName: outcome.readName ?? null },
         }
+      },
+
+      /**
+       * Render a composed cell to a PNG data URL. Looking at the picture is
+       * the only check that catches a degradation modelling a failure that
+       * does not happen — which is exactly how the first foil model (a
+       * full-card rainbow) got as far as it did.
+       */
+      async preview(cell) {
+        const img = await loadImage(cell.imageUrl)
+        if (cell.photo) return fitPhoto(img, cell.maxEdge ?? 1600).toDataURL('image/png')
+        const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), game: cell.game, ...(cell.overrides ?? {}) }
+        return compose(img, spec).toDataURL('image/png')
       },
 
       async shutdown() {

@@ -221,8 +221,32 @@ export interface OcrRect {
  *      coloured name plates, white type on full-arts).
  * They are complementary, which is why both are tried — the same reason
  * both binarization polarities are.
+ *
+ *   'chroma-sat' — max(R,G,B) - min(R,G,B): how COLOURFUL a pixel is, at
+ *      whatever brightness. For foil printed on the GLYPHS rather than under
+ *      them — a Yu-Gi-Oh Ultra Rare's gold name, a Secret Rare's silver one —
+ *      which inverts everything above: the text is the coloured thing and the
+ *      name bar it sits on is comparatively neutral.
+ *
+ *      Level-based projections lose that case for a reason no amount of
+ *      stretching fixes. Metal is not a colour, it is the RANGE a stroke
+ *      sweeps as the card tilts, from shadow through base to a blown-out
+ *      highlight — and that range STRADDLES the bar's own level, so within
+ *      one glyph some strokes read darker than the bar and some lighter.
+ *      Measured on the foil-text battery: for both metals, luma, chroma-min
+ *      and chroma-max all change sign across the specular range, and all
+ *      three read as mush. Saturation does not, because a metal's
+ *      colourfulness barely moves while its brightness swings: gold stays
+ *      colourful at every stop (78/149/69 against a beige bar's 52), silver
+ *      stays neutral at every stop (10/8/3 against that same 52).
+ *
+ *      Silver is the case that has no other answer. It is near-neutral by
+ *      construction (R≈G≈B), so every intensity projection collapses onto the
+ *      paper — and that same neutrality is exactly what makes it stand out in
+ *      a saturation channel. The property that defeats the others is the
+ *      signal here.
  */
-export type PrepVariant = 'normal' | 'binary' | 'binary-flip' | 'chroma-min' | 'chroma-max'
+export type PrepVariant = 'normal' | 'binary' | 'binary-flip' | 'chroma-min' | 'chroma-max' | 'chroma-sat'
 
 /**
  * Crop a region (fractions of the source), rescale toward `targetWidth`
@@ -270,19 +294,22 @@ const CONTRAST_TILES = 4
  * whole band (the global stretch it replaces did exactly that). Flat tiles
  * (blank borders) inherit the global levels so noise isn't amplified.
  */
-function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): void {
+export function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): void {
   const { data, width, height } = image
   const pixels = width * height
   const luma = new Uint8ClampedArray(pixels)
   const globalHist = new Uint32Array(256)
   let lumaSum = 0
-  const chroma = variant === 'chroma-min' ? -1 : variant === 'chroma-max' ? 1 : 0
+  const chroma = variant === 'chroma-min' ? -1 : variant === 'chroma-max' ? 1 : variant === 'chroma-sat' ? 2 : 0
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const y = chroma
-      ? chroma > 0
-        ? Math.max(data[i], data[i + 1], data[i + 2])
-        : Math.min(data[i], data[i + 1], data[i + 2])
-      : (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+    let y: number
+    if (chroma) {
+      const hi = Math.max(data[i], data[i + 1], data[i + 2])
+      const lo = Math.min(data[i], data[i + 1], data[i + 2])
+      y = chroma === 2 ? hi - lo : chroma > 0 ? hi : lo
+    } else {
+      y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+    }
     luma[p] = y
     lumaSum += y
     globalHist[y]++
@@ -331,7 +358,28 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
   // clearly dark crop so Tesseract always sees dark text on paper. The
   // 'binary-flip' variant forces the OPPOSITE call — full-art glyphs over
   // busy art regularly defeat the mean-luma heuristic.
-  const invert = variant === 'binary-flip' ? lumaSum / pixels >= 112 : lumaSum / pixels < 112
+  // Which way round is the text? For every other variant the answer is the
+  // crop's brightness — a dark plate carries light type. That reasoning does
+  // not transfer to 'chroma-sat', where a low mean means DESATURATED, which
+  // says nothing about whether the text is lighter or darker than its ground.
+  //
+  // The question there is only "is the text more colourful than what
+  // surrounds it, or less", and the histogram's SKEW answers it without
+  // needing to know which pixels are text. Text is always the minority
+  // population, so it moves the mean off the median in its own direction: a
+  // gold name on a neutral bar pulls the mean UP (invert, so the glyphs come
+  // out dark on light), while silver type on that same bar — or any neutral
+  // ink over saturated art, the case the chroma pair was added for — pulls it
+  // DOWN and is already the right way round. Ties default to no inversion,
+  // which is that second reading.
+  let invert: boolean
+  if (variant === 'chroma-sat') {
+    let median = 0
+    for (let mass = 0; median < 255 && mass < pixels / 2; median++) mass += globalHist[median]
+    invert = lumaSum / pixels > median + 2
+  } else {
+    invert = variant === 'binary-flip' ? lumaSum / pixels >= 112 : lumaSum / pixels < 112
+  }
   const values = new Uint8ClampedArray(pixels)
   for (let y = 0; y < height; y++) {
     const fy = Math.min(T - 1, Math.max(0, y / tileH - 0.5))
