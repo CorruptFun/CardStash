@@ -174,7 +174,11 @@ export interface CatalogCache {
   at: number
   /** Catalog-shape version; rows from older builds are refetched, not trusted. */
   v?: number
+  /** When product lists were last fully fetched; refreshes inside this window are prices-only for mature sets. */
+  productsAt?: number
   cards: Card[]
+  /** Parallel to `cards`: the TCGplayer group (set) id each card came from. */
+  cardGroups?: number[]
 }
 
 /** Small keyed cache row (TCGplayer group lists etc.); readers check `at` for TTL. */
