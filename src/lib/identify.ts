@@ -2,7 +2,7 @@ import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { OCR_BANDS, readCardNames, readRegionText, readSealedLines, type OcrRect } from './ocr'
+import { nameBands, readCardNames, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon } from './pokemon'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
@@ -157,8 +157,8 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
 const OCR_MATCH_THRESHOLD = 0.62
 /** Per-game budget for a name lookup: one slow card API mustn't stall the frame. */
 const OCR_MATCH_TIMEOUT_MS = 6_000
-/** Names tried per band — the card name is almost always the first clean line. */
-const OCR_NAMES_PER_BAND = 3
+/** Candidates tried per band — the name is usually the first line or the first joined pair. */
+const OCR_NAMES_PER_BAND = 4
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
@@ -170,9 +170,10 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   const tried = new Set<string>()
   let firstRead: string | undefined
   let cornerText: Promise<string> | null = null
-  // Bands are OCR'd one at a time so a hit in the cheap top band skips the
-  // rest of the work entirely.
-  for (const band of OCR_BANDS) {
+  // Bands are OCR'd one at a time, the game's most likely name position
+  // first (Riftbound & co. print names mid-card, not at the top), so a hit
+  // in the first band skips the rest of the work entirely.
+  for (const band of nameBands(gameHint)) {
     let names: string[]
     try {
       names = await readCardNames(canvas, band)

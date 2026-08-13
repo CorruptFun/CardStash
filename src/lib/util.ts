@@ -58,6 +58,22 @@ export function similarity(a: string, b: string): number {
   return 1 - levenshtein(na, nb) / Math.max(na.length, nb.length)
 }
 
+/**
+ * How well an OCR read matches a card name, forgiving a missing epithet:
+ * the card prints "JINX" over "Loose Cannon" but the catalog says
+ * "Jinx, Loose Cannon" (Lorcana's "Elsa - Snow Queen" splits the same way),
+ * so the name's leading segment counts almost as much as the whole. The
+ * small penalty keeps a full-name read ranked above a partial one.
+ */
+export function nameScore(read: string, cardName: string): number {
+  let score = similarity(read, cardName)
+  const lead = cardName.split(/,|:|\s[-–—]\s/)[0]?.trim()
+  if (lead && lead.length >= 3 && lead.length < cardName.length) {
+    score = Math.max(score, similarity(read, lead) - 0.05)
+  }
+  return score
+}
+
 export function normalizeName(name: string): string {
   return name
     .toLowerCase()

@@ -486,6 +486,15 @@ export async function searchCatalog(game: Game, query: string, signal?: AbortSig
     .map((r) => r.card)
 }
 
+/**
+ * Collector digits for matching: the leading run before any "/298" set-size
+ * suffix, zero-padding dropped — "045/298", "OGN-045" and a read of "45" all
+ * agree.
+ */
+function collectorDigits(value: string | null | undefined): string | undefined {
+  return value?.split('/')[0]?.replace(/\D+/g, '').replace(/^0+(?=\d)/, '') || undefined
+}
+
 export async function matchCatalog(
   game: Game,
   name: string,
@@ -495,13 +504,12 @@ export async function matchCatalog(
   const cards = await catalog(game)
   const ranked = rank(cards, name)
   if (!ranked.length) return null
-  const digits = number?.replace(/\D+/g, '')
+  const digits = collectorDigits(number)
   const set = setCode?.trim().toLowerCase()
   let best: Ranked | null = null
   for (const row of ranked.slice(0, 40)) {
     let score = row.score
-    if (digits && row.card.number?.replace(/\D+/g, '').replace(/^0+(?=\d)/, '') === digits.replace(/^0+(?=\d)/, ''))
-      score += 0.2
+    if (digits && collectorDigits(row.card.number) === digits) score += 0.2
     if (set && (row.card.setCode?.toLowerCase() === set || row.card.number?.toLowerCase().startsWith(set))) score += 0.1
     if (!best || score > best.score) best = { card: row.card, score }
   }

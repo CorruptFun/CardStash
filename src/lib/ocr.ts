@@ -1,3 +1,5 @@
+import type { Game } from './types'
+
 /**
  * On-device OCR: Tesseract.js, fully self-hosted. The runtime is bundled as
  * its own lazy chunk; the worker, the wasm cores and the English language
@@ -71,17 +73,36 @@ export interface OcrBand {
 }
 
 /**
- * Horizontal bands of a card crop that can hold the name line, cheapest
- * first. The scan loop OCRs them one at a time and stops on the first match.
- * Band 2 overlaps band 1's floor (so a name line straddling the cut is still
- * read whole) but not its whole area: `prepRegion` scales by width, so
- * re-OCRing band 1's rows again would reproduce identical pixels — and
- * identical candidates — for twice the runtime.
+ * Where each game prints its card name, as horizontal bands of a card crop,
+ * most-likely first — the scan loop OCRs them one at a time and stops on the
+ * first match, so order is expected cost. Magic, Pokémon, Yu-Gi-Oh and
+ * Digimon name their cards across the top; Riftbound, Lorcana and Star Wars:
+ * Unlimited put the name on a plate under the art (mid-card); One Piece and
+ * Gundam print it in the bottom banner. Auto mode has no game yet, so it
+ * sweeps top first, then the mid-card catchall. Bands overlap so a line
+ * straddling a cut is still read whole; `prepRegion` scales by width, so an
+ * overlap re-reads at the same scale and dedupes cleanly.
  */
-export const OCR_BANDS: readonly OcrBand[] = [
+const TOP_BANDS: readonly OcrBand[] = [
   { y: 0, h: 0.26 },
   { y: 0.2, h: 0.26 },
 ]
+const MID_BAND: OcrBand = { y: 0.44, h: 0.3 }
+const BOTTOM_BAND: OcrBand = { y: 0.66, h: 0.32 }
+const DEFAULT_BANDS: readonly OcrBand[] = [...TOP_BANDS, MID_BAND]
+
+const GAME_BANDS: Partial<Record<Game, readonly OcrBand[]>> = {
+  riftbound: [{ y: 0.46, h: 0.32 }, ...TOP_BANDS],
+  lorcana: [MID_BAND, ...TOP_BANDS],
+  starwars: [MID_BAND, ...TOP_BANDS],
+  onepiece: [BOTTOM_BAND, ...TOP_BANDS],
+  gundam: [BOTTOM_BAND, ...TOP_BANDS],
+}
+
+/** The name-band sweep for a game (or the auto-mode default sweep). */
+export function nameBands(game?: Game): readonly OcrBand[] {
+  return (game && GAME_BANDS[game]) || DEFAULT_BANDS
+}
 
 /** OCR runtime scales with pixel count; the name line survives this width fine. */
 const OCR_WIDTH = 640
@@ -127,9 +148,11 @@ function normalizeContrast(image: ImageData): void {
   const pixels = data.length / 4
   const luma = new Uint8ClampedArray(pixels)
   const histogram = new Uint32Array(256)
+  let lumaSum = 0
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     const y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
     luma[p] = y
+    lumaSum += y
     histogram[y]++
   }
   const clip = pixels * 0.02
@@ -138,30 +161,60 @@ function normalizeContrast(image: ImageData): void {
   let hi = 255
   for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
   const span = Math.max(1, hi - lo)
+  // Light type on a dark plate (Riftbound's name bar, collector lines on
+  // dark frames) reads far worse than dark-on-light: flip the polarity of a
+  // clearly dark crop so Tesseract always sees dark text on paper.
+  const invert = lumaSum / pixels < 112
   for (let p = 0, i = 0; p < pixels; p++, i += 4) {
-    const value = Math.max(0, Math.min(255, Math.round(((luma[p] - lo) * 255) / span)))
+    const stretched = Math.max(0, Math.min(255, Math.round(((luma[p] - lo) * 255) / span)))
+    const value = invert ? 255 - stretched : stretched
     data[i] = data[i + 1] = data[i + 2] = value
   }
 }
 
+/** A pair of short lines can be one split name — long lines are rules text. */
+const JOINABLE_LINE_LEN = 20
+
 /**
- * OCR one band of a card crop (the name line lives in the upper half) and
- * return plausible name candidates, best first.
+ * Card-name candidates from a band's OCR lines, best first. Champions and
+ * characters often split the name across two printed lines — Riftbound's
+ * "JINX" over "Loose Cannon" is catalogued as "Jinx, Loose Cannon", Lorcana
+ * stacks name over version — so each adjacent pair of short lines is also
+ * offered joined, ahead of its halves: an exact full-name hit outranks a
+ * partial one.
+ */
+export function nameCandidates(lines: string[]): string[] {
+  const out: string[] = []
+  const push = (value: string | null) => {
+    if (value && !out.some((seen) => seen.toLowerCase() === value.toLowerCase())) out.push(value)
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (i + 1 < lines.length && lines[i].length <= JOINABLE_LINE_LEN && lines[i + 1].length <= JOINABLE_LINE_LEN) {
+      push(cleanOcrLine(`${lines[i]} ${lines[i + 1]}`))
+    }
+    push(lines[i])
+  }
+  return out.slice(0, 6)
+}
+
+/**
+ * OCR one band of a card crop and return plausible name candidates, best
+ * first.
  */
 export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): Promise<string[]> {
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
   const { data } = await worker.recognize(region)
   const seen = new Set<string>()
-  const candidates: string[] = []
+  const lines: string[] = []
   for (const line of String(data?.text ?? '').split('\n')) {
     const cleaned = cleanOcrLine(line)
     if (cleaned && !seen.has(cleaned.toLowerCase())) {
       seen.add(cleaned.toLowerCase())
-      candidates.push(cleaned)
+      lines.push(cleaned)
     }
   }
-  return candidates.slice(0, 4)
+  return nameCandidates(lines)
 }
 
 /**
