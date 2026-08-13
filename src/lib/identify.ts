@@ -4,6 +4,7 @@ import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon } from './pokemon'
+import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
@@ -85,10 +86,31 @@ export async function identifyFrame(
   const mode = opts.mode ?? 'card'
   const config = settings()
   const gameHint = config.gameFilter === 'auto' ? undefined : config.gameFilter
+  beginScanTrace(mode, gameHint)
+  const startedAt = Date.now()
+  /** Every exit funnels through here so the diagnostics trace always closes. */
+  const finish = (outcome: IdentifyOutcome): IdentifyOutcome => {
+    endScanTrace(
+      outcome.ok
+        ? {
+            ok: true,
+            name: outcome.card.name,
+            game: outcome.card.game,
+            setCode: outcome.identification.setCode ?? outcome.card.setCode,
+            number: outcome.identification.number ?? outcome.card.number,
+            via: outcome.identification.via,
+            confidence: outcome.identification.confidence,
+            ms: Date.now() - startedAt,
+          }
+        : { ok: false, reason: outcome.reason, message: outcome.message, name: outcome.readName, ms: Date.now() - startedAt },
+    )
+    return outcome
+  }
   const cached = cacheLookup(hash, mode)
   const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
   if (cacheUsable && cached.card) {
-    return {
+    traceEvent('cache', { hit: true, card: cached.card.name })
+    return finish({
       ok: true,
       card: cached.card,
       identification: {
@@ -100,19 +122,20 @@ export async function identifyFrame(
         via: 'cache',
         foil: cached.foil,
       },
-    }
+    })
   }
   if (cacheUsable && !opts.ignoreMisses) {
-    return { ok: false, reason: 'cached-miss', message: 'Same frame as a recent miss' }
+    traceEvent('cache', { hit: false })
+    return finish({ ok: false, reason: 'cached-miss', message: 'Same frame as a recent miss' })
   }
 
   const outcome =
     mode === 'sealed' ? await identifySealedFrame(capture.canvas, gameHint) : await identifyViaOcr(capture.canvas, gameHint)
   if (outcome.ok) cacheStore(hash, mode, outcome.card, outcome.identification.foil)
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
-  // re-burn OCR + lookups every retry. A manual shutter tap bypasses this.
+  // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
   else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, null)
-  return outcome
+  return finish(outcome)
 }
 
 /** Pack/box front → set name → the set's sealed product. All on-device OCR. */
@@ -193,16 +216,32 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     // whose mid-card code refineFromCorner re-reads.
     cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
+      const lookupStarted = Date.now()
       const best = await bestMatchAcrossGames(name, games, {
         pokemonKey: config.pokemonKey,
         timeoutMs,
       }).catch(() => null)
+      traceEvent('lookup', {
+        read: name,
+        games: games.join(','),
+        matched: best?.card.name ?? null,
+        game: best?.card.game,
+        score: best ? Number(best.score.toFixed(3)) : null,
+        ms: Date.now() - lookupStarted,
+      })
       if (!best || best.score < OCR_MATCH_THRESHOLD) continue
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
       const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
       let card = refined?.card ?? best.card
       const foil = detectFoil(canvas)
+      traceEvent('refine', {
+        setCode: refined?.read.setCode ?? null,
+        number: refined?.read.number ?? null,
+        total: refined?.read.total ?? null,
+        edition: refined ? refined.card.setCode : null,
+        foil,
+      })
       // Sheen on a printing that never came foil: the copy in hand must be
       // a different printing — re-pick the newest foil-capable one.
       if (foil && !refined && card.game === 'mtg' && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')) {
