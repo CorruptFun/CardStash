@@ -1,3 +1,4 @@
+import { traceEvent } from './scandebug'
 import type { Game } from './types'
 
 /**
@@ -18,6 +19,9 @@ let primaryPromise: Promise<any> | null = null
 let cornerPromise: Promise<any | null> | null = null
 /** The resolved secondary — corner reads use it the moment it's ready. */
 let cornerWorker: any | null = null
+/** Bumped by stopOcr so an in-flight secondary spawn can't resurrect a
+ * terminated worker into the module slots. */
+let generation = 0
 
 async function spawnWorker(): Promise<any> {
   // The prebuilt ESM bundle's only export is `default` (the namespace).
@@ -52,9 +56,15 @@ function getWorker(): Promise<any> {
  * spawn failed, corner reads share the primary worker.
  */
 function ensureCornerWorker(): void {
+  const spawnedIn = generation
   cornerPromise ??= getWorker()
     .then(() => spawnWorker())
     .then((worker) => {
+      if (spawnedIn !== generation) {
+        // stopOcr ran while this spawned — don't resurrect into the slots.
+        worker.terminate().catch(() => {})
+        return null
+      }
       cornerWorker = worker
       return worker
     })
@@ -114,12 +124,16 @@ export interface OcrRect {
   h: number
 }
 
+export type PrepVariant = 'normal' | 'binary' | 'binary-flip'
+
 /**
  * Crop a region (fractions of the source), rescale toward `targetWidth`
  * (down for big name bands, up for tiny collector lines), grayscale and
- * stretch contrast.
+ * normalize. 'normal' is a locally-adaptive contrast stretch; 'binary'
+ * additionally thresholds to pure ink-on-paper — a different failure
+ * surface that cracks stylized type over busy art.
  */
-function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number): HTMLCanvasElement {
+function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number, variant: PrepVariant = 'normal'): HTMLCanvasElement {
   const sx = Math.max(0, Math.floor(rect.x * canvas.width))
   const sy = Math.max(0, Math.floor(rect.y * canvas.height))
   const sw = Math.max(1, Math.min(canvas.width - sx, Math.round(rect.w * canvas.width)))
@@ -134,7 +148,7 @@ function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: numbe
   ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
   try {
     const image = ctx.getImageData(0, 0, out.width, out.height)
-    normalizeContrast(image)
+    normalizeContrast(image, variant)
     ctx.putImageData(image, 0, 0)
   } catch {
     /* preprocessing is an accuracy boost, not a requirement */
@@ -142,46 +156,196 @@ function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: numbe
   return out
 }
 
-/** Grayscale + percentile contrast stretch (clips glare/shadow outliers). */
-function normalizeContrast(image: ImageData): void {
-  const { data } = image
-  const pixels = data.length / 4
+/** Tiles per axis for local normalization; glare/shadow rarely covers all tiles. */
+const CONTRAST_TILES = 4
+
+/**
+ * Grayscale + LOCALLY adaptive percentile contrast stretch: per-tile lo/hi
+ * levels, bilinearly interpolated per pixel. A glare streak or shadow
+ * gradient then only saturates its own corner instead of flattening the
+ * whole band (the global stretch it replaces did exactly that). Flat tiles
+ * (blank borders) inherit the global levels so noise isn't amplified.
+ */
+function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): void {
+  const { data, width, height } = image
+  const pixels = width * height
   const luma = new Uint8ClampedArray(pixels)
-  const histogram = new Uint32Array(256)
+  const globalHist = new Uint32Array(256)
   let lumaSum = 0
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     const y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
     luma[p] = y
     lumaSum += y
-    histogram[y]++
+    globalHist[y]++
   }
-  const clip = pixels * 0.02
-  let lo = 0
-  for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
-  let hi = 255
-  for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
-  const span = Math.max(1, hi - lo)
+  const levelAt = (histogram: Uint32Array, count: number, clipFraction: number): [number, number] => {
+    const clip = count * clipFraction
+    let lo = 0
+    for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
+    let hi = 255
+    for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
+    return [lo, hi]
+  }
+  const [globalLo, globalHi] = levelAt(globalHist, pixels, 0.02)
+
+  const T = CONTRAST_TILES
+  const tileW = Math.max(1, Math.ceil(width / T))
+  const tileH = Math.max(1, Math.ceil(height / T))
+  const tileLo = new Float64Array(T * T)
+  const tileHi = new Float64Array(T * T)
+  {
+    const hist = new Uint32Array(256)
+    for (let ty = 0; ty < T; ty++) {
+      for (let tx = 0; tx < T; tx++) {
+        hist.fill(0)
+        let count = 0
+        const yEnd = Math.min(height, (ty + 1) * tileH)
+        const xEnd = Math.min(width, (tx + 1) * tileW)
+        for (let y = ty * tileH; y < yEnd; y++) {
+          const row = y * width
+          for (let x = tx * tileW; x < xEnd; x++) {
+            hist[luma[row + x]]++
+            count++
+          }
+        }
+        const [lo, hi] = count ? levelAt(hist, count, 0.04) : [globalLo, globalHi]
+        // A flat tile has no signal worth stretching — use the global levels.
+        const flat = hi - lo < 24
+        tileLo[ty * T + tx] = flat ? globalLo : lo
+        tileHi[ty * T + tx] = flat ? globalHi : hi
+      }
+    }
+  }
+
   // Light type on a dark plate (Riftbound's name bar, collector lines on
   // dark frames) reads far worse than dark-on-light: flip the polarity of a
-  // clearly dark crop so Tesseract always sees dark text on paper.
-  const invert = lumaSum / pixels < 112
+  // clearly dark crop so Tesseract always sees dark text on paper. The
+  // 'binary-flip' variant forces the OPPOSITE call — full-art glyphs over
+  // busy art regularly defeat the mean-luma heuristic.
+  const invert = variant === 'binary-flip' ? lumaSum / pixels >= 112 : lumaSum / pixels < 112
+  const values = new Uint8ClampedArray(pixels)
+  for (let y = 0; y < height; y++) {
+    const fy = Math.min(T - 1, Math.max(0, y / tileH - 0.5))
+    const ty0 = Math.floor(fy)
+    const ty1 = Math.min(T - 1, ty0 + 1)
+    const wy = fy - ty0
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      const fx = Math.min(T - 1, Math.max(0, x / tileW - 0.5))
+      const tx0 = Math.floor(fx)
+      const tx1 = Math.min(T - 1, tx0 + 1)
+      const wx = fx - tx0
+      const lo =
+        (tileLo[ty0 * T + tx0] * (1 - wx) + tileLo[ty0 * T + tx1] * wx) * (1 - wy) +
+        (tileLo[ty1 * T + tx0] * (1 - wx) + tileLo[ty1 * T + tx1] * wx) * wy
+      const hi =
+        (tileHi[ty0 * T + tx0] * (1 - wx) + tileHi[ty0 * T + tx1] * wx) * (1 - wy) +
+        (tileHi[ty1 * T + tx0] * (1 - wx) + tileHi[ty1 * T + tx1] * wx) * wy
+      const span = Math.max(12, hi - lo)
+      const stretched = Math.max(0, Math.min(255, Math.round(((luma[row + x] - lo) * 255) / span)))
+      values[row + x] = invert ? 255 - stretched : stretched
+    }
+  }
+
+  if (variant === 'binary' || variant === 'binary-flip') {
+    // Otsu threshold over the normalized values → pure ink on paper.
+    const hist = new Uint32Array(256)
+    for (let p = 0; p < pixels; p++) hist[values[p]]++
+    let sumAll = 0
+    for (let v = 0; v < 256; v++) sumAll += v * hist[v]
+    let weightBg = 0
+    let sumBg = 0
+    let best = 0
+    let threshold = 127
+    for (let v = 0; v < 256; v++) {
+      weightBg += hist[v]
+      if (!weightBg) continue
+      const weightFg = pixels - weightBg
+      if (!weightFg) break
+      sumBg += v * hist[v]
+      const meanBg = sumBg / weightBg
+      const meanFg = (sumAll - sumBg) / weightFg
+      const between = weightBg * weightFg * (meanBg - meanFg) ** 2
+      if (between > best) {
+        best = between
+        threshold = v
+      }
+    }
+    for (let p = 0; p < pixels; p++) values[p] = values[p] > threshold ? 255 : 0
+  }
+
   for (let p = 0, i = 0; p < pixels; p++, i += 4) {
-    const stretched = Math.max(0, Math.min(255, Math.round(((luma[p] - lo) * 255) / span)))
-    const value = invert ? 255 - stretched : stretched
-    data[i] = data[i + 1] = data[i + 2] = value
+    data[i] = data[i + 1] = data[i + 2] = values[p]
   }
 }
 
 /** A pair of short lines can be one split name — long lines are rules text. */
 const JOINABLE_LINE_LEN = 20
 
+/** Suffixes that LOOK like junk but are load-bearing card-name endings. */
+const NAME_SUFFIX = /^(?:ex|gx|v|vmax|vstar|x)$/i
+
+/** A token that plausibly belongs to a printed name. */
+function wordish(token: string): boolean {
+  if (NAME_SUFFIX.test(token)) return true
+  const letters = (token.match(/[A-Za-z]/g) ?? []).length
+  return letters >= 3 && letters / token.length >= 0.7
+}
+
 /**
- * Card-name candidates from a band's OCR lines, best first. Champions and
- * characters often split the name across two printed lines — Riftbound's
- * "JINX" over "Loose Cannon" is catalogued as "Jinx, Loose Cannon", Lorcana
- * stacks name over version — so each adjacent pair of short lines is also
- * offered joined, ahead of its halves: an exact full-name hit outranks a
- * partial one.
+ * How much a candidate looks like a card name — used to rank candidates so
+ * the lookup budget goes to the likeliest reads first, not to whatever
+ * plate/art garbage OCR'd above the name.
+ */
+function plausibility(candidate: string): number {
+  const tokens = candidate.split(' ')
+  const letters = (candidate.match(/[A-Za-z]/g) ?? []).length
+  const wordishShare = tokens.filter(wordish).length / tokens.length
+  const caps = tokens.filter((t) => /^[A-Z]/.test(t)).length / tokens.length
+  let score = (letters / candidate.length) * 2 + wordishShare * 2 + caps * 0.5
+  // A fuller clean read carries more signal than its own lead fragment —
+  // "JINX Loose Cannon" must outrank bare "JINX" (nameScore's lead-segment
+  // tolerance still lets the fragment win the match if only it is real).
+  score += Math.min(tokens.length, 3) * 0.15
+  if (tokens.length === 1 && candidate.length <= 6) score -= 0.5
+  if (candidate.length < 4) score -= 1
+  if (candidate.length > 30) score -= (candidate.length - 30) / 20
+  if (tokens.length > 5) score -= (tokens.length - 5) * 0.3
+  return score
+}
+
+/** The longest run of name-plausible tokens ("=e Tauros ex, - w40" → "Tauros ex"). */
+function wordishWindow(line: string): string | null {
+  const tokens = line.split(' ')
+  let best: string[] = []
+  let run: string[] = []
+  for (const token of tokens) {
+    if (wordish(token)) {
+      run.push(token)
+      if (run.join(' ').length > best.join(' ').length) best = [...run]
+    } else run = []
+  }
+  const window = best.join(' ').replace(/^["'.,]+|["'.,]+$/g, '')
+  return (window.match(/[A-Za-z]/g) ?? []).length >= 4 ? window : null
+}
+
+/** Drop trailing junk tokens ("Lightning Bolt ek e)" → "Lightning Bolt"). */
+function trimTrailingJunk(line: string): string | null {
+  const tokens = line.split(' ')
+  let end = tokens.length
+  while (end > 1 && !wordish(tokens[end - 1])) end--
+  return end < tokens.length ? tokens.slice(0, end).join(' ') : null
+}
+
+/**
+ * Card-name candidates from a band's OCR lines, likeliest first. Beyond the
+ * raw lines this offers: adjacent short lines joined (Riftbound's "JINX"
+ * over "Loose Cannon" is catalogued as "Jinx, Loose Cannon"), the line minus
+ * a short leading label ("BASIC Tauros" → "Tauros"), the line minus trailing
+ * junk ("Lightning Bolt ek e)" → "Lightning Bolt"), and the longest
+ * name-plausible token window ("AKALI 101A SEN" → "AKALI"). Candidates are
+ * ranked by name-plausibility, not reading order — the lookup budget is
+ * finite and art garbage above the name must not consume it.
  */
 export function nameCandidates(lines: string[]): string[] {
   const out: string[] = []
@@ -193,14 +357,25 @@ export function nameCandidates(lines: string[]): string[] {
       push(cleanOcrLine(`${lines[i]} ${lines[i + 1]}`))
     }
     push(lines[i])
+    push(trimTrailingJunk(lines[i]))
     // Evolution/type labels share the name's visual row ("BASIC Tauros",
     // "STAGE 2 Charizard") and OCR merges them — offer the row minus its
     // short leading token as well. Long first words are left alone so real
     // two-word names don't shed their first half.
     const words = lines[i].split(' ')
-    if (words.length >= 2 && words[0].length <= 6) push(cleanOcrLine(words.slice(1).join(' ')))
+    if (words.length >= 2 && words[0].length <= 6) {
+      const stripped = cleanOcrLine(words.slice(1).join(' '))
+      push(stripped)
+      if (stripped) push(trimTrailingJunk(stripped))
+    }
+    push(wordishWindow(lines[i]))
   }
-  return out.slice(0, 6)
+  // Stable rank: plausibility first, original order as the tiebreak.
+  return out
+    .map((candidate, at) => ({ candidate, at, score: plausibility(candidate) }))
+    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .map((row) => row.candidate)
+    .slice(0, 8)
 }
 
 function candidatesFromText(text: string): string[] {
@@ -220,11 +395,22 @@ function candidatesFromText(text: string): string[] {
  * OCR one band of a card crop and return plausible name candidates, best
  * first.
  */
-export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): Promise<string[]> {
+export async function readCardNames(
+  canvas: HTMLCanvasElement,
+  band: OcrBand,
+  opts: { variant?: PrepVariant } = {},
+): Promise<string[]> {
   const worker = await getWorker()
-  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
+  const variant = opts.variant ?? 'normal'
+  // The binary retry runs at higher resolution: thresholding sharpens glyph
+  // edges, and the extra pixels are what let it crack stylized type.
+  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'normal' ? OCR_WIDTH : 960, variant)
+  const started = Date.now()
   const { data } = await worker.recognize(region)
-  return candidatesFromText(String(data?.text ?? ''))
+  const raw = String(data?.text ?? '')
+  const candidates = candidatesFromText(raw)
+  traceEvent('ocr-band', { y: band.y, h: band.h, variant, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
+  return candidates
 }
 
 /**
@@ -236,6 +422,7 @@ export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): P
 export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<string[]> {
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 700)
+  const started = Date.now()
   await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
   let text = ''
   try {
@@ -244,7 +431,9 @@ export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<
   } finally {
     await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
   }
-  return candidatesFromText(text)
+  const candidates = candidatesFromText(text)
+  traceEvent('ocr-anywhere', { ms: Date.now() - started, raw: text.slice(0, 400), candidates })
+  return candidates
 }
 
 /**
@@ -286,30 +475,43 @@ export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string
 const CORNER_OCR_WIDTH = 1200
 
 /** OCR an arbitrary card region (e.g. the collector line) and return raw text. */
-export async function readRegionText(canvas: HTMLCanvasElement, rect: OcrRect): Promise<string> {
+export async function readRegionText(
+  canvas: HTMLCanvasElement,
+  rect: OcrRect,
+  opts: { variant?: PrepVariant } = {},
+): Promise<string> {
   ensureCornerWorker()
   const worker = cornerWorker ?? (await getWorker())
-  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)))
+  const variant = opts.variant ?? 'normal'
+  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)), variant)
+  const started = Date.now()
   const { data } = await worker.recognize(region)
-  return String(data?.text ?? '')
+  const raw = String(data?.text ?? '')
+  traceEvent('ocr-region', { ...rect, variant, ms: Date.now() - started, raw: raw.slice(0, 200) })
+  return raw
 }
 
 function cleanOcrLine(line: string): string | null {
   let cleaned = line
     .replace(/[|_~`!@#%^*=<>{}[\]\\]/g, ' ')
     .replace(/\b(HP|hp)\s*\d+\b/g, ' ')
+    .replace(/\s(HP|hp)$/g, ' ')
     .replace(/\b\d{2,4}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   cleaned = cleaned.replace(/^[^A-Za-z"']+/, '').replace(/[^A-Za-z"'.!?)]+$/, '')
   if (cleaned.length < 3) return null
   const letters = (cleaned.match(/[A-Za-z]/g) ?? []).length
-  if (letters < 3 || letters / cleaned.length < 0.55) return null
+  if (letters < 3) return null
+  // A noisy line can still carry the name — salvage its best token window
+  // ("=e | Tauros ex, - w40 od" → "Tauros ex") instead of dropping the line.
+  if (letters / cleaned.length < 0.55) return wordishWindow(cleaned)
   if (cleaned.length > 40) cleaned = cleaned.slice(0, 40)
   return cleaned
 }
 
 export async function stopOcr(): Promise<void> {
+  generation++
   const pending = [primaryPromise, cornerPromise]
   primaryPromise = null
   cornerPromise = null

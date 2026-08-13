@@ -516,6 +516,33 @@ export async function matchCatalog(
   return best?.card ?? null
 }
 
+/**
+ * Identify by the printed collector fraction alone ("158/166") — the last
+ * resort when the name couldn't be read. Both halves must agree with a
+ * catalog row for a hit; newest set breaks ties.
+ */
+export async function catalogByCollector(game: Game, number: string, printedTotal: string): Promise<Card | null> {
+  const digits = collectorDigits(number)
+  if (!digits) return null
+  const cards = await catalog(game)
+  const hits = cards
+    .filter((card) => {
+      if (collectorDigits(card.number) !== digits) return false
+      const total = card.number?.split('/')[1]?.replace(/\D+/g, '')
+      return !!total && total.replace(/^0+(?=\d)/, '') === printedTotal.replace(/^0+(?=\d)/, '')
+    })
+    // Variants share the collector number as separate products ("Akali -
+    // Silent (Alternate Art)") — with number-only evidence the BASE printing
+    // is the honest pick, so parenthetical variants rank behind it.
+    .sort(
+      (a, b) =>
+        Number(/\(/.test(a.name)) - Number(/\(/.test(b.name)) ||
+        a.name.length - b.name.length ||
+        (b.releasedAt ?? '').localeCompare(a.releasedAt ?? ''),
+    )
+  return hits[0] ?? null
+}
+
 export async function catalogById(game: Game, apiId: string): Promise<Card | null> {
   try {
     const cards = await catalog(game)
