@@ -203,34 +203,47 @@ async function main() {
       return route.abort('failed')
     })
 
-    const workers = []
-    for (let i = 0; i < pages; i++) {
+    const freshPage = async (i) => {
       const page = await context.newPage()
       if (args.verbose) page.on('console', (msg) => console.log(`  [page${i}]`, msg.text().slice(0, 200)))
       page.on('pageerror', (err) => console.error(`  [page${i}] pageerror:`, String(err).slice(0, 300)))
       await page.goto(`http://127.0.0.1:${PORT}/tests/harness/page.html`, { waitUntil: 'domcontentloaded' })
       await page.waitForFunction(() => window.__harness != null, { timeout: 20_000 })
       await page.evaluate(() => window.__harness.warm())
-      workers.push(page)
+      return page
     }
+    const workers = []
+    for (let i = 0; i < pages; i++) workers.push(await freshPage(i))
 
     // --- run ----------------------------------------------------------------
     const results = []
     let next = 0
     const t0 = Date.now()
     await Promise.all(
-      workers.map(async (page) => {
+      workers.map(async (page, i) => {
         while (next < cells.length) {
           const at = next++
           const cell = cells[at]
-          let result
-          try {
-            result = await page.evaluate(
+          const run = (p) =>
+            p.evaluate(
               (c) => window.__harness.runCell(c),
               { imageUrl: cell.imageUrl, degradation: cell.degradation, hint: cell.hint },
             )
+          let result
+          try {
+            result = await run(page)
           } catch (err) {
-            result = { outcome: { ok: false, reason: 'exception', message: String(err).slice(0, 300) }, ms: 0, trace: null }
+            // A crashed renderer (OOM under Tesseract WASM) takes __harness
+            // with it, and this worker would fail every remaining cell in 0ms.
+            // Stand up a fresh page and retry the cell once before recording.
+            console.error(`  [page${i}] harness page lost — recreating (${String(err).slice(0, 140)})`)
+            try {
+              await page.close().catch(() => {})
+              page = await freshPage(i)
+              result = await run(page)
+            } catch (err2) {
+              result = { outcome: { ok: false, reason: 'exception', message: String(err2).slice(0, 300) }, ms: 0, trace: null }
+            }
           }
           const pass = graded(cell.fixture, result.outcome)
           const stage = pass ? 'pass' : failureStage(cell.fixture, result)

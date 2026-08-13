@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { track } from '../lib/analytics'
-import { captureFrame, startCamera, type CameraSession, type Region } from '../lib/camera'
+import { captureFrame, releaseCamera, startCamera, type CameraSession, type Region } from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { stopOcr, warmOcr } from '../lib/ocr'
@@ -24,6 +24,15 @@ const FOCUS_WAIT_MAX_MS = 1200
 const FOCUS_PEAK_HALFLIFE_MS = 750
 /** Frame-analysis cadence; display refresh above this is wasted heat. */
 const SENSE_MIN_INTERVAL_MS = 48
+/**
+ * How long after the app hides before a still-capturing camera is released.
+ * Platforms that suspend capture for hidden pages (iOS/Safari mute the track
+ * within a moment, hardware off) keep the session — resuming then needs no
+ * getUserMedia, which on iOS Home-Screen apps means no fresh permission
+ * prompt. Platforms that keep capturing in the background fail the probe and
+ * release the camera for privacy, exactly as before.
+ */
+const HIDDEN_CAMERA_PROBE_MS = 2_000
 
 interface ApiFailurePolicy {
   waitMs: number
@@ -177,30 +186,65 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     setState((prev) => ({ ...prev, ...partial }))
   }, [])
 
-  const teardown = useCallback(() => {
+  const hiddenProbeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** Halt the scanning work — loops, in-flight job, OCR — but not the camera. */
+  const suspendWork = useCallback(() => {
     cancelAnimationFrame(rafRef.current)
     rafRef.current = 0
     jobRef.current?.cancel()
     setBusy(false)
-    sessionRef.current?.stop()
-    sessionRef.current = null
     prevGrayRef.current = null
     regionStreakRef.current = 0
     stillSinceRef.current = null
     focusRef.current = { max: 0, blockedSince: 0 }
     stopOcr()
-    patch({ torchAvailable: false, torchOn: false })
-  }, [patch])
+  }, [])
+
+  /**
+   * Let go of the camera session. `park` hands a live stream to
+   * releaseCamera's grace window (iOS Home-Screen apps re-prompt on every
+   * re-acquisition, so quick hops back shouldn't need one); false is an
+   * outright stop — used when the platform kept capturing while hidden.
+   */
+  const releaseSession = useCallback(
+    (park: boolean) => {
+      if (hiddenProbeRef.current) {
+        clearTimeout(hiddenProbeRef.current)
+        hiddenProbeRef.current = null
+      }
+      const session = sessionRef.current
+      if (!session) return
+      sessionRef.current = null
+      if (park) releaseCamera(session)
+      else session.stop()
+      patch({ torchAvailable: false, torchOn: false })
+    },
+    [patch],
+  )
+
+  const teardown = useCallback(
+    (park = false) => {
+      suspendWork()
+      releaseSession(park)
+    },
+    [releaseSession, suspendWork],
+  )
 
   const stop = useCallback(() => {
     wantsCameraRef.current = false
-    teardown()
+    teardown(true)
     patch({ status: 'idle', sensing: false, needsResume: false })
   }, [patch, teardown])
 
   const handleLost = useCallback(() => {
-    if (sessionRef.current) {
-      teardown()
+    if (!sessionRef.current) return
+    teardown()
+    if (document.hidden && wantsCameraRef.current) {
+      // Died in the background (iOS reclaims capture aggressively): restart
+      // silently when the app returns instead of gating on a Resume tap.
+      patch({ status: 'paused', sensing: false, needsResume: false })
+    } else {
       patch({
         status: 'paused',
         sensing: false,
@@ -408,6 +452,19 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     }
   }, [handleLost, patch, senseLoop])
 
+  /** Pick scanning back up on a camera session that stayed alive. */
+  const resumeScanning = useCallback(() => {
+    const session = sessionRef.current
+    if (!session?.isLive()) return false
+    videoRef.current?.play().catch(() => {})
+    warmOcr()
+    failureRef.current = freshFailureState()
+    patch({ status: 'searching', needsResume: false, detail: null, miss: null })
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(senseLoop)
+    return true
+  }, [patch, senseLoop])
+
   const toggleTorch = useCallback(async () => {
     const session = sessionRef.current
     if (!session?.setTorch) return
@@ -445,16 +502,34 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     const onVisibility = () => {
       if (document.hidden) {
         if (sessionRef.current && wantsCameraRef.current) {
-          teardown()
+          // Stop the work, keep the camera: platforms that suspend capture
+          // for hidden pages (iOS mutes the track, hardware off) hand the
+          // same track back on return — no getUserMedia, and on iOS
+          // Home-Screen apps no fresh permission prompt. A probe releases
+          // the camera on platforms that keep capturing in the background.
+          suspendWork()
           patch({ status: 'paused', sensing: false, needsResume: false })
+          if (hiddenProbeRef.current) clearTimeout(hiddenProbeRef.current)
+          hiddenProbeRef.current = setTimeout(() => {
+            hiddenProbeRef.current = null
+            const session = sessionRef.current
+            if (document.hidden && session && !session.track.muted) releaseSession(false)
+          }, HIDDEN_CAMERA_PROBE_MS)
         }
-      } else if (wantsCameraRef.current && !sessionRef.current) {
-        start()
+      } else {
+        if (hiddenProbeRef.current) {
+          clearTimeout(hiddenProbeRef.current)
+          hiddenProbeRef.current = null
+        }
+        if (wantsCameraRef.current && !resumeScanning()) {
+          releaseSession(false)
+          start()
+        }
       }
     }
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [patch, start, teardown])
+  }, [patch, releaseSession, resumeScanning, start, suspendWork])
 
   useEffect(() => stop, [stop])
 

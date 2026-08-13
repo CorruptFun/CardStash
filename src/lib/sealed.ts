@@ -1,13 +1,17 @@
 import { GAMES } from './games'
+import { traceEvent } from './scandebug'
+import { sealedEvidence, sealedSetScore } from './sealedmatch'
 import { groupContents, sealedKind, tcgplayerGroups, type TcgGroup } from './tcgcsv'
 import type { Card, Game } from './types'
 import { normalizeName, similarity, tcgplayerSearchLink } from './util'
 
 /**
  * Sealed-product identification: a pack/box front carries the SET name in
- * huge type, so on-device OCR text is matched against the TCGplayer group
- * (set) index, then the set's sealed products are ranked by which product
- * words (booster/box/bundle/…) also appear on the packaging.
+ * huge type — or, on Japanese Pokémon packs, only the printed set code
+ * ("sv4K") — so on-device OCR text is matched against the TCGplayer group
+ * (set) index (scoring rules live in sealedmatch.ts), then the set's sealed
+ * products are ranked by which product words (booster/box/bundle/…) also
+ * appear on the packaging.
  */
 
 /**
@@ -29,11 +33,6 @@ function expectedKind(text: string): string | null {
 
 /** Booster-line names that tell sibling products apart (Play vs Collector…). */
 const BOOSTER_FLAVORS = ['collector', 'draft', 'jumpstart', 'set booster', 'play'] as const
-
-/** TCGplayer prefixes group names with codes ("SV08: Surging Sparks") — the box doesn't. */
-function cleanGroupName(name: string): string {
-  return name.replace(/^[A-Z0-9]{1,6}\s*[:—-]\s+/, '')
-}
 
 export interface SealedMatch {
   card: Card
@@ -59,7 +58,8 @@ export function warmSealedIndex(games?: Game[]): void {
  */
 export async function identifySealedText(lines: string[], games?: Game[], signal?: AbortSignal): Promise<SealedMatch | null> {
   const pool = games?.length ? games : GAMES
-  const text = normalizeName(lines.join(' '))
+  const evidence = sealedEvidence(lines)
+  const text = evidence.text
   if (text.length < 4) return null
 
   const perGame = await Promise.allSettled(pool.map(async (game) => ({ game, groups: await tcgplayerGroups(game, signal) })))
@@ -68,22 +68,19 @@ export async function identifySealedText(lines: string[], games?: Game[], signal
     if (settled.status !== 'fulfilled') continue
     const { game, groups } = settled.value
     for (const group of groups) {
-      const clean = normalizeName(cleanGroupName(group.name))
-      if (clean.length < 4) continue
-      let score = 0
-      if (text.includes(clean)) {
-        // Containment + a length bonus so "Prismatic Evolutions" beats the
-        // "Evolutions" it contains.
-        score = 0.86 + Math.min(0.12, clean.length / 150)
-      } else {
-        for (const line of lines) {
-          const lineScore = similarity(line, cleanGroupName(group.name))
-          if (lineScore > score) score = lineScore
-        }
-      }
+      const score = sealedSetScore(group, evidence)
       if (score > (bestSet?.score ?? 0)) bestSet = { game, group, score }
     }
   }
+  // Trace the nearest set even when it loses — "what did the scanner see?"
+  // on a pack miss is exactly this number.
+  if (bestSet)
+    traceEvent('sealed-set', {
+      set: bestSet.group.name,
+      game: bestSet.game,
+      score: Number(bestSet.score.toFixed(3)),
+      matched: bestSet.score >= SET_MATCH_THRESHOLD,
+    })
   if (!bestSet || bestSet.score < SET_MATCH_THRESHOLD) return null
 
   const contents = await groupContents(bestSet.game, bestSet.group, signal)
@@ -110,6 +107,7 @@ export async function identifySealedText(lines: string[], games?: Game[], signal
   if (!wanted && bestProduct!.score < 0.2) {
     card = contents.sealed.find((product) => product.sealed?.kind === 'Booster pack') ?? card
   }
+  traceEvent('sealed-product', { product: card.name, kind: card.sealed?.kind ?? null, wanted })
   return { card, group: contents.group, game: bestSet.game, score: Math.min(1, bestSet.score) }
 }
 
@@ -118,6 +116,9 @@ export async function sealedSetContents(card: Card, signal?: AbortSignal): Promi
   if (!card.sealed) return null
   const group: TcgGroup = {
     groupId: card.sealed.groupId,
+    // Japanese Pokémon sets live in their own TCGplayer category — the stored
+    // product remembers which one its group belongs to.
+    categoryId: card.sealed.categoryId,
     name: card.setName ?? '',
     abbreviation: card.setCode,
     publishedOn: card.releasedAt,
@@ -134,6 +135,7 @@ export async function sealedVariants(card: Card, signal?: AbortSignal): Promise<
   if (!card.sealed) return [card]
   const group: TcgGroup = {
     groupId: card.sealed.groupId,
+    categoryId: card.sealed.categoryId,
     name: card.setName ?? '',
     abbreviation: card.setCode,
     publishedOn: card.releasedAt,

@@ -16,9 +16,10 @@ export interface Settings {
    */
   cameraApproved: boolean
   /**
-   * The one-time "iPhone Safari forgets the camera grant — install to Home
-   * Screen" note has been shown. Only ever set in the iOS-browser context;
-   * the OS prompt there is by design and no app flag can suppress it.
+   * The one-time iOS camera-permission note has been shown (Safari tab: allow
+   * permanently via aA → Website Settings; Home-Screen app: iOS re-asks each
+   * launch and nothing can persist it). The OS prompt itself is by design and
+   * no app flag can suppress it.
    */
   iosCameraHintShown: boolean
   /** Powers the AI deck builder only — scanning is fully on-device. */

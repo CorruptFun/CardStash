@@ -163,6 +163,7 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
   } catch {
     return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
   }
+  traceEvent('sealed-ocr', { lines })
   if (!lines.length) {
     return { ok: false, reason: 'ocr-miss', message: 'Couldn’t read the packaging — fill the frame with the front' }
   }

@@ -584,12 +584,27 @@ const GAME_CATEGORY: Record<Game, RegExp> = {
   gundam: /gundam/i,
 }
 
+/**
+ * Extra TCGplayer categories whose sets ALSO belong to a game's sealed index.
+ * Japanese Pokémon product is its own category ("Pokemon Japan", separate
+ * from "Pokemon"), and its packs are what pack scans kept missing: their
+ * fronts carry no English set name, only the printed set code ("sv4K") that
+ * sealedmatch.ts matches on.
+ */
+const AUX_GROUP_CATEGORIES: Partial<Record<Game, RegExp[]>> = {
+  pokemon: [/^pokemon\W*japan/i],
+}
+
 export function tcgplayerCategoryId(game: Game, signal?: AbortSignal): Promise<number> {
   return categoryId({ category: GAME_CATEGORY[game], premiumFinish: 'foil' }, signal)
 }
 
 export interface TcgGroup {
   groupId: number
+  /** The TCGplayer category the group lives in — differs from the game's
+   * primary category for aux sets (Japanese Pokémon). Absent on data cached
+   * by older builds; readers fall back to the game's primary category. */
+  categoryId?: number
   name: string
   abbreviation?: string
   publishedOn?: string
@@ -605,25 +620,46 @@ export async function tcgplayerGroups(game: Game, signal?: AbortSignal): Promise
   const inFlight = groupsLoading.get(game)
   if (inFlight) return inFlight
   const load = (async () => {
-    const key = `tcg-groups:${game}`
+    // v2: entries carry categoryId + aux-category sets; v1 caches (up to a
+    // day old, English-only) must not shadow them after an update.
+    const key = `tcg-groups:v2:${game}`
     const cached = await kvGet<TcgGroup[]>(key, CATALOG_TTL_MS)
     if (cached?.length) {
       groupsMemory.set(game, { at: Date.now(), groups: cached })
       return cached
     }
-    const category = await tcgplayerCategoryId(game, signal)
-    const rows = await results(`${API}/${category}/groups`, signal)
-    const groups: TcgGroup[] = rows
-      .map((row) => ({
-        groupId: Number(row?.groupId),
-        name: String(row?.name ?? ''),
-        abbreviation: row?.abbreviation || undefined,
-        publishedOn: typeof row?.publishedOn === 'string' ? row.publishedOn.slice(0, 10) : undefined,
-      }))
-      .filter((group) => Number.isFinite(group.groupId) && group.name)
+    const fetchCategoryGroups = async (category: number): Promise<TcgGroup[]> => {
+      const rows = await results(`${API}/${category}/groups`, signal)
+      return rows
+        .map((row) => ({
+          groupId: Number(row?.groupId),
+          categoryId: category,
+          name: String(row?.name ?? ''),
+          abbreviation: row?.abbreviation || undefined,
+          publishedOn: typeof row?.publishedOn === 'string' ? row.publishedOn.slice(0, 10) : undefined,
+        }))
+        .filter((group) => Number.isFinite(group.groupId) && group.name)
+    }
+    // The game's own category must load; aux categories (Japanese Pokémon)
+    // are best-effort — but an incomplete merge is served without being
+    // persisted, so the missing half retries next session instead of
+    // reading as "doesn't exist" for a day.
+    const groups = await fetchCategoryGroups(await tcgplayerCategoryId(game, signal))
+    let complete = true
+    for (const spec of AUX_GROUP_CATEGORIES[game] ?? []) {
+      try {
+        const category = await categoryId({ category: spec, premiumFinish: 'foil' }, signal)
+        groups.push(...(await fetchCategoryGroups(category)))
+      } catch {
+        complete = false
+      }
+    }
     if (groups.length) {
-      groupsMemory.set(game, { at: Date.now(), groups })
-      kvPut(key, groups)
+      // An incomplete merge is memory-cached backdated (same trick as the
+      // card catalog): served now, retried in minutes, never persisted.
+      const at = complete ? Date.now() : Date.now() - CATALOG_TTL_MS + INCOMPLETE_RETRY_MS
+      groupsMemory.set(game, { at, groups })
+      if (complete) kvPut(key, groups)
     }
     return groups
   })().finally(() => groupsLoading.delete(game))
@@ -694,7 +730,9 @@ export async function groupContents(game: Game, group: TcgGroup, signal?: AbortS
   const inFlight = groupLoading.get(key)
   if (inFlight) return inFlight
   const load = (async () => {
-    const category = await tcgplayerCategoryId(game, signal)
+    // A group knows its own category (Japanese Pokémon sets live apart from
+    // the game's primary category); only legacy-cached groups fall back.
+    const category = group.categoryId ?? (await tcgplayerCategoryId(game, signal))
     const [products, priceRows] = await Promise.all([
       results(`${API}/${category}/${group.groupId}/products`, signal),
       results(`${API}/${category}/${group.groupId}/prices`, signal).catch(() => []),
@@ -730,6 +768,7 @@ export async function sealedRefresh(card: Card): Promise<Card | null> {
   if (!info) return null
   const group: TcgGroup = {
     groupId: info.groupId,
+    categoryId: info.categoryId,
     name: card.setName ?? '',
     abbreviation: card.setCode,
     publishedOn: card.releasedAt,

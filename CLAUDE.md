@@ -49,6 +49,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   an `opened` flag and stop counting at the sealed price once opened),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
+  Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
+  the group index merges the "Pokemon Japan" TCGplayer category so Japanese
+  packs match by their printed set code ("sv4K").
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
 - `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
   `builderSeeds` (cards handed to the AI builder to design around).

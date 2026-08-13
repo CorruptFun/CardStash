@@ -12,26 +12,110 @@ export async function cameraPermissionState(): Promise<CameraPermission> {
   }
 }
 
+/** iOS/iPadOS — iPads masquerade as Macs, so touch points break the tie. */
+const IS_IOS =
+  typeof navigator !== 'undefined' &&
+  (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+/** Running installed to the Home Screen (standalone display mode). */
+export const IS_STANDALONE =
+  typeof window !== 'undefined' &&
+  (window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as { standalone?: boolean }).standalone === true)
+
+/**
+ * iOS Home-Screen web apps get NO persistent camera grant: Apple re-prompts
+ * on each fresh getUserMedia acquisition after the app was closed — there's
+ * no Settings entry, no aA menu, no web API to change that. What the app CAN
+ * control is how often it re-acquires: every getUserMedia call this flag lets
+ * us skip is a permission dialog the user doesn't see.
+ */
+export const CAMERA_REPROMPTS_EACH_ACQUIRE = IS_IOS && IS_STANDALONE
+
 export interface CameraSession {
   stream: MediaStream
   track: MediaStreamTrack
   setTorch: ((on: boolean) => Promise<void>) | null
   isLive: () => boolean
   stop: () => void
+  /** Retire the session but leave the stream's tracks running (for parking). */
+  detach: () => void
+}
+
+/* --- parked stream -------------------------------------------------------- */
+
+/**
+ * On platforms where re-acquiring the camera re-prompts (iOS Home-Screen
+ * apps), a stopped scan session parks its live stream here for a short grace
+ * window instead of ending it. Reopening the scanner inside the window —
+ * closing a card sheet, hopping back from another tab — adopts the parked
+ * stream: no getUserMedia, no permission dialog, no camera warm-up. iOS
+ * interrupts the capture itself while the app is hidden (hardware off,
+ * indicator cleared), so holding the track is cheap.
+ */
+const PARK_MS = 25_000
+
+interface ParkedStream {
+  stream: MediaStream
+  timer: ReturnType<typeof setTimeout>
+  onEnded: () => void
+}
+
+let parked: ParkedStream | null = null
+
+function clearParked(stop: boolean): void {
+  if (!parked) return
+  const { stream, timer, onEnded } = parked
+  parked = null
+  clearTimeout(timer)
+  stream.getVideoTracks()[0]?.removeEventListener('ended', onEnded)
+  if (stop) for (const track of stream.getTracks()) track.stop()
+}
+
+/** The parked stream, if it's still alive — caller takes ownership. */
+function adoptParked(): MediaStream | null {
+  if (!parked) return null
+  const stream = parked.stream
+  const live = stream.getVideoTracks()[0]?.readyState === 'live'
+  clearParked(!live)
+  return live ? stream : null
+}
+
+/**
+ * Release a camera session: an outright stop on most platforms, a short park
+ * on the ones where the next acquisition would re-prompt. Torch is forced off
+ * before parking — a flashlight must not outlive the scan view.
+ */
+export function releaseCamera(session: CameraSession): void {
+  if (!CAMERA_REPROMPTS_EACH_ACQUIRE || !session.isLive()) {
+    session.stop()
+    return
+  }
+  const stream = session.stream
+  const track = session.track
+  track.applyConstraints({ advanced: [{ torch: false } as MediaTrackConstraintSet] }).catch(() => {})
+  session.detach()
+  clearParked(true)
+  const onEnded = () => clearParked(false)
+  track.addEventListener('ended', onEnded)
+  parked = { stream, onEnded, timer: setTimeout(() => clearParked(true), PARK_MS) }
 }
 
 export async function startCamera(
   video: HTMLVideoElement,
   opts: { onLost?: () => void } = {},
 ): Promise<CameraSession> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: 'environment' },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-  })
+  const stream =
+    adoptParked() ??
+    (await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    }))
   video.srcObject = stream
   video.setAttribute('playsinline', 'true')
   video.muted = true
@@ -49,17 +133,21 @@ export async function startCamera(
     }
   }
   track.addEventListener('ended', handleEnded)
+  const detach = () => {
+    stopped = true
+    track.removeEventListener('ended', handleEnded)
+    video.srcObject = null
+  }
   return {
     stream,
     track,
     setTorch,
     isLive: () => !stopped && track.readyState !== 'ended',
     stop: () => {
-      stopped = true
-      track.removeEventListener('ended', handleEnded)
+      detach()
       for (const t of stream.getTracks()) t.stop()
-      video.srcObject = null
     },
+    detach,
   }
 }
 

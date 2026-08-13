@@ -5,7 +5,7 @@ import { CardImg, Seg } from '../components/basics'
 import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
-import { cameraPermissionState } from '../lib/camera'
+import { CAMERA_REPROMPTS_EACH_ACQUIRE, cameraPermissionState, IS_STANDALONE } from '../lib/camera'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome, ScanMode } from '../lib/identify'
@@ -35,11 +35,18 @@ function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
   return headlineFinish(hit.card.prices, options)
 }
 
-/** iOS Safari (not installed to Home Screen) forgets camera grants per-visit. */
+/**
+ * iOS camera-permission reality, in two flavors:
+ * - Safari tab: asks per visit BY DEFAULT, but aA → Website Settings →
+ *   Camera → Allow persists the grant for good.
+ * - Home Screen app: asks again on each fresh launch, and there is NO
+ *   setting anywhere to persist it — an Apple limitation. Cardstock softens
+ *   it by keeping the camera session alive across quick switches
+ *   (see releaseCamera in lib/camera.ts), but a cold launch always re-asks.
+ */
 const IOS_BROWSER =
-  typeof navigator !== 'undefined' &&
-  /iPhone|iPad|iPod/.test(navigator.userAgent) &&
-  !window.matchMedia('(display-mode: standalone)').matches
+  typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent) && !IS_STANDALONE
+const IOS_PWA = CAMERA_REPROMPTS_EACH_ACQUIRE
 
 /** Collect mode: dedupe rapid re-scans of the same card. */
 const REPEAT_WINDOW_MS = 2500
@@ -287,9 +294,10 @@ export function ScanView({ active }: { active: boolean }) {
       scanner.scanNow()
     }
   }
-  /* iOS Safari (browser tab) re-asks for the camera every visit BY DESIGN —
-   * no app flag can stop it. Say so once, with the actual fix. */
-  const iosHint = scanning && IOS_BROWSER && !config.iosCameraHintShown
+  /* iOS re-asks for the camera BY DESIGN — per Safari visit unless the user
+   * allows the site permanently, per launch (unfixably) for Home-Screen
+   * apps. Say so once, with whatever recourse the context actually has. */
+  const iosHint = scanning && (IOS_BROWSER || IOS_PWA) && !config.iosCameraHintShown
 
   return (
     <div className="scan">
@@ -375,9 +383,11 @@ export function ScanView({ active }: { active: boolean }) {
             Everything runs on this device — the card name, its collector number, even foil sheen. No account, no API.
           </p>
           <p className="scan__gatehint">
-            You'll be asked for the camera once; after that Cardstock opens it automatically.
+            {IOS_PWA
+              ? 'iOS asks Home-Screen apps for the camera again on each launch — an Apple limitation, not Cardstock forgetting. Cardstock holds the camera through quick app switches so it asks as rarely as iOS allows.'
+              : "You'll be asked for the camera once; after that Cardstock opens it automatically."}
             {IOS_BROWSER
-              ? ' iPhone tip: in Safari tap aA → Website Settings → Camera → Allow (or add Cardstock to your Home Screen) so the permission sticks.'
+              ? ' iPhone tip: in Safari tap aA → Website Settings → Camera → Allow so Safari stops asking on every visit.'
               : ''}
           </p>
         </div>
@@ -408,8 +418,12 @@ export function ScanView({ active }: { active: boolean }) {
           <p>{scanner.detail ?? 'Check permissions and try again.'}</p>
           {scanner.status === 'denied' && IOS_BROWSER && (
             <p className="scan__gatehint">
-              iPhone: in Safari tap aA → Website Settings → Camera → Allow — or add Cardstock to your Home Screen — and
-              the permission is remembered.
+              iPhone: in Safari tap aA → Website Settings → Camera → Allow and the permission is remembered.
+            </p>
+          )}
+          {scanner.status === 'denied' && IOS_PWA && (
+            <p className="scan__gatehint">
+              iOS doesn't keep camera answers for Home-Screen apps — close and reopen Cardstock and it will ask again.
             </p>
           )}
           <button
@@ -454,11 +468,18 @@ export function ScanView({ active }: { active: boolean }) {
           )}
           {iosHint && (
             <div className="scan__ioshint">
-              <p>
-                iPhone asks for the camera on every Safari visit — that's Safari, not Cardstock.
-                <b> Add Cardstock to your Home Screen</b> (Share <Icon name="upload" size={11} /> → Add to Home Screen)
-                and the permission sticks.
-              </p>
+              {IOS_PWA ? (
+                <p>
+                  iOS asks Home-Screen apps for the camera again each time they're reopened — an Apple limitation, not
+                  Cardstock forgetting. Cardstock holds the camera through quick app switches so it asks as rarely as
+                  iOS allows.
+                </p>
+              ) : (
+                <p>
+                  iPhone asks for the camera on every Safari visit — that's Safari, not Cardstock. Tap
+                  <b> aA → Website Settings → Camera → Allow</b> and Safari stops asking for good.
+                </p>
+              )}
               <button
                 className="chip__searchbtn"
                 onClick={() => {

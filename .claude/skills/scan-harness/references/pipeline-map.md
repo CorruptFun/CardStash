@@ -91,3 +91,22 @@ Auto-attempts fire on: still (motion < 7.5) held long enough + retry gap +
 focus gate. Manual `scanNow()` (viewfinder tap / Try again) bypasses
 miss-cache, backoff, AND the focus gate — it resets `blockedSince`.
 `sealedRegion`/sealed mode skips refineCardCrop entirely; keep it that way.
+
+Camera lifecycle: hiding the app suspends the WORK but keeps the session
+when the platform muted the track (iOS frees the hardware itself); an
+explicit stop parks the live stream ~25s on iOS Home-Screen apps
+(`releaseCamera` in lib/camera.ts). Both exist because every skipped
+`getUserMedia` there is a permission dialog the user doesn't see — don't
+"simplify" them back to stop/reacquire.
+
+## Sealed set matching (lib/sealedmatch.ts)
+
+Three signals, best wins: whole-name containment 0.86+len bonus, per-line
+fuzzy similarity, exact set-code token 0.8 (vs threshold 0.72 in sealed.ts).
+Guard invariants: a code participates only with ≥3 chars AND a letter AND a
+digit ("sv4k" yes; "MEW"/"151" collide with card names and plain numbers),
+only as a whole OCR token, and always BELOW containment so a readable
+English set name outranks any code. The code path is what identifies
+Japanese Pokémon packs (own TCGplayer category, "Pokemon Japan", merged
+into the group index by tcgcsv.ts `tcgplayerGroups`) — their fronts print
+no Latin set name at all.
