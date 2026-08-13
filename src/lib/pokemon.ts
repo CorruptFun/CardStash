@@ -360,6 +360,20 @@ export async function matchPokemon(
   return toCard(ranked[0])
 }
 
+/**
+ * Identify by the collector line ALONE — the last resort when no name could
+ * be read (foil glare, ornate faces) but "215/203" survived: number + the
+ * printed set size pin the card. Newest set wins the rare size collision.
+ */
+export async function pokemonByCollector(number: string, printedTotal: string, apiKey?: string): Promise<Card | null> {
+  const num = stripLucene(number)
+  const total = Number(printedTotal)
+  if (!num || !Number.isFinite(total)) return null
+  const rows = await runQueries([`number:"${num}" set.printedTotal:${total}`], 10, apiKey).catch(() => [])
+  if (rows.length) return toCard(rows[0])
+  return null
+}
+
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {
   if (id.startsWith(DEX_PREFIX)) {
     try {

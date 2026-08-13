@@ -3,11 +3,12 @@ import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
-import { matchPokemon } from './pokemon'
+import { matchPokemon, pokemonByCollector } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
+import { catalogByCollector, isCatalogGame } from './tcgcsv'
 import type { Card, Game } from './types'
 import { detectFoil, hammingDistance, refineCardCrop } from './vision'
 import { normalizeName, similarity } from './util'
@@ -345,6 +346,40 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
     /* the band sweep's verdict below stands */
   }
 
+  // Name reading is out of road (ornate faces, foil sheen over the title).
+  // The collector line alone still pins the card when BOTH halves of the
+  // printed fraction survived — "215/203" plus the game is unambiguous.
+  if (gameHint) {
+    try {
+      // cornerText (when queued) already covered the exact hinted region;
+      // if no candidate ever queued it, let the normal-region read run.
+      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect)
+      if (read.number && read.total) {
+        traceEvent('corner-id', { number: read.number, total: read.total })
+        let card: Card | null = null
+        if (gameHint === 'pokemon') card = await pokemonByCollector(read.number, read.total, config.pokemonKey)
+        else if (isCatalogGame(gameHint)) card = await catalogByCollector(gameHint, read.number, read.total)
+        if (card) {
+          return {
+            ok: true,
+            card,
+            identification: {
+              game: card.game,
+              name: card.name,
+              setCode: read.setCode ?? card.setCode,
+              number: read.number,
+              confidence: 0.7,
+              via: 'ocr',
+              foil: detectFoil(canvas) ? true : undefined,
+            },
+          }
+        }
+      }
+    } catch {
+      /* the miss verdict below stands */
+    }
+  }
+
   return {
     ok: false,
     reason: 'ocr-miss',
@@ -369,6 +404,33 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
  * crop WAS that region (`cornerIsExact`). Fails soft: any trouble keeps the
  * name-based match.
  */
+/**
+ * Read the collector line with escalating effort: the speculative strip
+ * first, the game's own region, then narrow per-game slivers at full
+ * magnification, binarized — the line is tiny type that drowns beside rules
+ * text at strip scale.
+ */
+async function readCornerInfo(
+  game: Game,
+  canvas: HTMLCanvasElement,
+  cornerText: Promise<string> | null,
+  cornerIsExact: boolean,
+  mapRect: (rect: OcrRect) => OcrRect,
+): Promise<CornerRead> {
+  let read = parseCornerInfo(game, cornerText ? await cornerText : '')
+  if (!read.setCode && !read.number && !cornerIsExact) {
+    read = parseCornerInfo(game, await readRegionText(canvas, mapRect(CORNER_REGION[game])))
+  }
+  if (!read.setCode && !read.number) {
+    const retries = CORNER_RETRY_REGIONS[game] ?? [CORNER_REGION[game]]
+    for (const rect of retries) {
+      read = parseCornerInfo(game, await readRegionText(canvas, mapRect(rect), { variant: 'binary' }))
+      if (read.setCode || read.number) break
+    }
+  }
+  return read
+}
+
 async function refineFromCorner(
   card: Card,
   canvas: HTMLCanvasElement,
@@ -377,21 +439,9 @@ async function refineFromCorner(
   mapRect: (rect: OcrRect) => OcrRect,
   pokemonKey?: string,
 ): Promise<{ card: Card; read: CornerRead } | null> {
-  let read = parseCornerInfo(card.game, cornerText ? await cornerText : '')
-  if (!read.setCode && !read.number && !cornerIsExact) {
-    read = parseCornerInfo(card.game, await readRegionText(canvas, mapRect(CORNER_REGION[card.game])))
-  }
-  if (!read.setCode && !read.number) {
-    // The collector line is tiny type that drowns beside rules text at strip
-    // scale — retry narrow slivers at full magnification, binarized. This
-    // read is what tells "Tauros" from "Tauros ex", so it earns the work.
-    const retries = CORNER_RETRY_REGIONS[card.game] ?? [CORNER_REGION[card.game]]
-    for (const rect of retries) {
-      read = parseCornerInfo(card.game, await readRegionText(canvas, mapRect(rect), { variant: 'binary' }))
-      if (read.setCode || read.number) break
-    }
-    if (!read.setCode && !read.number) return null
-  }
+  // This read is what tells "Tauros" from "Tauros ex" — it earns the work.
+  const read = await readCornerInfo(card.game, canvas, cornerText, cornerIsExact, mapRect)
+  if (!read.setCode && !read.number) return null
   let exact: Card | null = null
   if (card.game === 'yugioh') {
     exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null

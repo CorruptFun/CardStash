@@ -21,6 +21,19 @@ test('pokemon: promo code', () => {
   assert.equal(parseCornerInfo('pokemon', 'SWSH 250').number, 'SWSH250')
 })
 
+test('pokemon: fused fraction — OCR ate the slash', () => {
+  const read = parseCornerInfo('pokemon', '© 156149 Medea')
+  assert.equal(read.number, '156')
+  assert.equal(read.total, '149')
+  const padded = parseCornerInfo('pokemon', 'junk 096086')
+  assert.equal(padded.number, '96')
+  assert.equal(padded.total, '86')
+})
+
+test('pokemon: a year is not a fused fraction', () => {
+  assert.equal(parseCornerInfo('pokemon', '©2023 Pokémon').number, undefined)
+})
+
 test('mtg: modern collector line', () => {
   const read = parseCornerInfo('mtg', '0269 M\nMH3 • EN')
   assert.equal(read.number, '269')

@@ -91,7 +91,7 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   }
 
   // Fraction-style games: Pokémon 123/198, Lorcana 23/204 · EN · 1, SWU 056/262.
-  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/) ?? fusedFraction(upper)
   if (game === 'lorcana') {
     if (!frac) return {}
     const set = upper.match(/\b(?:EN|FR|DE|IT)\b[^A-Z0-9\n]{0,4}(Q?\d{1,2})\b/)
@@ -111,6 +111,32 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   }
   // Riftbound / Star Wars: Unlimited and friends — the number alone helps.
   return frac ? { number: frac[1], total: frac[2] } : {}
+}
+
+/**
+ * The collector fraction's slash is the smallest glyph on the card and OCR
+ * regularly eats it: "156/149" reads as "156149". Recover a plausible
+ * number/total split from a bare 5-6 digit run — totals are set sizes
+ * (double or triple digits) and secret-rare numbers overshoot the total
+ * only modestly, which prunes bogus splits.
+ */
+function fusedFraction(upper: string): RegExpMatchArray | null {
+  const run = upper.match(/(?:^|[^\d/])(\d{5,6})(?:[^\d/]|$)/)
+  if (!run) return null
+  const digits = run[1]
+  const splits = digits.length === 6 ? [3] : [2, 3]
+  for (const at of splits) {
+    const number = Number(digits.slice(0, at).replace(/^0+(?=\d)/, ''))
+    const total = Number(digits.slice(at).replace(/^0+(?=\d)/, ''))
+    const plausible =
+      total >= 30 && total <= 400 && number >= 1 && number <= total + 150 && !YEAR.test(digits.slice(0, 4))
+    if (plausible) {
+      // Shape-compatible with the RegExpMatchArray the fraction regex yields
+      // (which also strips leading zeros from both groups).
+      return [digits, String(number), String(total)] as unknown as RegExpMatchArray
+    }
+  }
+  return null
 }
 
 /** Compare Yu-Gi-Oh print codes across languages: LOB-EN001 ≡ LOB-001. */
