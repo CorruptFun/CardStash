@@ -91,6 +91,13 @@ const norm = (s) =>
     .replace(/\s+/g, ' ')
     .trim()
 
+/** Filename/report-safe key from a card name. */
+const slug = (s) =>
+  norm(s)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24)
+
 async function pool(items, limit, fn) {
   const out = new Array(items.length)
   let next = 0
@@ -162,13 +169,66 @@ async function pokemon() {
     if (alt) picks.push({ key: 'tauros-plain', card: alt })
   } else fail('pokemon/tauros', 'no Tauros found on TCGdex')
 
-  const byId = async (key, id) => {
+  const byId = async (key, id, extra = {}) => {
     const card = await hydrate(id)
-    if (card) picks.push({ key, card })
+    if (card) picks.push({ key, card, ...extra })
     else fail(`pokemon/${key}`, `TCGdex has no ${id}`)
   }
   await byId('charizard-base', 'base1-4') // 1999 Base Set holo — the classic frame/font
   await byId('umbreon-vmax-alt', 'swsh7-215') // dark full-art alt (hard: dark plate, busy art)
+
+  /**
+   * Pick a card by species + printed suffix, without hard-coding a TCGdex id
+   * that a re-index can move.
+   */
+  const bySuffix = async (key, species, suffix, extra = {}) => {
+    try {
+      const briefs = await searchAndHydrate(species)
+      const cards = briefs
+        .map((b) => fulls.get(b.id))
+        .filter((c) => c && c.image && isPaper(c) && new RegExp(`\\b${suffix}$`, 'i').test(String(c.name)))
+      const pick = cards.slice(-1)[0]
+      if (pick) picks.push({ key, card: pick, ...extra })
+      else fail(`pokemon/${key}`, `no ${species} ${suffix} on TCGdex`)
+    } catch (err) {
+      fail(`pokemon/${key}`, err)
+    }
+  }
+
+  // Lesson 31: the VMAX/VSTAR species rescue — a VMAX or VSTAR always evolves
+  // from the SAME species' V, so "Evolves from Umbreon V" pins an unreadable
+  // Umbreon VMAX — is sound REASONING evidenced by exactly one fixture. One
+  // fixture cannot separate a real mechanism from an overfit to that card, and
+  // the rescue is unsafe for every other suffix (a Stage-1 ex evolves from a
+  // different species, which often has its own ex printing), so the evidence
+  // has to be of this exact shape.
+  await bySuffix('rayquaza-vmax', 'rayquaza', 'VMAX')
+  await bySuffix('arceus-vstar', 'arceus', 'VSTAR')
+  await bySuffix('lugia-vstar', 'lugia', 'VSTAR')
+
+  /**
+   * Capture a card's API universe WITHOUT making it a battery fixture.
+   * The real photographs in tests/harness/photos/ bring their own imagery —
+   * what they need from the fetcher is only that the stubs can ANSWER for
+   * their card. Seven of the first eight photos failed purely because they
+   * could not (lesson 32): "Duel Tower" was read PERFECTLY and still graded
+   * as a miss. That measures the fixture set, not the pipeline.
+   */
+  const universe = async (name, match) => {
+    try {
+      const briefs = await searchAndHydrate(name)
+      const cards = briefs.map((b) => fulls.get(b.id)).filter((c) => c && isPaper(c))
+      const pick = (match && cards.find(match)) ?? cards.slice(-1)[0]
+      if (pick) picks.push({ key: `universe-${slug(name)}`, card: pick, universeOnly: true })
+      else fail(`pokemon/universe/${name}`, 'nothing hydrated')
+    } catch (err) {
+      fail(`pokemon/universe/${name}`, err)
+    }
+  }
+  // The three photographed Pokémon cards (tests/harness/photos/manifest.json).
+  await universe('blastoise', (c) => /blastoise[\s-]*ex$/i.test(String(c.name)))
+  await universe('charizard', (c) => String(c.localId) === '11' && /xy12|evolutions/i.test(String(c?.set?.id ?? '')))
+  await universe('machamp', (c) => /^machamp$/i.test(String(c.name)))
   for (const name of ['pikachu', 'iono']) {
     const briefs = await searchAndHydrate(name)
     const cards = briefs.map((b) => fulls.get(b.id)).filter((c) => c && c.image && isPaper(c))
@@ -180,7 +240,8 @@ async function pokemon() {
 
   for (const { card } of picks) await wantSet(card?.set?.id)
 
-  for (const { key, card } of picks) {
+  for (const { key, card, universeOnly } of picks) {
+    if (universeOnly) continue // universe coverage only — the photo is the image
     if (!card?.image) {
       fail(`pokemon/${key}`, 'card has no image base')
       continue
@@ -583,6 +644,28 @@ const YGO = 'https://db.ygoprodeck.com/api/v7'
 async function yugioh() {
   console.log('\nYu-Gi-Oh (YGOPRODeck)…')
   const NAMES = ['Blue-Eyes White Dragon', 'Dark Magician', 'Ash Blossom & Joyous Spring']
+  /**
+   * Cards the real photographs and the binder page actually contain
+   * (tests/harness/photos/manifest.json). Captured into the stub universe but
+   * NOT turned into battery fixtures: a photo brings its own imagery, and what
+   * it needs from the fetcher is only that the stubs can answer for its card.
+   * Lesson 32 — seven of the first eight photos failed on absence alone, and
+   * "Duel Tower" had already been read perfectly when it was graded a miss.
+   */
+  const UNIVERSE_NAMES = [
+    // the foil-name photographs
+    'Blue-Eyes Alternative White Dragon',
+    'Blue-Eyes Spirit Dragon',
+    'Duel Tower',
+    'Enigmaster Packbit',
+    'I:P Masquerena',
+    // the nine-slot binder page
+    'Imsety, Glory of Horus',
+    'Qebehsenuef, Protection of Horus',
+    'Duamutef, Blessing of Horus',
+    'Hapi, Guidance of Horus',
+    "King's Sarcophagus",
+  ]
   const rows = []
   const seen = new Set()
   const push = (raw) => {
@@ -603,9 +686,21 @@ async function yugioh() {
       fail(`yugioh/${name}`, err)
     }
   }
+  for (const name of UNIVERSE_NAMES) {
+    try {
+      const res = await fetchRetry(`${YGO}/cardinfo.php?name=${encodeURIComponent(name)}`)
+      if (res?.data?.[0]) push(res.data[0])
+      else fail(`yugioh/universe/${name}`, 'no data')
+    } catch (err) {
+      fail(`yugioh/universe/${name}`, err)
+    }
+  }
   // A stub universe of 3 cards flatters substring retrieval — capture the
-  // realistic fname pools the app's longest-word fallback would face.
-  for (const word of ['dragon', 'magician', 'blossom']) {
+  // realistic fname pools the app's longest-word fallback would face. 'horus'
+  // is here for the binder page: five of its eight cards share that word, so
+  // a partial read of one has to survive competition from its siblings rather
+  // than being the only row in the pool.
+  for (const word of ['dragon', 'magician', 'blossom', 'horus']) {
     try {
       const res = await fetchRetry(`${YGO}/cardinfo.php?fname=${encodeURIComponent(word)}&num=60&offset=0`)
       for (const raw of res?.data ?? []) push(raw)
@@ -615,7 +710,7 @@ async function yugioh() {
     }
   }
   for (const raw of named) {
-    const key = norm(raw.name).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24)
+    const key = slug(raw.name)
     const url = raw.card_images?.[0]?.image_url
     if (!url) {
       fail(`yugioh/${key}`, 'no image url')
