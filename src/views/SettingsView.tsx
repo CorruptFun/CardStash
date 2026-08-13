@@ -7,9 +7,10 @@ import { seedDemoData } from '../lib/demo'
 import { testGeminiKey } from '../lib/gemini'
 import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
+import { relativeAge } from '../lib/util'
+import { APP_VERSION } from '../lib/version'
 import { useUi } from '../store/ui'
 
-const APP_VERSION = '0.6.0'
 const INSIGHT_DAYS = 30
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -407,13 +408,6 @@ export function SettingsView() {
       </Modal>
     </div>
   )
-}
-
-function relativeAge(at: number): string {
-  const ms = Math.max(0, Date.now() - at)
-  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`
-  if (ms < 48 * 3_600_000) return `${Math.round(ms / 3_600_000)}h`
-  return `${Math.round(ms / 86_400_000)}d`
 }
 
 function KeyState({ set, noun = 'Key' }: { set: boolean; noun?: string }) {

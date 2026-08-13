@@ -25,7 +25,7 @@ export interface SheetRequest {
   deckId?: string
   /** Preselect this finish in the add bar (scanner saw a foil sheen). */
   finish?: Finish
-  origin?: 'scan' | 'search' | 'collection' | 'deck'
+  origin?: 'scan' | 'search' | 'collection' | 'deck' | 'friend'
 }
 
 export interface SearchPrefill {

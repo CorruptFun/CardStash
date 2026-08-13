@@ -646,6 +646,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const [finish, setFinish] = useState<Finish>(row.finish)
   const [condition, setCondition] = useState<Condition>(row.condition)
   const [opened, setOpened] = useState(row.opened ?? false)
+  const [forTrade, setForTrade] = useState(row.forTrade ?? 0)
   const [paid, setPaid] = useState(row.purchasePrice != null ? String(row.purchasePrice) : '')
   const [note, setNote] = useState(row.note ?? '')
   const [saving, setSaving] = useState(false)
@@ -658,6 +659,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
       setFinish(row.finish)
       setCondition(row.condition)
       setOpened(row.opened ?? false)
+      setForTrade(row.forTrade ?? 0)
       setPaid(row.purchasePrice != null ? String(row.purchasePrice) : '')
       setNote(row.note ?? '')
     }
@@ -670,6 +672,8 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
       () =>
         updateItem(row.id, {
           ...(sealed ? { opened } : { finish, condition }),
+          // An opened box isn't the sealed product anymore — nothing to trade.
+          forTrade: sealed && opened ? 0 : forTrade,
           purchasePrice: hasPaid ? (paidValue ?? row.purchasePrice) : undefined,
           note: note.trim() || undefined,
         }),
@@ -697,6 +701,11 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
               <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
               <span className="copyrow__cond">{row.condition}</span>
             </>
+          )}
+          {(row.forTrade ?? 0) > 0 && (
+            <span className="tradechip">
+              <Icon name="swap" size={11} /> {row.forTrade}
+            </span>
           )}
         </span>
         <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>
@@ -754,6 +763,15 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
               aria-label="Paid per card"
             />
           </div>
+          {!(sealed && opened) && (
+            <div className="copyedit__trade">
+              <span className="copyedit__tradetext">
+                <strong>For trade</strong>
+                <em>Flagged copies show up in your shared binder — friends can ask for them</em>
+              </span>
+              <Stepper value={Math.min(forTrade, row.qty)} onChange={setForTrade} min={0} max={row.qty} />
+            </div>
+          )}
           <input
             className="input"
             type="text"

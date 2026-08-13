@@ -122,6 +122,16 @@ export interface CsvImportRow extends ImportRow {
   language?: string
   purchasePrice?: number
   scryfallId?: string
+  forTrade?: number
+}
+
+/** "2" → 2, "yes"/"all" → the row's qty, junk → none. */
+function parseForTrade(raw: string | undefined, qty: number): number | undefined {
+  const key = raw?.trim().toLowerCase()
+  if (!key) return undefined
+  if (['yes', 'y', 'true', 'all'].includes(key)) return qty
+  const count = Number.parseInt(key, 10)
+  return Number.isFinite(count) && count > 0 ? Math.min(count, qty) : undefined
 }
 
 export function parseCollectionCsv(text: string): CsvImportRow[] {
@@ -145,6 +155,7 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
   const condition = col('condition')
   const language = col('language', 'lang')
   const price = col('purchase price', 'price paid', 'cost')
+  const forTrade = col('for trade', 'trade', 'for_trade', 'trade quantity')
   if (name === -1) throw new Error('No "Name" column found — is this a collection CSV export?')
 
   const parsed: CsvImportRow[] = []
@@ -154,6 +165,7 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
     const rowGame = game === -1 ? undefined : normalizeGame(cells[game])
     const rowApiId = apiId === -1 ? undefined : cells[apiId]?.trim() || undefined
     const rowFinish = normalizeFinish(finish === -1 ? '' : cells[finish])
+    const rowQty = Math.max(1, parseInt(qty === -1 ? '1' : cells[qty] || '1', 10) || 1)
     parsed.push({
       name: cardName,
       game: rowGame,
@@ -161,12 +173,13 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
       number: number === -1 ? undefined : cells[number]?.trim() || undefined,
       apiId: rowApiId,
       scryfallId: rowGame == null || rowGame === 'mtg' ? rowApiId : undefined,
-      qty: Math.max(1, parseInt(qty === -1 ? '1' : cells[qty] || '1', 10) || 1),
+      qty: rowQty,
       finish: rowFinish,
       foil: rowFinish !== 'nonfoil',
       condition: normalizeCondition(condition === -1 ? 'NM' : cells[condition] || 'NM'),
       language: language === -1 ? undefined : cells[language]?.trim() || undefined,
       purchasePrice: parsePurchasePrice(price === -1 ? undefined : cells[price]),
+      forTrade: parseForTrade(forTrade === -1 ? undefined : cells[forTrade], rowQty),
     })
   }
   if (!parsed.length) throw new Error('No importable rows found')
@@ -191,6 +204,7 @@ const EXPORT_HEADER = [
   'Quantity',
   'Finish',
   'Condition',
+  'For trade',
   'Sealed',
   'Unit price (USD)',
   'Purchase price',
@@ -212,6 +226,7 @@ export function collectionToCsv(items: CollectionItem[]): string {
         item.qty,
         item.finish === 'nonfoil' ? '' : item.finish,
         item.condition,
+        item.forTrade ?? '',
         item.opened == null ? '' : item.opened ? 'opened' : 'sealed',
         itemUnitPrice(item)?.toFixed(2) ?? '',
         item.purchasePrice?.toFixed(2) ?? '',

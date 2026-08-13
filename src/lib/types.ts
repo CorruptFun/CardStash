@@ -125,6 +125,8 @@ export interface CollectionItem {
   opened?: boolean
   /** Cost basis per copy, USD. */
   purchasePrice?: number
+  /** Copies of this row offered for trade (0..qty); absent = none. */
+  forTrade?: number
   note?: string
   addedAt: number
   card: Card
@@ -187,3 +189,104 @@ export interface KvCacheRow {
   at: number
   data: unknown
 }
+
+/* --- Social: friends & trades (no server — snapshots travel as links/files) --- */
+
+/** What a profile share includes: just the trade binder, or the whole collection. */
+export type ShareScope = 'trade' | 'all'
+
+/** One shared binder row — a friend's copy, or one side of a trade. */
+export interface SharedCard {
+  /** `${game}:${apiId}` — same id space as Card, so live lookups still work. */
+  cardId: string
+  game: Game
+  name: string
+  setCode?: string
+  setName?: string
+  number?: string
+  rarity?: string
+  finish: Finish
+  condition: Condition
+  qty: number
+  /** Copies of this row offered for trade (≤ qty). */
+  forTrade: number
+  image?: string
+  /** Market unit price for the finish at export time, USD — condition NOT applied. */
+  price?: number
+}
+
+/** A followed collector: their last imported snapshot, kept locally. */
+export interface Friend {
+  /** Their stable profile id (generated once on their device). */
+  id: string
+  name: string
+  note?: string
+  scope: ShareScope
+  addedAt: number
+  /** When the snapshot was last imported here. */
+  updatedAt: number
+  /** The snapshot's own export stamp. */
+  exportedAt: number
+  /** Where the snapshot was fetched from — enables one-tap refresh. */
+  sourceUrl?: string
+  cards: SharedCard[]
+}
+
+export type TradeStatus = 'proposed' | 'accepted' | 'declined' | 'completed' | 'canceled'
+
+export interface TradeRecord {
+  id: string
+  /** Other party's profile id ('' when unknown — they may not be a saved friend). */
+  friendId: string
+  friendName: string
+  /** 'out' = I proposed it, 'in' = it was proposed to me. */
+  direction: 'out' | 'in'
+  status: TradeStatus
+  createdAt: number
+  updatedAt: number
+  note?: string
+  /** My side: copies I hand over. */
+  give: SharedCard[]
+  /** Their side: copies I receive. */
+  get: SharedCard[]
+  /** Set once the swap has been booked into the collection. */
+  appliedAt?: number
+}
+
+/* Decoded + sanitized share payloads. On the wire they carry an
+ * `app: 'cardstock-social'` marker and travel deflate+base64url-encoded in
+ * links, or as plain JSON in exported files. */
+
+export interface ProfilePayload {
+  kind: 'profile'
+  id: string
+  name: string
+  note?: string
+  scope: ShareScope
+  at: number
+  cards: SharedCard[]
+}
+
+export interface TradePayload {
+  kind: 'trade'
+  id: string
+  at: number
+  from: { id: string; name: string }
+  to?: { id?: string; name?: string }
+  note?: string
+  /** Cards the sender offers. */
+  offer: SharedCard[]
+  /** Cards the sender wants back. */
+  want: SharedCard[]
+}
+
+export interface ReplyPayload {
+  kind: 'reply'
+  id: string
+  at: number
+  from: { id: string; name: string }
+  status: 'accepted' | 'declined'
+  note?: string
+}
+
+export type SocialPayload = ProfilePayload | TradePayload | ReplyPayload

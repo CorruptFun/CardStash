@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { settings } from './settings'
 import { uid } from './util'
+import { APP_VERSION } from './version'
 
 /**
  * Local-first diagnostics: counts, timings and hashed errors — never card
@@ -17,6 +18,9 @@ export const EVENT_TYPES = [
   'deck_created',
   'ai_builder_run',
   'price_refresh',
+  'friend_added',
+  'social_share',
+  'trade_update',
   'error',
 ] as const
 
@@ -288,8 +292,6 @@ const FLUSH_TIMEOUT_MS = 10_000
 const KEEPALIVE_BYTES = 60_000
 const FLUSH_MIN_GAP_MS = 30_000
 let flushing = false
-
-const APP_VERSION = '0.4.0'
 
 function payload(events: AnalyticsEvent[], device: string) {
   return {
