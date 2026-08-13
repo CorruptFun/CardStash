@@ -108,8 +108,174 @@ async function runQueries(queries: string[], pageSize: number, apiKey?: string, 
   return []
 }
 
+/* --- TCGdex fallback ------------------------------------------------------
+ * pokemontcg.io (the primary) has gone stale — its team moved on to a
+ * commercial product, updates lag by whole set cycles and outages are
+ * routine. TCGdex is the maintained open API: no key, current sets, open
+ * CORS. It answers whenever the primary errors, returns nothing, or plainly
+ * doesn't know the printed set. Prices are best-effort there (shape has
+ * shifted between releases), so the primary stays first for its pricing.
+ */
+
+const DEX_API = 'https://api.tcgdex.net/v2/en'
+/** apiId prefix marking a TCGdex-sourced card, so refreshes route back to it. */
+const DEX_PREFIX = 'dex-'
+
+interface DexBrief {
+  id?: string
+  localId?: string | number
+  name?: string
+  image?: string
+}
+
+/** TCGdex image fields are extension-less bases. */
+function dexImage(base: string | undefined, quality: 'low' | 'high'): string | undefined {
+  return typeof base === 'string' && base ? `${base}/${quality}.webp` : undefined
+}
+
+/** Defensive price mining — tcgdex pricing shapes have shifted release to release. */
+function dexPriceEntries(raw: any): PriceEntry[] {
+  const entries: PriceEntry[] = []
+  const tcg = raw?.pricing?.tcgplayer
+  if (!tcg || typeof tcg !== 'object') return entries
+  for (const [variant, block] of Object.entries<any>(tcg)) {
+    if (!block || typeof block !== 'object') continue
+    const finish = FINISH_BY_TCGPLAYER_KEY[variant] ?? (/holo|foil/i.test(variant) ? 'holo' : 'nonfoil')
+    for (const [kind, key] of [
+      ['market', 'marketPrice'],
+      ['low', 'lowPrice'],
+      ['mid', 'midPrice'],
+      ['high', 'highPrice'],
+    ] as const) {
+      const value = block[key] ?? block[kind]
+      if (typeof value === 'number' && value > 0) entries.push({ source: 'tcgplayer', kind, finish, currency: 'USD', value })
+    }
+  }
+  return entries
+}
+
+function dexToCard(raw: any): Card {
+  const variants = raw?.variants ?? {}
+  const finishes: Finish[] = []
+  if (variants.normal) finishes.push('nonfoil')
+  if (variants.holo) finishes.push('holo')
+  if (variants.reverse) finishes.push('reverse')
+  if (variants.firstEdition) finishes.push('firstEd')
+  const name = String(raw?.name ?? 'Unknown card')
+  return {
+    id: `pokemon:${DEX_PREFIX}${raw.id}`,
+    game: 'pokemon',
+    apiId: `${DEX_PREFIX}${raw.id}`,
+    name,
+    setCode: typeof raw?.set?.id === 'string' ? raw.set.id.toUpperCase() : undefined,
+    setName: raw?.set?.name,
+    number: raw?.localId != null ? String(raw.localId) : undefined,
+    rarity: raw?.rarity,
+    finishes: finishes.length ? finishes : undefined,
+    imageSmall: dexImage(raw?.image, 'low'),
+    imageLarge: dexImage(raw?.image, 'high'),
+    typeLine: [raw?.category, raw?.stage].filter(Boolean).join(' — ') || undefined,
+    subtext: typeof raw?.description === 'string' ? raw.description : undefined,
+    supertype: raw?.category ?? 'Pokémon',
+    prices: mergePrices(dexPriceEntries(raw)),
+    links: {
+      tcgplayer: tcgplayerSearchLink(`${name} ${raw?.set?.name ?? ''}`.trim()),
+      ebaySold: ebaySoldLink({ name: `${name} ${raw?.localId ?? ''}`.trim(), setName: raw?.set?.name, game: 'pokemon' }),
+    },
+  }
+}
+
+function dexBriefToCard(brief: DexBrief): Card {
+  const id = String(brief.id)
+  const name = String(brief.name ?? 'Unknown card')
+  return {
+    id: `pokemon:${DEX_PREFIX}${id}`,
+    game: 'pokemon',
+    apiId: `${DEX_PREFIX}${id}`,
+    name,
+    number: brief.localId != null ? String(brief.localId) : undefined,
+    setCode: id.includes('-') ? id.split('-')[0].toUpperCase() : undefined,
+    imageSmall: dexImage(brief.image, 'low'),
+    imageLarge: dexImage(brief.image, 'high'),
+    supertype: 'Pokémon',
+    prices: mergePrices([]),
+    links: {
+      tcgplayer: tcgplayerSearchLink(name),
+      ebaySold: ebaySoldLink({ name, game: 'pokemon' }),
+    },
+  }
+}
+
+async function dexBriefs(name: string, signal?: AbortSignal): Promise<DexBrief[]> {
+  const clean = stripQuotes(name)
+  if (!clean) return []
+  const rows = await fetchJson(`${DEX_API}/cards?name=${encodeURIComponent(clean)}`, { signal, timeoutMs: 10_000 })
+  return Array.isArray(rows) ? rows.filter((row: DexBrief) => row?.id && row?.name) : []
+}
+
+const plainDigits = (value: unknown) =>
+  String(value ?? '')
+    .replace(/\D+/g, '')
+    .replace(/^0+(?=\d)/, '')
+
+/**
+ * Match a card on TCGdex by name, then pin the printing: the collector
+ * number narrows the briefs, and the printed set size ("…/086") picks the
+ * set once a few candidates are hydrated.
+ */
+async function dexMatch(
+  name: string,
+  number?: string | null,
+  printedTotal?: string | null,
+  signal?: AbortSignal,
+): Promise<Card | null> {
+  const briefs = await dexBriefs(name, signal)
+  if (!briefs.length) return null
+  const target = normalizeName(name)
+  let named = briefs.filter((brief) => normalizeName(String(brief.name)) === target)
+  if (!named.length) named = briefs.filter((brief) => normalizeName(String(brief.name)).startsWith(target))
+  if (!named.length) return null
+  const digits = plainDigits(number)
+  const numbered = digits ? named.filter((brief) => plainDigits(brief.localId) === digits) : []
+  // Newest last in practice — hydrate the tail few and let the set size decide.
+  const pool = (numbered.length ? numbered : named).slice(-6)
+  const fulls = (
+    await Promise.all(
+      pool.map((brief) => fetchJson(`${DEX_API}/cards/${brief.id}`, { signal, timeoutMs: 10_000 }).catch(() => null)),
+    )
+  ).filter((raw: any) => raw?.id)
+  if (!fulls.length) return null
+  const total = printedTotal ? Number(printedTotal) : NaN
+  const sized = Number.isFinite(total) ? fulls.filter((raw: any) => Number(raw?.set?.cardCount?.official) === total) : []
+  const ranked = sized.length ? sized : fulls
+  return dexToCard(ranked[ranked.length - 1])
+}
+
 export async function searchPokemon(query: string, apiKey?: string, signal?: AbortSignal): Promise<Card[]> {
-  return (await runQueries(nameQueries(query), 30, apiKey, signal)).map(toCard)
+  let rows: any[] = []
+  let primaryError: unknown = null
+  try {
+    rows = await runQueries(nameQueries(query), 30, apiKey, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    primaryError = err
+  }
+  if (rows.length) return rows.map(toCard)
+  // Primary down or blank: TCGdex briefs still answer with names and images
+  // (prices arrive when a card is opened/refreshed).
+  const target = normalizeName(query)
+  const briefs = await dexBriefs(query, signal).catch(() => [] as DexBrief[])
+  if (briefs.length) {
+    return briefs
+      .sort(
+        (a, b) =>
+          Number(normalizeName(String(b.name)).startsWith(target)) - Number(normalizeName(String(a.name)).startsWith(target)),
+      )
+      .slice(0, 30)
+      .map(dexBriefToCard)
+  }
+  if (primaryError) throw primaryError
+  return []
 }
 
 export async function matchPokemon(
@@ -124,13 +290,21 @@ export async function matchPokemon(
   const num = number ? stripLucene(number) : ''
   const withNumber = num ? [...queries.map((q) => `${q} number:"${num}"`), ...queries] : queries
   const results = await runQueries(withNumber, 10, apiKey).catch(() => [])
-  if (!results.length) return null
+  // Primary erroring or blank — the TCGdex fallback still knows the card.
+  if (!results.length) return dexMatch(name, number, printedTotal).catch(() => null)
   // The printed "123/198" total identifies the set even when no code is legible.
   let pool = results
   if (printedTotal) {
     const total = Number(printedTotal)
     const sized = results.filter((raw: any) => Number(raw.set?.printedTotal) === total)
     if (sized.length) pool = sized
+    else {
+      // No set of this size in the primary: it predates the set (the API
+      // has gone stale). TCGdex usually has it — an exact-edition hit there
+      // beats the primary's wrong-set guess.
+      const dex = await dexMatch(name, number, printedTotal).catch(() => null)
+      if (dex) return dex
+    }
   }
   if (setCode) {
     const exact = pool.find(
@@ -144,6 +318,14 @@ export async function matchPokemon(
 }
 
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {
+  if (id.startsWith(DEX_PREFIX)) {
+    try {
+      const raw = await fetchJson(`${DEX_API}/cards/${id.slice(DEX_PREFIX.length)}`, { timeoutMs: 15_000 })
+      return raw?.id ? dexToCard(raw) : null
+    } catch {
+      return null
+    }
+  }
   try {
     const res = await fetchJson(`${API}/cards/${id}`, { headers: headers(apiKey), timeoutMs: 15_000 })
     return res.data ? toCard(res.data) : null

@@ -1165,7 +1165,9 @@ button {
 }
 .reticle__hint {
   position: absolute;
-  bottom: -30px;
+  /* Inside the frame's bottom edge: hanging below the reticle put it under
+   * the shutter button on tall phones. */
+  bottom: 14px;
   left: 50%;
   transform: translate(-50%);
   font-family: var(--font-num);
@@ -1174,6 +1176,7 @@ button {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #ffffffc7;
+  text-shadow: 0 1px 6px #000000b3;
   white-space: nowrap;
 }
 .reticle--sensing {
