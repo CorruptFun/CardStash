@@ -197,6 +197,19 @@ export function nameCandidates(lines: string[]): string[] {
   return out.slice(0, 6)
 }
 
+function candidatesFromText(text: string): string[] {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const line of text.split('\n')) {
+    const cleaned = cleanOcrLine(line)
+    if (cleaned && !seen.has(cleaned.toLowerCase())) {
+      seen.add(cleaned.toLowerCase())
+      lines.push(cleaned)
+    }
+  }
+  return nameCandidates(lines)
+}
+
 /**
  * OCR one band of a card crop and return plausible name candidates, best
  * first.
@@ -205,16 +218,27 @@ export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): P
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
   const { data } = await worker.recognize(region)
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const line of String(data?.text ?? '').split('\n')) {
-    const cleaned = cleanOcrLine(line)
-    if (cleaned && !seen.has(cleaned.toLowerCase())) {
-      seen.add(cleaned.toLowerCase())
-      lines.push(cleaned)
-    }
+  return candidatesFromText(String(data?.text ?? ''))
+}
+
+/**
+ * Position-agnostic fallback: OCR the whole card crop with automatic layout
+ * detection — the name could be anywhere on promos, full-art specials and
+ * custom cards — and mine every line for name candidates. Heavier than a
+ * band, so the scan loop only calls it after the targeted bands miss.
+ */
+export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<string[]> {
+  const worker = await getWorker()
+  const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 700)
+  await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
+  let text = ''
+  try {
+    const { data } = await worker.recognize(region)
+    text = String(data?.text ?? '')
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
   }
-  return nameCandidates(lines)
+  return candidatesFromText(text)
 }
 
 /**
