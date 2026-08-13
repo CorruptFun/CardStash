@@ -19,6 +19,11 @@ const RETRY_MAX_GAP_MS = 60_000
 const FOCUS_RATIO = 0.62
 const FOCUS_FLOOR = 6
 const FOCUS_WAIT_MAX_MS = 1200
+/** Sharpness-peak half-life in ms — time-based, so 120Hz displays decay the
+ * same as 60Hz ones. */
+const FOCUS_PEAK_HALFLIFE_MS = 750
+/** Frame-analysis cadence; display refresh above this is wasted heat. */
+const SENSE_MIN_INTERVAL_MS = 48
 
 interface ApiFailurePolicy {
   waitMs: number
@@ -145,6 +150,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   const failureRef = useRef<FailureState>(freshFailureState())
   /** Focus tracking: rolling sharpness peak + how long the gate has blocked. */
   const focusRef = useRef({ max: 0, blockedSince: 0 })
+  const lastSenseRef = useRef(0)
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null)
   const regionStreakRef = useRef(0)
   const senseCtxRef = useRef<CanvasRenderingContext2D | null>(null)
@@ -220,6 +226,14 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       rafRef.current = requestAnimationFrame(senseLoop)
       return
     }
+    // Sensing at ~20fps reads the scene just as well as at display refresh —
+    // running the Sobel pass at 120Hz would only heat the phone.
+    const sinceLast = performance.now() - lastSenseRef.current
+    if (sinceLast < SENSE_MIN_INTERVAL_MS) {
+      rafRef.current = requestAnimationFrame(senseLoop)
+      return
+    }
+    lastSenseRef.current = performance.now()
     const vw = video.videoWidth
     const vh = video.videoHeight
     const sw = SENSE_WIDTH
@@ -242,9 +256,11 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       return
     }
     prevGrayRef.current = analysis.gray
-    // Decaying peak: after a scene change the old peak fades in a few
-    // seconds, so the gate below always compares against CURRENT conditions.
-    focusRef.current.max = Math.max(analysis.sharpness, focusRef.current.max * 0.985)
+    // Decaying peak: after a scene change the old peak fades within ~a
+    // second, so the gate below always compares against CURRENT conditions.
+    // Time-based, so the sensing cadence doesn't change the decay rate.
+    const decay = Math.pow(0.5, sinceLast / FOCUS_PEAK_HALFLIFE_MS)
+    focusRef.current.max = Math.max(analysis.sharpness, focusRef.current.max * decay)
     regionStreakRef.current = analysis.region
       ? Math.min(6, regionStreakRef.current + 1)
       : Math.max(0, regionStreakRef.current - 1)
@@ -308,7 +324,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       const capture = captureFrame(video, region)
       const hash = frameHash(capture.canvas)
       const startedAt = performance.now()
-      await job.run(() => identifyFrame(capture, hash, { ignoreMisses: manual, mode }), {
+      await job.run((signal) => identifyFrame(capture, hash, { ignoreMisses: manual, mode, signal }), {
         outcome: (outcome) => {
           track('scan_attempt', {
             engine: outcome.ok ? outcome.identification.via : outcome.reason === 'cached-miss' ? 'cache' : 'ocr',
@@ -411,6 +427,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   const rescan = useCallback(() => {
     lastAttemptRef.current = 0
     stillSinceRef.current = null
+    focusRef.current.blockedSince = 0
     failureRef.current = freshFailureState()
     patch({ hit: null, miss: null, status: 'searching', detail: null })
   }, [patch])
@@ -419,6 +436,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     if (jobRef.current?.running || !sessionRef.current) return
     lastAttemptRef.current = 0
     stillSinceRef.current = null
+    focusRef.current.blockedSince = 0
     failureRef.current = freshFailureState()
     attempt(true)
   }, [attempt])

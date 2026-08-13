@@ -1195,7 +1195,10 @@ button {
 .chipslot {
   position: absolute;
   left: 50%;
-  top: calc(44% - min(31vw, 150px, 16vh) * 88 / 63 - 14px);
+  /* Above the reticle, but never into the top controls on short viewports.
+     The -100% translate hangs the stack UP from this line, so the floor
+     budgets the stack's own height below the top bar. */
+  top: max(calc(var(--sat) + 122px), calc(44% - min(31vw, 150px, 16vh) * 88 / 63 - 14px));
   transform: translate(-50%, -100%);
   z-index: 8;
   max-width: min(92vw, 400px);
@@ -1311,18 +1314,6 @@ button {
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
 }
-.chip__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--warn);
-  animation: pulse 1.1s ease-in-out infinite;
-}
-@keyframes pulse {
-  50% {
-    opacity: 0.3;
-  }
-}
 .chip--nomatch {
   border-color: #e0a54266;
 }
@@ -1410,7 +1401,8 @@ button {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  top: calc(var(--sat) + 62px);
+  /* Above the tray band, below the reticle — never under the scan chip. */
+  bottom: calc(var(--nav-h) + var(--sab) + 152px);
   z-index: 7;
   width: min(92vw, 360px);
   display: flex;

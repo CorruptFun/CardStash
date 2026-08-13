@@ -81,9 +81,11 @@ function similarity(a, b) {
   return 1 - lev(na, nb) / Math.max(na.length, nb.length)
 }
 
-/** Did the pipeline land on the right card? Exact normalized name, or ≥0.9. */
+/** Did the pipeline land on the right card? Right GAME, and the name exact
+ * (normalized) or ≥0.9 — a confident hit in the wrong game is a failure. */
 function graded(expected, outcome) {
   if (!outcome?.ok) return false
+  if (outcome.game && outcome.game !== expected.game) return false
   return similarity(expected.name, outcome.name) >= 0.9
 }
 

@@ -74,11 +74,17 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     // Modern: "0269 M" then "MH3 • EN"; older: "269/350 U" then "M21 • EN".
     let number: string | undefined
     for (const line of upper.split('\n')) {
-      const frac = line.match(/\b0*(\d{1,4})\s*\/\s*\d{1,4}\b/)
-      if (frac) {
+      // The denominator is the SET size — a creature's "4/4" power/toughness
+      // box also matches a bare fraction shape, but no set has 44 cards's
+      // worth of ambiguity: real set sizes start well above P/T values.
+      const frac = line.match(/\b0*(\d{1,4})\s*\/\s*0*(\d{2,4})\b/)
+      if (frac && Number(frac[2]) >= 45) {
         number = frac[1]
         break
       }
+      // A line holding a REJECTED fraction is the P/T box or token rules
+      // text — its digits must not feed the solo-number fallback either.
+      if (/\d\s*\/\s*\d/.test(line)) continue
       const solo = line.match(/(?:^|[^\dA-Z/])0*(\d{1,4})(?:[A-Z]\b|\b)/)
       if (solo && !YEAR.test(solo[1])) {
         number = solo[1]

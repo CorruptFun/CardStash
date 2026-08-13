@@ -1,5 +1,6 @@
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
+import { isAbort } from './fetchJson'
 import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
@@ -28,6 +29,9 @@ export type ScanMode = 'card' | 'sealed'
 interface CacheEntry {
   hash: string
   mode: ScanMode
+  /** The game filter the attempt ran under — a miss under 'auto' must not
+   * suppress a retry after the user picks the right game. */
+  hint?: Game
   card: Card | null
   /** Foil sheen read off the physical copy — kept so cached hits price right. */
   foil?: boolean
@@ -36,21 +40,25 @@ interface CacheEntry {
 
 const cache: CacheEntry[] = []
 const CACHE_LIMIT = 60
-const MISS_TTL_MS = 15_000
+/** A full miss now burns a multi-pass OCR sweep — don't re-burn the same
+ * unchanged frame twice a minute; a tap rescans instantly regardless. */
+const MISS_TTL_MS = 30_000
 const HASH_TOLERANCE = 10
 
-function cacheLookup(hash: string, mode: ScanMode): CacheEntry | null {
+function cacheLookup(hash: string, mode: ScanMode, hint?: Game): CacheEntry | null {
   const now = Date.now()
   for (const entry of cache) {
     if (entry.mode === mode && hammingDistance(entry.hash, hash) <= HASH_TOLERANCE) {
+      // A miss only counts against the same filter it was produced under.
+      if (entry.card === null && entry.hint !== hint) continue
       return entry.card === null && now - entry.at > MISS_TTL_MS ? null : entry
     }
   }
   return null
 }
 
-function cacheStore(hash: string, mode: ScanMode, card: Card | null, foil?: boolean): void {
-  cache.unshift({ hash, mode, card, foil, at: Date.now() })
+function cacheStore(hash: string, mode: ScanMode, hint: Game | undefined, card: Card | null, foil?: boolean): void {
+  cache.unshift({ hash, mode, hint, card, foil, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
@@ -82,7 +90,7 @@ export interface IdentificationMeta {
 export async function identifyFrame(
   capture: FrameCapture,
   hash: string,
-  opts: { ignoreMisses?: boolean; mode?: ScanMode } = {},
+  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal } = {},
 ): Promise<IdentifyOutcome> {
   const mode = opts.mode ?? 'card'
   const config = settings()
@@ -107,7 +115,7 @@ export async function identifyFrame(
     )
     return outcome
   }
-  const cached = cacheLookup(hash, mode)
+  const cached = cacheLookup(hash, mode, gameHint)
   const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
   if (cacheUsable && cached.card) {
     traceEvent('cache', { hit: true, card: cached.card.name })
@@ -131,11 +139,13 @@ export async function identifyFrame(
   }
 
   const outcome =
-    mode === 'sealed' ? await identifySealedFrame(capture.canvas, gameHint) : await identifyViaOcr(capture.canvas, gameHint)
-  if (outcome.ok) cacheStore(hash, mode, outcome.card, outcome.identification.foil)
+    mode === 'sealed'
+      ? await identifySealedFrame(capture.canvas, gameHint)
+      : await identifyViaOcr(capture.canvas, gameHint, opts.signal)
+  if (outcome.ok) cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
-  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, null)
+  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, gameHint, null)
   return finish(outcome)
 }
 
@@ -206,7 +216,16 @@ const OCR_NAMES_PER_BAND = 6
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
-async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
+async function identifyViaOcr(
+  frame: HTMLCanvasElement,
+  gameHint: Game | undefined,
+  signal?: AbortSignal,
+): Promise<IdentifyOutcome> {
+  /** Checked between passes: a stopped scanner must not keep escalating
+   * OCR passes and lookups in the background. */
+  const bail = () => {
+    if (signal?.aborted) throw new DOMException('Scan attempt aborted', 'AbortError')
+  }
   // The reticle crop is a fixed window; the card in it is regularly smaller,
   // off-center or slightly rolled. Tighten to the detected card and deskew
   // before any OCR — every band below assumes card-relative geometry.
@@ -238,11 +257,17 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
   const tried = new Set<string>()
   let firstRead: string | undefined
   let cornerText: Promise<string> | null = null
+  // Attempt-wide budget against DYING APIs: fast lookups are nearly free and
+  // deep candidate exploration is the accuracy win, but lookups riding their
+  // multi-second timeouts must not stretch one attempt into minutes — only
+  // those count against the budget, plus a hard wall-clock deadline.
+  let slowLookupsLeft = 4
+  const lookupDeadline = Date.now() + 20_000
+  const SLOW_LOOKUP_MS = 1_500
 
-  /** Dedupe candidates against earlier passes; remember the first plausible read. */
+  /** Candidates not yet consumed by a lookup; remember the first plausible read. */
   const freshOf = (names: string[]): string[] => {
     const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
-    for (const name of fresh) tried.add(name.toLowerCase())
     firstRead ??= fresh[0]
     return fresh
   }
@@ -258,18 +283,24 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
     // whose mid-card code refineFromCorner re-reads.
     cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
+      if (slowLookupsLeft <= 0 || Date.now() > lookupDeadline) break
+      // Consumed here, not at freshOf: candidates past this pass's window
+      // stay eligible for the next pass instead of being silently dropped.
+      tried.add(name.toLowerCase())
       const lookupStarted = Date.now()
       const best = await bestMatchAcrossGames(name, games, {
         pokemonKey: config.pokemonKey,
         timeoutMs,
       }).catch(() => null)
+      const lookupMs = Date.now() - lookupStarted
+      if (lookupMs > SLOW_LOOKUP_MS) slowLookupsLeft--
       traceEvent('lookup', {
         read: name,
         games: games.join(','),
         matched: best?.card.name ?? null,
         game: best?.card.game,
         score: best ? Number(best.score.toFixed(3)) : null,
-        ms: Date.now() - lookupStarted,
+        ms: lookupMs,
       })
       if (!best || best.score < matchThresholdFor(name)) continue
       // Name pinned the card; now read the printed collector line to pin
@@ -311,6 +342,7 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
   // first (Riftbound & co. print names mid-card, not at the top), so a hit
   // in the first band skips the rest of the work entirely.
   for (const band of nameBands(gameHint)) {
+    bail()
     let names: string[]
     try {
       names = await readCardNames(canvas, band)
@@ -328,10 +360,12 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
   // faces routinely defeat the mean-luma polarity heuristic. A different
   // failure surface, so it regularly cracks what the first pass mangled.
   for (const variant of ['binary', 'binary-flip'] as const) {
+    bail()
     try {
       const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })))
       if (hit) return hit
-    } catch {
+    } catch (err) {
+      if (isAbort(err)) throw err
       /* fall through to the full sweep */
     }
   }
@@ -339,10 +373,12 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
   // The bands assume a standard frame, but promos, full-art specials and
   // custom cards put names in unexpected places. Before giving up, sweep the
   // whole card once with automatic layout detection and mine every line.
+  bail()
   try {
     const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
     if (hit) return hit
-  } catch {
+  } catch (err) {
+    if (isAbort(err)) throw err
     /* the band sweep's verdict below stands */
   }
 
@@ -350,6 +386,7 @@ async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefin
   // The collector line alone still pins the card when BOTH halves of the
   // printed fraction survived — "215/203" plus the game is unambiguous.
   if (gameHint) {
+    bail()
     try {
       // cornerText (when queued) already covered the exact hinted region;
       // if no candidate ever queued it, let the normal-region read run.
