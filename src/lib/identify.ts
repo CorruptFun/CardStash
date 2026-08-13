@@ -2,7 +2,7 @@ import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { nameBands, readCardNames, readRegionText, readSealedLines, type OcrRect } from './ocr'
+import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon } from './pokemon'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
@@ -157,6 +157,8 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
 const OCR_MATCH_THRESHOLD = 0.62
 /** Per-game budget for a name lookup: one slow card API mustn't stall the frame. */
 const OCR_MATCH_TIMEOUT_MS = 6_000
+/** A single hinted game has no four-way fan-out — its API gets longer (the keyless Pokémon API needs it). */
+const OCR_MATCH_TIMEOUT_HINTED_MS = 9_000
 /** Candidates tried per band — the name is usually the first line or the first joined pair. */
 const OCR_NAMES_PER_BAND = 4
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
@@ -167,9 +169,63 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   // (Riftbound & co.) are reachable by picking them in the scan game filter.
   const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
   const config = settings()
+  const timeoutMs = games.length === 1 ? OCR_MATCH_TIMEOUT_HINTED_MS : OCR_MATCH_TIMEOUT_MS
   const tried = new Set<string>()
   let firstRead: string | undefined
   let cornerText: Promise<string> | null = null
+
+  /** Dedupe candidates against earlier passes; remember the first plausible read. */
+  const freshOf = (names: string[]): string[] => {
+    const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
+    for (const name of fresh) tried.add(name.toLowerCase())
+    firstRead ??= fresh[0]
+    return fresh
+  }
+
+  /** Look the candidates up; a confident hit is refined to the exact edition. */
+  const tryCandidates = async (fresh: string[]): Promise<IdentifyOutcome | null> => {
+    if (!fresh.length) return null
+    // Queue the collector-line OCR now: it runs on the secondary OCR worker
+    // (or on the primary, idle while the name candidates are out on the
+    // network), so the line is usually read "for free" by the time a match
+    // wants it. With a game hint the crop is that game's exact region; in
+    // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
+    // whose mid-card code refineFromCorner re-reads.
+    cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
+    for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
+      const best = await bestMatchAcrossGames(name, games, {
+        pokemonKey: config.pokemonKey,
+        timeoutMs,
+      }).catch(() => null)
+      if (!best || best.score < OCR_MATCH_THRESHOLD) continue
+      // Name pinned the card; now read the printed collector line to pin
+      // the exact edition, and check the surface for a foil sheen.
+      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
+      let card = refined?.card ?? best.card
+      const foil = detectFoil(canvas)
+      // Sheen on a printing that never came foil: the copy in hand must be
+      // a different printing — re-pick the newest foil-capable one.
+      if (foil && !refined && card.game === 'mtg' && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')) {
+        const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
+        if (better) card = better
+      }
+      return {
+        ok: true,
+        card,
+        identification: {
+          game: card.game,
+          name,
+          setCode: refined?.read.setCode,
+          number: refined?.read.number,
+          confidence: best.score,
+          via: 'ocr',
+          foil: foil ? true : undefined,
+        },
+      }
+    }
+    return null
+  }
+
   // Bands are OCR'd one at a time, the game's most likely name position
   // first (Riftbound & co. print names mid-card, not at the top), so a hit
   // in the first band skips the rest of the work entirely.
@@ -181,50 +237,20 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
       if (tried.size || firstRead) break
       return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
     }
-    const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
-    for (const name of fresh) tried.add(name.toLowerCase())
-    firstRead ??= fresh[0]
-    if (!fresh.length) continue
-    // Queue the collector-line OCR now: it runs on the secondary OCR worker
-    // (or on the primary, idle while the name candidates are out on the
-    // network), so the line is usually read "for free" by the time a match
-    // wants it. With a game hint the crop is that game's exact region; in
-    // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
-    // whose mid-card code refineFromCorner re-reads.
-    cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
-    for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
-      const best = await bestMatchAcrossGames(name, games, {
-        pokemonKey: config.pokemonKey,
-        timeoutMs: OCR_MATCH_TIMEOUT_MS,
-      }).catch(() => null)
-      if (best && best.score >= OCR_MATCH_THRESHOLD) {
-        // Name pinned the card; now read the printed collector line to pin
-        // the exact edition, and check the surface for a foil sheen.
-        const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
-        let card = refined?.card ?? best.card
-        const foil = detectFoil(canvas)
-        // Sheen on a printing that never came foil: the copy in hand must be
-        // a different printing — re-pick the newest foil-capable one.
-        if (foil && !refined && card.game === 'mtg' && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')) {
-          const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
-          if (better) card = better
-        }
-        return {
-          ok: true,
-          card,
-          identification: {
-            game: card.game,
-            name,
-            setCode: refined?.read.setCode,
-            number: refined?.read.number,
-            confidence: best.score,
-            via: 'ocr',
-            foil: foil ? true : undefined,
-          },
-        }
-      }
-    }
+    const hit = await tryCandidates(freshOf(names))
+    if (hit) return hit
   }
+
+  // The bands assume a standard frame, but promos, full-art specials and
+  // custom cards put names in unexpected places. Before giving up, sweep the
+  // whole card once with automatic layout detection and mine every line.
+  try {
+    const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
+    if (hit) return hit
+  } catch {
+    /* the band sweep's verdict below stands */
+  }
+
   return {
     ok: false,
     reason: 'ocr-miss',
