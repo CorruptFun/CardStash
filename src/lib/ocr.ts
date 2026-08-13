@@ -115,12 +115,16 @@ export interface OcrRect {
   h: number
 }
 
+export type PrepVariant = 'normal' | 'binary'
+
 /**
  * Crop a region (fractions of the source), rescale toward `targetWidth`
  * (down for big name bands, up for tiny collector lines), grayscale and
- * stretch contrast.
+ * normalize. 'normal' is a locally-adaptive contrast stretch; 'binary'
+ * additionally thresholds to pure ink-on-paper — a different failure
+ * surface that cracks stylized type over busy art.
  */
-function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number): HTMLCanvasElement {
+function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number, variant: PrepVariant = 'normal'): HTMLCanvasElement {
   const sx = Math.max(0, Math.floor(rect.x * canvas.width))
   const sy = Math.max(0, Math.floor(rect.y * canvas.height))
   const sw = Math.max(1, Math.min(canvas.width - sx, Math.round(rect.w * canvas.width)))
@@ -135,7 +139,7 @@ function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: numbe
   ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
   try {
     const image = ctx.getImageData(0, 0, out.width, out.height)
-    normalizeContrast(image)
+    normalizeContrast(image, variant)
     ctx.putImageData(image, 0, 0)
   } catch {
     /* preprocessing is an accuracy boost, not a requirement */
@@ -143,33 +147,124 @@ function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: numbe
   return out
 }
 
-/** Grayscale + percentile contrast stretch (clips glare/shadow outliers). */
-function normalizeContrast(image: ImageData): void {
-  const { data } = image
-  const pixels = data.length / 4
+/** Tiles per axis for local normalization; glare/shadow rarely covers all tiles. */
+const CONTRAST_TILES = 4
+
+/**
+ * Grayscale + LOCALLY adaptive percentile contrast stretch: per-tile lo/hi
+ * levels, bilinearly interpolated per pixel. A glare streak or shadow
+ * gradient then only saturates its own corner instead of flattening the
+ * whole band (the global stretch it replaces did exactly that). Flat tiles
+ * (blank borders) inherit the global levels so noise isn't amplified.
+ */
+function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): void {
+  const { data, width, height } = image
+  const pixels = width * height
   const luma = new Uint8ClampedArray(pixels)
-  const histogram = new Uint32Array(256)
+  const globalHist = new Uint32Array(256)
   let lumaSum = 0
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     const y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
     luma[p] = y
     lumaSum += y
-    histogram[y]++
+    globalHist[y]++
   }
-  const clip = pixels * 0.02
-  let lo = 0
-  for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
-  let hi = 255
-  for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
-  const span = Math.max(1, hi - lo)
+  const levelAt = (histogram: Uint32Array, count: number, clipFraction: number): [number, number] => {
+    const clip = count * clipFraction
+    let lo = 0
+    for (let mass = 0; lo < 255 && mass < clip; lo++) mass += histogram[lo]
+    let hi = 255
+    for (let mass = 0; hi > 0 && mass < clip; hi--) mass += histogram[hi]
+    return [lo, hi]
+  }
+  const [globalLo, globalHi] = levelAt(globalHist, pixels, 0.02)
+
+  const T = CONTRAST_TILES
+  const tileW = Math.max(1, Math.ceil(width / T))
+  const tileH = Math.max(1, Math.ceil(height / T))
+  const tileLo = new Float64Array(T * T)
+  const tileHi = new Float64Array(T * T)
+  {
+    const hist = new Uint32Array(256)
+    for (let ty = 0; ty < T; ty++) {
+      for (let tx = 0; tx < T; tx++) {
+        hist.fill(0)
+        let count = 0
+        const yEnd = Math.min(height, (ty + 1) * tileH)
+        const xEnd = Math.min(width, (tx + 1) * tileW)
+        for (let y = ty * tileH; y < yEnd; y++) {
+          const row = y * width
+          for (let x = tx * tileW; x < xEnd; x++) {
+            hist[luma[row + x]]++
+            count++
+          }
+        }
+        const [lo, hi] = count ? levelAt(hist, count, 0.04) : [globalLo, globalHi]
+        // A flat tile has no signal worth stretching — use the global levels.
+        const flat = hi - lo < 24
+        tileLo[ty * T + tx] = flat ? globalLo : lo
+        tileHi[ty * T + tx] = flat ? globalHi : hi
+      }
+    }
+  }
+
   // Light type on a dark plate (Riftbound's name bar, collector lines on
   // dark frames) reads far worse than dark-on-light: flip the polarity of a
   // clearly dark crop so Tesseract always sees dark text on paper.
   const invert = lumaSum / pixels < 112
+  const values = new Uint8ClampedArray(pixels)
+  for (let y = 0; y < height; y++) {
+    const fy = Math.min(T - 1, Math.max(0, y / tileH - 0.5))
+    const ty0 = Math.floor(fy)
+    const ty1 = Math.min(T - 1, ty0 + 1)
+    const wy = fy - ty0
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      const fx = Math.min(T - 1, Math.max(0, x / tileW - 0.5))
+      const tx0 = Math.floor(fx)
+      const tx1 = Math.min(T - 1, tx0 + 1)
+      const wx = fx - tx0
+      const lo =
+        (tileLo[ty0 * T + tx0] * (1 - wx) + tileLo[ty0 * T + tx1] * wx) * (1 - wy) +
+        (tileLo[ty1 * T + tx0] * (1 - wx) + tileLo[ty1 * T + tx1] * wx) * wy
+      const hi =
+        (tileHi[ty0 * T + tx0] * (1 - wx) + tileHi[ty0 * T + tx1] * wx) * (1 - wy) +
+        (tileHi[ty1 * T + tx0] * (1 - wx) + tileHi[ty1 * T + tx1] * wx) * wy
+      const span = Math.max(12, hi - lo)
+      const stretched = Math.max(0, Math.min(255, Math.round(((luma[row + x] - lo) * 255) / span)))
+      values[row + x] = invert ? 255 - stretched : stretched
+    }
+  }
+
+  if (variant === 'binary') {
+    // Otsu threshold over the normalized values → pure ink on paper.
+    const hist = new Uint32Array(256)
+    for (let p = 0; p < pixels; p++) hist[values[p]]++
+    let sumAll = 0
+    for (let v = 0; v < 256; v++) sumAll += v * hist[v]
+    let weightBg = 0
+    let sumBg = 0
+    let best = 0
+    let threshold = 127
+    for (let v = 0; v < 256; v++) {
+      weightBg += hist[v]
+      if (!weightBg) continue
+      const weightFg = pixels - weightBg
+      if (!weightFg) break
+      sumBg += v * hist[v]
+      const meanBg = sumBg / weightBg
+      const meanFg = (sumAll - sumBg) / weightFg
+      const between = weightBg * weightFg * (meanBg - meanFg) ** 2
+      if (between > best) {
+        best = between
+        threshold = v
+      }
+    }
+    for (let p = 0; p < pixels; p++) values[p] = values[p] > threshold ? 255 : 0
+  }
+
   for (let p = 0, i = 0; p < pixels; p++, i += 4) {
-    const stretched = Math.max(0, Math.min(255, Math.round(((luma[p] - lo) * 255) / span)))
-    const value = invert ? 255 - stretched : stretched
-    data[i] = data[i + 1] = data[i + 2] = value
+    data[i] = data[i + 1] = data[i + 2] = values[p]
   }
 }
 
@@ -221,14 +316,21 @@ function candidatesFromText(text: string): string[] {
  * OCR one band of a card crop and return plausible name candidates, best
  * first.
  */
-export async function readCardNames(canvas: HTMLCanvasElement, band: OcrBand): Promise<string[]> {
+export async function readCardNames(
+  canvas: HTMLCanvasElement,
+  band: OcrBand,
+  opts: { variant?: PrepVariant } = {},
+): Promise<string[]> {
   const worker = await getWorker()
-  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, OCR_WIDTH)
+  const variant = opts.variant ?? 'normal'
+  // The binary retry runs at higher resolution: thresholding sharpens glyph
+  // edges, and the extra pixels are what let it crack stylized type.
+  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'binary' ? 960 : OCR_WIDTH, variant)
   const started = Date.now()
   const { data } = await worker.recognize(region)
   const raw = String(data?.text ?? '')
   const candidates = candidatesFromText(raw)
-  traceEvent('ocr-band', { y: band.y, h: band.h, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
+  traceEvent('ocr-band', { y: band.y, h: band.h, variant, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
   return candidates
 }
 

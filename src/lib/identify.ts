@@ -9,7 +9,7 @@ import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import type { Card, Game } from './types'
-import { detectFoil, hammingDistance } from './vision'
+import { detectFoil, hammingDistance, refineCardCrop } from './vision'
 import { similarity } from './util'
 import { ygoPrintingVariants } from './ygo'
 
@@ -187,7 +187,17 @@ const OCR_NAMES_PER_BAND = 4
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
-async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
+async function identifyViaOcr(frame: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
+  // The reticle crop is a fixed window; the card in it is regularly smaller,
+  // off-center or slightly rolled. Tighten to the detected card and deskew
+  // before any OCR — every band below assumes card-relative geometry.
+  const refined = refineCardCrop(frame)
+  const canvas = refined.canvas
+  traceEvent('crop', {
+    applied: refined.applied,
+    angle: refined.angle,
+    ...(refined.region ? { x: refined.region.x, y: refined.region.y, w: refined.region.w, h: refined.region.h } : {}),
+  })
   // No hint: only sweep games with a cheap by-name API. Catalog-backed games
   // (Riftbound & co.) are reachable by picking them in the scan game filter.
   const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
@@ -278,6 +288,17 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     }
     const hit = await tryCandidates(freshOf(names))
     if (hit) return hit
+  }
+
+  // The contrast-stretched pass misreads stylized type over busy art (full
+  // arts, foils). Before the heavier sweeps, re-read the game's primary band
+  // binarized at higher resolution — a different failure surface, so it
+  // regularly cracks what the first pass mangled.
+  try {
+    const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant: 'binary' })))
+    if (hit) return hit
+  } catch {
+    /* fall through to the full sweep */
   }
 
   // The bands assume a standard frame, but promos, full-art specials and
