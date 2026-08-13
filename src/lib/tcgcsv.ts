@@ -16,15 +16,28 @@ import { ebaySoldLink, normalizeName, similarity, sleep, tcgplayerSearchLink } f
  * catalog incomplete, which is served for the moment but retried in minutes
  * and never persisted — otherwise the missing set's cards would read as
  * "doesn't exist" until the day cache expired.
+ *
+ * Refreshes are incremental: product lists (the heavy files) barely change
+ * once a set matures, so a recent product pass is reused and only prices —
+ * small files that change daily — are refetched. New, young and undated
+ * (promo) sets still get a full daily fetch: those are the ones that grow
+ * and get their card data backfilled by TCGplayer.
  */
 
 const API = 'https://tcgcsv.com/tcgplayer'
 const CATALOG_TTL_MS = 20 * 3_600_000
 /** Bump when catalog-building logic changes so already-stored (possibly partial) caches refetch. */
-const CATALOG_VERSION = 2
+const CATALOG_VERSION = 3
 /** How soon a knowingly incomplete catalog (a set failed to download) retries. */
 const INCOMPLETE_RETRY_MS = 5 * 60_000
-const FETCH_CONCURRENCY = 6
+/** How long a product pass is reused before every set's list is refetched. */
+const PRODUCTS_TTL_MS = 7 * 86_400_000
+/** Sets younger than this refetch products daily — their data is still settling. */
+const YOUNG_GROUP_MS = 45 * 86_400_000
+/** The category list is a fixed constant for weeks at a time. */
+const CATEGORIES_TTL_MS = 7 * 86_400_000
+/** tcgcsv is static files behind HTTP/2 — wider fans out fine. */
+const FETCH_CONCURRENCY = 12
 const SEARCH_LIMIT = 30
 
 interface CatalogSpec {
@@ -79,14 +92,24 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>
 
 let categoriesPromise: Promise<any[]> | null = null
 
-async function categoryId(spec: CatalogSpec, signal?: AbortSignal): Promise<number> {
-  categoriesPromise ??= results(`${API}/categories`).catch((err) => {
+function categories(): Promise<any[]> {
+  categoriesPromise ??= (async () => {
+    const cached = await kvGet<any[]>('tcg-categories', CATEGORIES_TTL_MS)
+    if (cached?.length) return cached
+    const rows = await results(`${API}/categories`)
+    if (rows.length) kvPut('tcg-categories', rows)
+    return rows
+  })().catch((err) => {
     categoriesPromise = null
     throw err
   })
-  const categories = await categoriesPromise
+  return categoriesPromise
+}
+
+async function categoryId(spec: CatalogSpec, signal?: AbortSignal): Promise<number> {
+  const list = await categories()
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-  const hits = categories.filter((c) => spec.category.test(c?.name ?? '') || spec.category.test(c?.displayName ?? ''))
+  const hits = list.filter((c) => spec.category.test(c?.name ?? '') || spec.category.test(c?.displayName ?? ''))
   // Prefer the shortest name so "One Piece Card Game" beats regional variants.
   hits.sort((a, b) => String(a?.name ?? '').length - String(b?.name ?? '').length)
   const id = Number(hits[0]?.categoryId)
@@ -128,6 +151,7 @@ function largeImage(imageUrl: string | undefined): string | undefined {
 }
 
 interface PriceRow {
+  productId?: number
   lowPrice?: number
   midPrice?: number
   highPrice?: number
@@ -223,17 +247,73 @@ const loading = new Map<Game, Promise<Card[]>>()
 
 interface FetchedCatalog {
   cards: Card[]
+  /** Parallel to `cards`: the TCGplayer group each card came from. */
+  cardGroups: number[]
+  /** When every set's product list was last fully fetched. */
+  productsAt: number
   /** False when at least one set failed to download — don't trust it for a day. */
   complete: boolean
 }
 
-async function fetchCatalog(game: Game, spec: CatalogSpec): Promise<FetchedCatalog> {
+function mapPrices(rows: PriceRow[]): Map<number, PriceRow[]> {
+  const byProduct = new Map<number, PriceRow[]>()
+  for (const row of rows) {
+    const list = byProduct.get(row.productId!) ?? []
+    list.push(row)
+    byProduct.set(row.productId!, list)
+  }
+  return byProduct
+}
+
+/** Today's prices onto a card built from a reused product pass. */
+function repriceCard(card: Card, rows: PriceRow[], spec: CatalogSpec): Card {
+  const finishes = [
+    ...new Set(rows.map((row) => (/foil|premium/i.test(row.subTypeName ?? '') ? spec.premiumFinish : 'nonfoil'))),
+  ]
+  return {
+    ...card,
+    finishes: finishes.length ? finishes : card.finishes,
+    prices: mergePrices(priceEntries(rows, spec.premiumFinish)),
+  }
+}
+
+/** Young and undated (promo) sets grow and get backfilled — refetch them whole. */
+function groupIsYoung(group: any, now: number): boolean {
+  const published = typeof group?.publishedOn === 'string' ? Date.parse(group.publishedOn) : NaN
+  return !Number.isFinite(published) || now - published < YOUNG_GROUP_MS
+}
+
+async function fetchCatalog(game: Game, spec: CatalogSpec, prior?: CatalogCache): Promise<FetchedCatalog> {
   const category = await categoryId(spec)
   const groups = await results(`${API}/${category}/groups`)
+  const now = Date.now()
+  // Product lists are the heavy files and barely change once a set matures:
+  // reuse a recent product pass for mature sets and refetch only their
+  // prices — small files that DO change daily.
+  const reusable =
+    prior &&
+    prior.v === CATALOG_VERSION &&
+    prior.cardGroups?.length === prior.cards.length &&
+    now - (prior.productsAt ?? 0) < PRODUCTS_TTL_MS
+      ? prior
+      : null
+  const priorGroupIds = new Set(reusable?.cardGroups ?? [])
   let failed = 0
-  const perGroup = await pool(groups, FETCH_CONCURRENCY, async (group): Promise<Card[]> => {
-    const groupId = group?.groupId
-    if (groupId == null) return []
+  interface GroupResult {
+    groupId: number
+    /** Fresh cards from a full product fetch… */
+    cards?: Card[]
+    /** …or fresh prices for the reused pass (null: keep yesterday's). */
+    reprice?: Map<number, PriceRow[]> | null
+  }
+  const perGroup = await pool(groups, FETCH_CONCURRENCY, async (group): Promise<GroupResult | null> => {
+    const groupId = Number(group?.groupId)
+    if (!Number.isFinite(groupId)) return null
+    if (reusable && priorGroupIds.has(groupId) && !groupIsYoung(group, now)) {
+      // A failed prices file keeps yesterday's numbers — better than none.
+      const rows = await withRetry(() => results(`${API}/${category}/${groupId}/prices`)).catch(() => null)
+      return { groupId, reprice: rows ? mapPrices(rows) : null }
+    }
     try {
       const [products, priceRows] = await Promise.all([
         // The set's cards must load; a missing prices file (brand-new set
@@ -241,25 +321,55 @@ async function fetchCatalog(game: Game, spec: CatalogSpec): Promise<FetchedCatal
         withRetry(() => results(`${API}/${category}/${groupId}/products`)),
         withRetry(() => results(`${API}/${category}/${groupId}/prices`)).catch(() => []),
       ])
-      const pricesByProduct = new Map<number, PriceRow[]>()
-      for (const row of priceRows) {
-        const list = pricesByProduct.get(row.productId) ?? []
-        list.push(row)
-        pricesByProduct.set(row.productId, list)
+      const pricesByProduct = mapPrices(priceRows)
+      return {
+        groupId,
+        cards: products
+          .filter(isSingle)
+          .map((product) => toCard(game, product, group, pricesByProduct.get(product.productId) ?? [], spec)),
       }
-      return products
-        .filter(isSingle)
-        .map((product) => toCard(game, product, group, pricesByProduct.get(product.productId) ?? [], spec))
     } catch {
       // Count the loss instead of swallowing it: one lost set must not
       // silently vanish from search until the day cache expires.
       failed++
-      return []
+      return null
     }
   })
-  const cards = perGroup.flat()
+
+  const cards: Card[] = []
+  const cardGroups: number[] = []
+  const fullyFetched = new Set<number>()
+  const repriceByGroup = new Map<number, Map<number, PriceRow[]> | null>()
+  for (const result of perGroup) {
+    if (!result) continue
+    if (result.cards) {
+      fullyFetched.add(result.groupId)
+      for (const card of result.cards) {
+        cards.push(card)
+        cardGroups.push(result.groupId)
+      }
+    } else {
+      repriceByGroup.set(result.groupId, result.reprice ?? null)
+    }
+  }
+  if (reusable) {
+    for (let i = 0; i < reusable.cards.length; i++) {
+      const groupId = reusable.cardGroups![i]
+      if (fullyFetched.has(groupId)) continue // replaced by this round's fetch
+      if (!repriceByGroup.has(groupId)) continue // the set left TCGplayer
+      const rows = repriceByGroup.get(groupId)
+      const card = reusable.cards[i]
+      cards.push(rows ? repriceCard(card, rows.get(Number(card.apiId)) ?? [], spec) : card)
+      cardGroups.push(groupId)
+    }
+  }
   if (!cards.length) throw new Error('The TCGplayer catalog came back empty')
-  return { cards, complete: failed === 0 }
+  return {
+    cards,
+    cardGroups,
+    productsAt: reusable ? (reusable.productsAt ?? now) : now,
+    complete: failed === 0,
+  }
 }
 
 async function catalog(game: Game, signal?: AbortSignal): Promise<Card[]> {
@@ -282,8 +392,10 @@ async function catalog(game: Game, signal?: AbortSignal): Promise<Card[]> {
         return stored.cards
       }
       try {
-        const { cards, complete } = await fetchCatalog(game, spec)
-        const cache: CatalogCache = { game, v: CATALOG_VERSION, at: Date.now(), cards }
+        // An expired cache is still gold: its product pass makes the refresh
+        // prices-only for every mature set.
+        const { cards, cardGroups, productsAt, complete } = await fetchCatalog(game, spec, stored ?? inMemory)
+        const cache: CatalogCache = { game, v: CATALOG_VERSION, at: Date.now(), productsAt, cards, cardGroups }
         if (complete) {
           memory.set(game, cache)
           // Persisting is best-effort: quota pressure must not fail the search.
@@ -344,6 +456,27 @@ function rank(cards: Card[], query: string): Ranked[] {
  */
 export function warmCatalog(game: Game): void {
   if (isCatalogGame(game)) catalog(game).catch(() => {})
+}
+
+/**
+ * Warm the catalogs of the games the user demonstrably plays (collection +
+ * decks), one at a time so a phone isn't parsing three catalogs at once.
+ * Skipped under Data Saver; refreshes are incremental, so on a typical day
+ * this moves only each game's price files.
+ */
+export async function warmOwnedCatalogs(): Promise<void> {
+  try {
+    if ((navigator as { connection?: { saveData?: boolean } }).connection?.saveData) return
+    const [collectionGames, deckGames] = await Promise.all([
+      db.collection.orderBy('game').uniqueKeys(),
+      db.decks.orderBy('game').uniqueKeys(),
+    ])
+    for (const game of new Set([...collectionGames, ...deckGames] as Game[])) {
+      if (isCatalogGame(game)) await catalog(game).catch(() => {})
+    }
+  } catch {
+    /* warming is best-effort */
+  }
 }
 
 export async function searchCatalog(game: Game, query: string, signal?: AbortSignal): Promise<Card[]> {

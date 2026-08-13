@@ -6,6 +6,7 @@ import { searchGame } from '../lib/cardsearch'
 import { recordPricePoint } from '../lib/db'
 import { isAbort } from '../lib/fetchJson'
 import { GAME_LABEL, GAMES } from '../lib/games'
+import { warmCatalog } from '../lib/tcgcsv'
 import { useSettings } from '../lib/settings'
 import type { Card, Game } from '../lib/types'
 import { money } from '../lib/util'
@@ -62,6 +63,9 @@ export function SearchView() {
   }
 
   useEffect(() => {
+    // Picking a game tab names intent — start its catalog download (no-op
+    // for API-backed games) before the user finishes typing.
+    warmCatalog(game)
     clearTimeout(debounceRef.current)
     if (query.trim().length >= 2) runSearch(query, game)
     // eslint-disable-next-line react-hooks/exhaustive-deps

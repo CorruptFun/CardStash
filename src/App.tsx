@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Icon, type IconName } from './components/Icon'
 import { Toasts } from './components/Toasts'
+import { warmOwnedCatalogs } from './lib/tcgcsv'
 import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
 import { CardSheetHost } from './views/CardSheet'
@@ -56,6 +57,14 @@ export function App() {
   }, [])
   const navigate = useCallback((hash: string) => {
     location.hash = hash
+  }, [])
+
+  // Once the app has settled, refresh the catalogs of the games this user
+  // actually plays so search/scan answer instantly (incremental + day-cached,
+  // so on most launches this is a no-op or a small price refresh).
+  useEffect(() => {
+    const timer = setTimeout(() => warmOwnedCatalogs(), 3500)
+    return () => clearTimeout(timer)
   }, [])
 
   return (
