@@ -142,7 +142,13 @@ export async function identifyFrame(
     mode === 'sealed'
       ? await identifySealedFrame(capture.canvas, gameHint)
       : await identifyViaOcr(capture.canvas, gameHint, opts.signal)
-  if (outcome.ok) cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
+  if (outcome.ok) {
+    // Cache only well-evidenced hits: a collector-line-only identification
+    // (confidence 0.7) must be re-derived per attempt, not re-served at
+    // cache confidence.
+    if (outcome.identification.confidence >= 0.75)
+      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
+  }
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
   else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, gameHint, null)
@@ -391,7 +397,12 @@ async function identifyViaOcr(
       // cornerText (when queued) already covered the exact hinted region;
       // if no candidate ever queued it, let the normal-region read run.
       const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect)
-      if (read.number && read.total) {
+      // As the SOLE evidence, the fraction must have been printed with its
+      // slash actually read — a reconstructed digit run ("ILLUS 17208" →
+      // 17/208) resolving to some real card is exactly how a confident
+      // wrong identification would slip out. Reconstructed fractions still
+      // serve the refine path, where the name match corroborates them.
+      if (read.number && read.total && !read.fused) {
         traceEvent('corner-id', { number: read.number, total: read.total })
         let card: Card | null = null
         if (gameHint === 'pokemon') card = await pokemonByCollector(read.number, read.total, config.pokemonKey)

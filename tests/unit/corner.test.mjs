@@ -21,13 +21,21 @@ test('pokemon: promo code', () => {
   assert.equal(parseCornerInfo('pokemon', 'SWSH 250').number, 'SWSH250')
 })
 
-test('pokemon: fused fraction — OCR ate the slash', () => {
+test('pokemon: fused fraction — OCR ate the slash — is marked as reconstructed', () => {
   const read = parseCornerInfo('pokemon', '© 156149 Medea')
   assert.equal(read.number, '156')
   assert.equal(read.total, '149')
+  assert.equal(read.fused, true)
   const padded = parseCornerInfo('pokemon', 'junk 096086')
   assert.equal(padded.number, '96')
   assert.equal(padded.total, '86')
+  const slashed = parseCornerInfo('pokemon', 'SVI EN 123/198')
+  assert.equal(slashed.fused, undefined)
+})
+
+test('mtg: P/T and token lines cannot poison the collector number', () => {
+  assert.equal(parseCornerInfo('mtg', '4/4\n0269 M\nMH3 - EN').number, '269')
+  assert.equal(parseCornerInfo('mtg', 'CREATE A 1/1 SOLDIER\n0269 M\nMH3 - EN').number, '269')
 })
 
 test('pokemon: a year is not a fused fraction', () => {

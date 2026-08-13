@@ -357,7 +357,16 @@ export async function matchPokemon(
   const ranked = [...pool].sort(
     (a: any, b: any) => nameScore(name, String(b.name ?? '')) - nameScore(name, String(a.name ?? '')),
   )
-  return toCard(ranked[0])
+  const best = ranked[0]
+  const bestScore = nameScore(name, String(best?.name ?? ''))
+  if (bestScore < 0.98) {
+    // The primary's newest-first page can simply not contain the old exact
+    // card ("Charizard" → sixty modern ex/VMAX variants). TCGdex indexes
+    // everything — take its answer when it fits the read better.
+    const dex = await dexMatch(name, number, printedTotal).catch(() => null)
+    if (dex && nameScore(name, dex.name) > bestScore) return dex
+  }
+  return toCard(best)
 }
 
 /**

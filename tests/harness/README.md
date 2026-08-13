@@ -13,9 +13,11 @@ deterministic and needs no network.
 # 1) Fixtures (one-time). Anywhere with open internet:
 node tests/harness/fetch-fixtures.mjs
 #    …or in a restricted sandbox, pull the machine-generated branch that the
-#    "Scan harness fixtures" workflow force-pushes:
+#    "Scan harness fixtures" workflow force-pushes (git archive, NOT a
+#    --work-tree checkout — the latter stages the fixtures into your index):
 git fetch origin harness-fixtures
-git --work-tree=tests/harness/fixtures checkout origin/harness-fixtures -- .
+mkdir -p tests/harness/fixtures
+git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
 
 # 2) The matrix:
 npm run test:scan                       # everything

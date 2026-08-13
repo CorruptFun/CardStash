@@ -554,7 +554,14 @@ for (const [name, step] of steps) {
 await save('manifest.json', manifest)
 console.log(`\n${manifest.fixtures.length} fixtures, ${failures.length} failures.`)
 console.log(failures.length ? failures.map((f) => ` - ${f.scope}: ${f.error}`).join('\n') : 'All clean.')
-if (!manifest.fixtures.length) {
-  console.error('No fixtures at all — refusing to publish an empty set.')
+// A partial run must not clobber a good snapshot: a whole-game failure or a
+// thin fixture set fails the job, so the workflow's force-push never ships it.
+const FIXTURE_FLOOR = 15
+const wholeGameFailures = failures.filter((f) => steps.some(([name]) => name === f.scope))
+if (manifest.fixtures.length < FIXTURE_FLOOR || wholeGameFailures.length) {
+  console.error(
+    `Refusing to publish: ${manifest.fixtures.length}/${FIXTURE_FLOOR} fixtures` +
+      (wholeGameFailures.length ? `, whole games failed: ${wholeGameFailures.map((f) => f.scope).join(', ')}` : ''),
+  )
   process.exit(1)
 }
