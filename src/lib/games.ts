@@ -51,7 +51,9 @@ export const GAME_FULL_NAME: Record<Game, string> = {
 
 /**
  * Games whose APIs answer a cheap by-name query. The OCR sweep (no game hint)
- * only tries these — the TCGCSV-backed games would each pull a full catalog.
+ * only tries the enabled subset of these — the TCGCSV-backed games would each
+ * pull a full catalog, so they only join the sweep when the user has turned
+ * every light game off (see identifyViaOcr).
  */
 export const LIGHT_MATCH_GAMES: Game[] = ['mtg', 'pokemon', 'yugioh', 'lorcana']
 

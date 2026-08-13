@@ -90,7 +90,11 @@ export async function identifyFrame(
   const gameHint =
     config.gameFilter !== 'auto' ? config.gameFilter : config.enabledGames.length === 1 ? config.enabledGames[0] : undefined
   const cached = cacheLookup(hash, mode)
-  const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
+  // A hit must still fit the current filter AND the enabled games — a card
+  // scanned just before its game was turned off shouldn't resurface from here.
+  const cacheUsable =
+    cached &&
+    (!cached.card || ((!gameHint || cached.card.game === gameHint) && config.enabledGames.includes(cached.card.game)))
   if (cacheUsable && cached.card) {
     return {
       ok: true,

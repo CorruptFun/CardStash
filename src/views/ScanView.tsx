@@ -282,17 +282,19 @@ export function ScanView({ active }: { active: boolean }) {
       <div className="scan__vignette" />
       {!gated && (
         <div className="scan__top safe-top">
-          <Seg
-            ariaLabel="Game filter"
-            size="sm"
-            scroll
-            options={[
-              { value: 'auto' as const, label: 'Auto' },
-              ...config.enabledGames.map((game) => ({ value: game, label: GAME_SHORT[game] })),
-            ]}
-            value={config.gameFilter}
-            onChange={(gameFilter) => config.set({ gameFilter })}
-          />
+          {config.enabledGames.length > 1 && (
+            <Seg
+              ariaLabel="Game filter"
+              size="sm"
+              scroll
+              options={[
+                { value: 'auto' as const, label: 'Auto' },
+                ...config.enabledGames.map((game) => ({ value: game, label: GAME_SHORT[game] })),
+              ]}
+              value={config.gameFilter}
+              onChange={(gameFilter) => config.set({ gameFilter })}
+            />
+          )}
           <div className="scan__topbtns">
             <button
               className={`collectpill ${scanMode === 'sealed' ? 'collectpill--on' : ''}`}

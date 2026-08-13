@@ -68,7 +68,7 @@ export function SettingsView() {
         <h3>Card games</h3>
         <p className="setsec__note">
           Pick the games you play. The rest disappear from search, scanning and deck building — and their card catalogs
-          are never downloaded. Cards you already own always stay in your collection.
+          are never downloaded in the background. Cards you already own always stay in your collection.
         </p>
         <div className="gamegrid" role="group" aria-label="Games shown in the app">
           {GAMES.map((game) => {
