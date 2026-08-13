@@ -23,6 +23,7 @@ import {
   wantKeyFor,
   wantKeySet,
 } from '../lib/social'
+import { sendToInbox, syncConfigured } from '../lib/sync'
 import type { CollectionItem, Friend, Game, SharedCard, TradeRecord } from '../lib/types'
 import { money, relativeAge, uid, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
@@ -299,6 +300,7 @@ function TradeComposer({
   const [note, setNote] = useState('')
   const [pack, setPack] = useState<SharePack | null>(null)
   const [tradeId, setTradeId] = useState<string | null>(null)
+  const [delivered, setDelivered] = useState(false)
   const [filter, setFilter] = useState('')
 
   const isMyWant = (row: SharedCard) => myWantKeys.has(wantKeyFor(row.game, row.name))
@@ -399,6 +401,16 @@ function TradeComposer({
     }
     if (!(await guarded(async () => (await saveTrade(trade), true), 'Save trade'))) return
     const payload = buildTradePayload(trade, me)
+    // Synced friends get it in their inbox; the link stays as the fallback.
+    if (syncConfigured()) {
+      try {
+        await sendToInbox(friend.id, payload)
+        setDelivered(true)
+        toast(`Sent to ${friend.name}`, 'success')
+      } catch (err: any) {
+        toast(`Couldn’t deliver over sync (${err?.message ?? 'failed'}) — send the link instead`, 'error')
+      }
+    }
     const blob = await encodeBlob(payload)
     setPack({
       url: shareUrl(blob),
@@ -513,10 +525,17 @@ function TradeComposer({
 
       {step === 'share' && pack && (
         <div className="composer__review">
-          <p className="setsec__note">
-            The offer is saved under Trades. Send this to {friend.name} — opening it shows them both sides and
-            one-tap Accept/Decline links back to you.
-          </p>
+          {delivered ? (
+            <p className="deliveredline">
+              <Icon name="check" size={15} /> Delivered to {friend.name} — it lands on their Friends tab within
+              seconds. The link below works too, if you’d rather send it.
+            </p>
+          ) : (
+            <p className="setsec__note">
+              The offer is saved under Trades. Send this to {friend.name} — opening it shows them both sides and
+              one-tap Accept/Decline links back to you.
+            </p>
+          )}
           <ShareActions pack={pack} />
           <a className="btn btn--ghost composer__done" href={`#/trades/${tradeId}`}>
             <Icon name="swap" size={15} /> View the trade

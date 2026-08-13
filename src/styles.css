@@ -4991,3 +4991,94 @@ button {
   margin-right: 4px;
   vertical-align: -1px;
 }
+
+/* --- Live sync (optional self-hosted server) ------------------------------ */
+
+.syncpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.syncpanel__row {
+  display: flex;
+  gap: var(--s2);
+}
+.syncpanel__row .input {
+  flex: 1;
+  min-width: 0;
+}
+.syncstate {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 9px var(--s3);
+  border-radius: var(--r-1);
+  background: var(--up-fill);
+  border: 1px solid rgba(76, 195, 138, 0.35);
+}
+.syncstate__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--up);
+  animation: syncpulse 2.2s ease-in-out infinite;
+}
+@keyframes syncpulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.syncstate__text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--up);
+}
+.syncdir {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.syncdir__label {
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.syncdir__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 8px var(--s3);
+  border-radius: var(--r-1);
+  background: var(--ink-100);
+  border: 1px solid var(--rule);
+  text-align: left;
+  min-width: 0;
+}
+.syncdir__row:active {
+  background: var(--ink-150);
+}
+.deliveredline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px var(--s3);
+  border-radius: var(--r-1);
+  background: var(--up-fill);
+  border: 1px solid rgba(76, 195, 138, 0.35);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--paper);
+}
+.deliveredline svg {
+  flex: none;
+  color: var(--up);
+}
