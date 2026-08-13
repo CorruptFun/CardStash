@@ -41,6 +41,13 @@ keys live on-device and are sent only to their own services. Social works
 serverlessly by default: a share link *is* the data (compressed into the URL),
 so nothing is published anywhere unless you send it to someone.
 
+## Documentation
+
+Full build documentation lives in [`docs/`](docs/) — architecture, the data
+model, the scan pipeline, card sources and pricing, social/sync, the PWA and
+service worker, testing, privacy, and the decisions behind all of it. Start at
+[`docs/README.md`](docs/README.md).
+
 ## Commands
 
 - `npm run dev` — dev server

@@ -6,6 +6,20 @@ Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
 the repo is `server/`, an optional self-hosted sync box the user opts into
 (see Conventions); the app must always work fully without it.
 
+## Where the full documentation is
+
+This file is the short brief. `docs/` is the long form — read the relevant
+chapter before a non-trivial change, and update it when behaviour changes:
+
+- `docs/architecture.md` — layers, boot, routing, state, caches, egress
+- `docs/data-model.md` — types, Dexie schema + migrations, settings, invariants
+- `docs/scanning.md` — the scan pipeline (deep tuning lives in the skill)
+- `docs/card-data.md` — games, sources, catalog caching, pricing, portfolio/deck math
+- `docs/social.md` — serverless friends/trades/wants + the optional sync server
+- `docs/ui.md` · `docs/pwa-build-deploy.md` · `docs/testing.md` · `docs/privacy.md`
+- `docs/extending.md` — checklists (add a game, a table, a setting, a release)
+- `docs/decisions.md` — why the load-bearing choices are what they are
+
 ## History you should know
 
 This repo originally carried **build output only** (README pointing at the
