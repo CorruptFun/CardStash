@@ -21,6 +21,7 @@ export const EVENT_TYPES = [
   'friend_added',
   'social_share',
   'trade_update',
+  'want_update',
   'error',
 ] as const
 
