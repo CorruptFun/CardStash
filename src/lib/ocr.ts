@@ -1,50 +1,68 @@
 /**
- * On-device OCR fallback (no Gemini key): Tesseract.js from a CDN, loaded
- * lazily and cached by the service worker's `ext` cache.
+ * On-device OCR: Tesseract.js, fully self-hosted. The runtime is bundled as
+ * its own lazy chunk; the worker, the wasm cores and the English language
+ * data are copied from npm into `ocr/` at build time (see ocrAssets() in
+ * vite.config.ts) and served from our own origin — no third-party CDN at
+ * scan time. sw.js runtime-caches `ocr/` on first use, so scanning works
+ * offline afterwards. The language data is the exact `4.0.0_best_int`
+ * variant tesseract.js v6 would otherwise pull remotely: same accuracy.
+ *
+ * Two workers share the load: the primary reads name bands and pack fronts;
+ * a secondary spins up in the background so the collector-line read can
+ * overlap band reads instead of queueing behind them.
  */
-const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js'
 
-declare global {
-  interface Window {
-    Tesseract?: any
-  }
-}
+let primaryPromise: Promise<any> | null = null
+let cornerPromise: Promise<any | null> | null = null
+/** The resolved secondary — corner reads use it the moment it's ready. */
+let cornerWorker: any | null = null
 
-let workerPromise: Promise<any> | null = null
-
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = src
-    script.async = true
-    script.crossOrigin = 'anonymous'
-    script.onload = () => resolve()
-    script.onerror = () => {
-      script.remove()
-      reject(new Error(`Failed to load ${src}`))
-    }
-    document.head.appendChild(script)
+async function spawnWorker(): Promise<any> {
+  // The prebuilt ESM bundle's only export is `default` (the namespace).
+  const { default: Tesseract } = await import('tesseract.js/dist/tesseract.esm.min.js')
+  const { createWorker, PSM } = Tesseract
+  const base = new URL('ocr/', document.baseURI).href
+  const worker = await createWorker('eng', 1, {
+    workerPath: `${base}worker.min.js`,
+    corePath: `${base}core`,
+    langPath: base.slice(0, -1), // the worker appends "/eng.traineddata.gz"
+    // The service worker's ext cache is the single store for the language
+    // data — skip the second copy Tesseract would keep in IndexedDB.
+    cacheMethod: 'none',
   })
+  // The input is a pre-cropped band, not a page: single-block segmentation
+  // (PSM 6) skips Tesseract's layout analysis, a large share of its runtime.
+  await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK }).catch(() => {})
+  return worker
 }
 
-async function getWorker(): Promise<any> {
-  workerPromise ??= (async () => {
-    if (!window.Tesseract) await loadScript(TESSERACT_CDN)
-    if (!window.Tesseract) throw new Error('Tesseract failed to initialize')
-    const worker = await window.Tesseract.createWorker('eng', 1)
-    // The input is a pre-cropped band, not a page: single-block segmentation
-    // (PSM 6) skips Tesseract's layout analysis, a large share of its runtime.
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
-    return worker
-  })().catch((err) => {
-    workerPromise = null
+function getWorker(): Promise<any> {
+  primaryPromise ??= spawnWorker().catch((err) => {
+    primaryPromise = null
     throw err
   })
-  return workerPromise
+  return primaryPromise
+}
+
+/**
+ * Start the secondary worker once the primary is up (its assets then come
+ * straight from cache). Purely an optimization: while it's missing or its
+ * spawn failed, corner reads share the primary worker.
+ */
+function ensureCornerWorker(): void {
+  cornerPromise ??= getWorker()
+    .then(() => spawnWorker())
+    .then((worker) => {
+      cornerWorker = worker
+      return worker
+    })
+    .catch(() => null)
 }
 
 export function warmOcr(): void {
-  getWorker().catch(() => {})
+  getWorker()
+    .then(() => ensureCornerWorker())
+    .catch(() => {})
 }
 
 export interface OcrBand {
@@ -186,7 +204,8 @@ const CORNER_OCR_WIDTH = 1200
 
 /** OCR an arbitrary card region (e.g. the collector line) and return raw text. */
 export async function readRegionText(canvas: HTMLCanvasElement, rect: OcrRect): Promise<string> {
-  const worker = await getWorker()
+  ensureCornerWorker()
+  const worker = cornerWorker ?? (await getWorker())
   const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)))
   const { data } = await worker.recognize(region)
   return String(data?.text ?? '')
@@ -208,11 +227,14 @@ function cleanOcrLine(line: string): string | null {
 }
 
 export async function stopOcr(): Promise<void> {
-  const pending = workerPromise
-  workerPromise = null
-  if (pending) {
+  const pending = [primaryPromise, cornerPromise]
+  primaryPromise = null
+  cornerPromise = null
+  cornerWorker = null
+  for (const promise of pending) {
+    if (!promise) continue
     try {
-      await (await pending).terminate()
+      await (await promise)?.terminate()
     } catch {
       /* already gone */
     }
