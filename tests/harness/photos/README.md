@@ -58,6 +58,30 @@ Drop the image in this directory and add a row to `manifest.json`:
 - `note` is for humans. Record the lighting and whether the card was held or
   flat; when a cell fails, that is the first thing worth knowing.
 
+## Grading a photo run honestly
+
+A photo cell can only pass if its card is in the captured API universe — the
+stubs answer from `tests/harness/fixtures`, which holds the fetcher's picks
+plus a few substring pools, not the whole catalogue. The first eight photos
+scored 1/8, and seven of those failures were cards the stubs cannot return at
+all; one of them ("Duel Tower") had already been read perfectly. **Check
+membership before reading anything into the number**, and read the traces
+rather than the score:
+
+```sh
+grep -ril "Card Name" tests/harness/fixtures/api/
+```
+
+To grade a photo properly, add its card to the picks in `fetch-fixtures.mjs`,
+let CI regenerate `harness-fixtures`, re-pull, and re-baseline (lesson 3).
+
+## Binder pages
+
+`--binder --cards="A|B|C"` records an unordered MULTISET of names in a
+separate `binders` list, because a nine-card photo is a different kind of
+ground truth from one card and must never be graded as one. The single-card
+runner ignores that list.
+
 ## What is worth photographing
 
 The point is finishes the scans cannot show, so shoot the same card the way a
