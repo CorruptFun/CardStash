@@ -105,6 +105,36 @@ explicit stop parks the live stream ~25s on iOS Home-Screen apps
 `getUserMedia` there is a permission dialog the user doesn't see — don't
 "simplify" them back to stop/reacquire.
 
+## Sideways cards (orientation, `looksSideways` + `uprightTurn`)
+
+People photograph cards lying flat on a desk, so the card arrives QUARTER
+TURNED — and every band and collector region below is written in upright
+card coordinates, so a turned card misses all of them. Measured before any
+handling: 5/46 on the `sideways`/`sideways-ccw` battery (and 0/23 one way)
+versus ~70% upright.
+
+The frame is turned upright before any card geometry applies. Two gates:
+- **When to look** (`looksSideways`, vision.ts): the detector under-reads a
+  sideways card badly, so the threshold is set from measurement, not
+  geometry — upright cards detect at p50 0.72 / p90 0.73, sideways at 0.97,
+  gate at **0.85**. On the standard battery this fires on 2/246 cells and
+  turns none of them.
+- **Which way is up** (`uprightTurn`, identify.ts): unknowable from shape,
+  so the COLLECTOR LINE arbitrates — `looksLikeCollectorLine` (fraction /
+  set-dash code / passcode) on the bottom strip of each candidate turn.
+  Script-agnostic on purpose: a Japanese card offers no other Latin
+  evidence, and the choice happens before any name is read. As-captured is
+  probed FIRST (a mis-detected upright card must not be turned), and
+  ambiguity resolves to no turn — never a coin flip.
+
+**Guard:** a turned frame demands `TURNED_MATCH_THRESHOLD` (0.95) on NAME
+matches. Turning is an inferred orientation over fewer pixels, and Pokémon
+print the evolution line under the name — that line is itself a real card
+name ("Iono's Tadbulb" on an Iono's Bellibolt ex), so a half-read band
+matches a genuine wrong card with conviction. Correct turned hits measured
+1.00 (exact name) or 0.70 (collector-line evidence, judged separately);
+both wrong cards sat at 0.79. Result: 12/46, zero wrong-cards.
+
 ## Language-independent identification (the corner-only path)
 
 Names are read by an English-only Tesseract, so a non-Latin card can only be

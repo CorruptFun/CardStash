@@ -224,5 +224,11 @@ export const DEGRADATIONS = {
   // --degradations=dim,dark (or lowlight,dim,dark for the low-light suite).
   dim: { brightness: 0.26, noise: 10, downscale: 0.85 },
   dark: { brightness: 0.15, noise: 15, blurPx: 0.7, downscale: 0.75 },
+  // A card lying SIDEWAYS in the frame — how people actually photograph a
+  // card on a desk. `fill` has to drop for the rotated card to fit a portrait
+  // frame at all, which is itself faithful: a sideways card never fills the
+  // reticle. Both handednesses, because nothing says which way the top faces.
+  sideways: { rotate: 90, fill: 0.62 },
+  'sideways-ccw': { rotate: -90, fill: 0.62 },
   worst: { fill: 0.62, dx: 0.05, rotate: 3, downscale: 0.65, blurPx: 0.8, glare: 0.55, brightness: 0.55, noise: 5 },
 }

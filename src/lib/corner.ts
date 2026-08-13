@@ -261,3 +261,23 @@ export function sameYgoCode(a: string | undefined, b: string | undefined): boole
   }
   return norm(a) === norm(b)
 }
+
+/**
+ * Does this text read like a printed collector line? Used to decide which way
+ * up a SIDEWAYS card is: turned the right way the bottom strip holds the
+ * fraction / set-dash code / passcode, turned the wrong way it holds the
+ * card's top edge and matches none of them. Deliberately game-agnostic and
+ * script-agnostic — a Japanese card offers no other Latin evidence, and the
+ * decision has to be made before any game is known.
+ */
+export function looksLikeCollectorLine(text: string): boolean {
+  const upper = text.toUpperCase().replace(/[–—]/g, '-')
+  // "123/198" — a printed fraction with a plausible set size.
+  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  if (frac && Number(frac[2]) >= 20) return true
+  // "OP01-016", "LOB-EN001" — set-prefixed codes.
+  if (/\b[A-Z]{1,4}\d{0,3}\s*-\s*[A-Z]{0,2}\s?\d{2,4}\b/.test(upper)) return true
+  // The Yu-Gi-Oh passcode.
+  if (/(?:^|\D)\d{8}(?!\d)/.test(upper)) return true
+  return false
+}

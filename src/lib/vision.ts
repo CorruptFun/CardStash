@@ -402,3 +402,44 @@ export function hammingDistance(a: string, b: string): number {
   }
   return distance
 }
+
+/**
+ * A card lying SIDEWAYS in the frame — how people photograph a card flat on a
+ * desk. Every band and collector-line region downstream is written in upright
+ * card coordinates, so a quarter-turned card misses all of them; the fix is to
+ * turn the FRAME upright before any of that geometry is applied.
+ */
+export function looksSideways(refinement: CropRefinement, frame: HTMLCanvasElement): boolean {
+  const region = refinement.cardRegion ?? refinement.region
+  // With no detection to go on, the frame's own shape is the only clue.
+  if (!region) return frame.width > frame.height * SIDEWAYS_ASPECT
+  const w = region.w * frame.width
+  const h = region.h * frame.height
+  return h > 0 && w / h > SIDEWAYS_ASPECT
+}
+
+/**
+ * A card is 63:88 ≈ 0.72 upright and ≈ 1.4 on its side, but the detector
+ * under-reads a sideways card badly (its long edges run the wrong way), so
+ * the measured split is what the gate is set from, not the geometric ideal:
+ * over the matrix, upright cards detect at p50 0.72 / p90 0.73, sideways ones
+ * at 0.97. 0.85 sits in the empty middle. Being wrong here is cheap by
+ * construction — `uprightTurn` probes the as-captured orientation first and
+ * refuses to turn when nothing reads like a collector line either way.
+ */
+const SIDEWAYS_ASPECT = 0.85
+
+/** Rotate a frame by whole quarter turns (1 = 90° clockwise). */
+export function rotateQuarter(source: HTMLCanvasElement, turns: number): HTMLCanvasElement {
+  const t = ((turns % 4) + 4) % 4
+  if (t === 0) return source
+  const swap = t % 2 === 1
+  const out = document.createElement('canvas')
+  out.width = swap ? source.height : source.width
+  out.height = swap ? source.width : source.height
+  const ctx = out.getContext('2d')!
+  ctx.translate(out.width / 2, out.height / 2)
+  ctx.rotate((t * Math.PI) / 2)
+  ctx.drawImage(source, -source.width / 2, -source.height / 2)
+  return out
+}

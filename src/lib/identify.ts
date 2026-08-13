@@ -4,6 +4,7 @@ import { isAbort } from './fetchJson'
 import {
   CORNER_REGION,
   CORNER_RETRY_REGIONS,
+  looksLikeCollectorLine,
   parseCornerInfo,
   parsePasscode,
   sameYgoCode,
@@ -20,7 +21,7 @@ import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import { catalogByCollector, isCatalogGame } from './tcgcsv'
 import type { Card, Game } from './types'
-import { detectFoil, hammingDistance, refineCardCrop } from './vision'
+import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
 import { normalizeName, similarity } from './util'
 import { ygoById, ygoPrintingVariants } from './ygo'
 
@@ -240,10 +241,73 @@ const OCR_MATCH_TIMEOUT_HINTED_MS = 9_000
 const OCR_NAMES_PER_BAND = 6
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
+/**
+ * Name-match bar on a frame this pass TURNED upright. Turning is an inferred
+ * orientation over fewer pixels, and a partial read there is dangerous in a
+ * specific way: Pokémon print the evolution line right under the name, and
+ * that line is itself a real card name ("Iono's Tadbulb" on an Iono's
+ * Bellibolt ex), so a half-read band matches a genuine wrong card with
+ * conviction. Measured on the sideways battery, correct turned hits score
+ * 1.00 (exact name) or 0.70 (collector-line evidence, judged separately),
+ * while both wrong cards sat at 0.79 — this bar is set in that empty gap.
+ */
+const TURNED_MATCH_THRESHOLD = 0.95
+
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
  * keep it tight enough that an unreadable card doesn't cook the phone. */
 const SOLE_EVIDENCE_PASS_BUDGET = 5
+
+/** Card-relative → frame-relative rect mapping for one crop refinement. */
+function mapThrough(refined: CropRefinement): (rect: OcrRect) => OcrRect {
+  return (rect) => {
+    const card = refined.cardRegion
+    if (!card) return rect
+    return {
+      x: card.x + rect.x * card.w,
+      y: card.y + rect.y * card.h,
+      w: rect.w * card.w,
+      h: rect.h * card.h,
+    }
+  }
+}
+
+/**
+ * Turn a sideways frame upright. Both quarter turns are probed at the strip
+ * where the collector line is printed; the turn whose strip actually reads
+ * like one wins. That test is script-agnostic on purpose — a Japanese card
+ * offers no other Latin evidence, and the choice must be made before a name
+ * has been read or a game is even known.
+ *
+ * Ambiguity resolves to null (stay as captured) rather than to a coin flip:
+ * a wrongly-turned frame sends every later pass hunting in the wrong place.
+ */
+async function uprightTurn(
+  frame: HTMLCanvasElement,
+  asIs: CropRefinement,
+  gameHint: Game | undefined,
+): Promise<CropRefinement | null> {
+  const strip = gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP
+  // A card already the right way up (a mis-detection) would read its own
+  // collector line — so an as-captured hit means: don't turn anything. Probed
+  // on the REFINED canvas, since that is the geometry the strip is written in.
+  const asCaptured = await readRegionText(asIs.canvas, mapThrough(asIs)(strip), { variant: 'binary' }).catch(() => '')
+  if (looksLikeCollectorLine(asCaptured)) {
+    traceEvent('upright', { turns: 0, reason: 'as-captured' })
+    return null
+  }
+  for (const turns of [1, 3]) {
+    const rotated = rotateQuarter(frame, turns)
+    const candidate = refineCardCrop(rotated)
+    const text = await readRegionText(candidate.canvas, mapThrough(candidate)(strip), { variant: 'binary' }).catch(() => '')
+    if (looksLikeCollectorLine(text)) {
+      traceEvent('upright', { turns, raw: text.slice(0, 60) })
+      return candidate
+    }
+  }
+  traceEvent('upright', { turns: null, reason: 'no collector line either way' })
+  return null
+}
 
 async function identifyViaOcr(
   frame: HTMLCanvasElement,
@@ -263,7 +327,21 @@ async function identifyViaOcr(
   // flat-tile noise guard — measured as a net loss on the matrix. Dark
   // frames are instead handled inside detection and at the camera.)
   const darkFrame = frameLuma(frame) < DARK_FRAME_LUMA
-  const refined = refineCardCrop(frame)
+  let refined = refineCardCrop(frame)
+  // A card lying SIDEWAYS on a desk is a normal way to photograph one, and
+  // every band and collector region below is written in upright card
+  // coordinates — so turn the FRAME upright first, before any of that
+  // geometry applies. Which quarter turn is up can't be known from shape
+  // alone, so both are tried and the collector line arbitrates: the right way
+  // up puts it in the bottom strip, the wrong way puts the card's top there.
+  let turned = false
+  if (looksSideways(refined, frame)) {
+    const upright = await uprightTurn(frame, refined, gameHint)
+    if (upright) {
+      refined = upright
+      turned = true
+    }
+  }
   const canvas = refined.canvas
   traceEvent('crop', {
     applied: refined.applied,
@@ -273,16 +351,7 @@ async function identifyViaOcr(
   })
   // The tiny collector-line crops need card-relative precision even when the
   // frame wasn't worth cropping — map them through the detected card region.
-  const mapRect = (rect: OcrRect): OcrRect => {
-    const card = refined.cardRegion
-    if (!card) return rect
-    return {
-      x: card.x + rect.x * card.w,
-      y: card.y + rect.y * card.h,
-      w: rect.w * card.w,
-      h: rect.h * card.h,
-    }
-  }
+  const mapRect = mapThrough(refined)
   const config = settings()
   // No hint: only sweep enabled games with a cheap by-name API. Catalog-backed
   // games (Riftbound & co.) are reachable by picking them in the scan game
@@ -346,7 +415,8 @@ async function identifyViaOcr(
         score: best ? Number(best.score.toFixed(3)) : null,
         ms: lookupMs,
       })
-      if (!best || best.score < matchThresholdFor(name)) continue
+      const bar = turned ? Math.max(matchThresholdFor(name), TURNED_MATCH_THRESHOLD) : matchThresholdFor(name)
+      if (!best || best.score < bar) continue
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
       const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(() => null)

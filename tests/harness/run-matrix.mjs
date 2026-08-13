@@ -379,6 +379,6 @@ async function main() {
  * --degradations so per-game regression gates stay comparable across
  * reports that predate them. */
 const DEGRADATION_KEYS = ['clean', 'small-offset', 'soft-focus', 'rot+5', 'rot-5', 'perspective', 'glare', 'lowlight', 'worst']
-const EXTRA_DEGRADATION_KEYS = ['dim', 'dark']
+const EXTRA_DEGRADATION_KEYS = ['dim', 'dark', 'sideways', 'sideways-ccw']
 
 main()
