@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Icon } from '../components/Icon'
 import { CardImg, Seg } from '../components/basics'
+import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
 import { cameraPermissionState } from '../lib/camera'
@@ -86,6 +87,8 @@ function ScanChip({
   onOpen,
   detail,
   onSearch,
+  onRetry,
+  onDetails,
 }: {
   status: ScannerStatus
   hit: Extract<IdentifyOutcome, { ok: true }> | null
@@ -96,6 +99,8 @@ function ScanChip({
   onOpen: () => void
   detail: string | null
   onSearch: (() => void) | null
+  onRetry: () => void
+  onDetails: () => void
 }) {
   if (status === 'found' && hit && finish) {
     const card = hit.card
@@ -151,11 +156,19 @@ function ScanChip({
       <div className="chip chip--nomatch">
         <span className="chip__missbody">
           <span className="chip__label">{detail ?? 'No match — try filling the frame'}</span>
-          {onSearch && (
-            <button className="chip__searchbtn" onClick={onSearch}>
-              <Icon name="search" size={13} /> Search it instead
+          <span className="chip__missactions">
+            <button className="chip__searchbtn" onClick={onRetry}>
+              <Icon name="refresh" size={13} /> Try again
             </button>
-          )}
+            {onSearch && (
+              <button className="chip__searchbtn" onClick={onSearch}>
+                <Icon name="search" size={13} /> Search it instead
+              </button>
+            )}
+            <button className="chip__searchbtn chip__searchbtn--icon" onClick={onDetails} aria-label="What did the scanner see?">
+              <Icon name="eye" size={14} />
+            </button>
+          </span>
         </span>
       </div>
     )
@@ -179,6 +192,8 @@ export function ScanView({ active }: { active: boolean }) {
   const [scanMode, setScanMode] = useState<ScanMode>('card')
   /** Manual finish pick on the chip, per identified card. */
   const [finishPick, setFinishPick] = useState<{ id: string; finish: Finish } | null>(null)
+  /** The "what did the scanner see" diagnostics overlay. */
+  const [debugOpen, setDebugOpen] = useState(false)
 
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
@@ -264,19 +279,33 @@ export function ScanView({ active }: { active: boolean }) {
     scanner.status === 'unsupported' ||
     scanner.status === 'error' ||
     (scanner.status === 'paused' && scanner.needsResume)
+  // One voice: while the chip is up (thinking/found/nomatch) it does the
+  // talking — the reticle hint only fills the chip-less states.
   const hint =
-    scanner.status === 'thinking'
-      ? 'Reading…'
-      : scanner.status === 'locking' || scanner.sensing
-        ? 'Hold steady…'
-        : scanMode === 'sealed'
-          ? 'Fill the frame with the pack or box front'
-          : 'Fill the frame with a card'
+    scanner.status === 'locking' || scanner.sensing
+      ? 'Hold steady…'
+      : scanMode === 'sealed'
+        ? 'Fill the frame with the pack or box front'
+        : 'Fill the frame with a card'
+  const tapRescan = () => {
+    if (!scanner.busy && scanning) {
+      haptic(config.haptics ? 8 : 0)
+      scanner.scanNow()
+    }
+  }
+  /* iOS Safari (browser tab) re-asks for the camera every visit BY DESIGN —
+   * no app flag can stop it. Say so once, with the actual fix. */
+  const iosHint = scanning && IOS_BROWSER && !config.iosCameraHintShown
 
   return (
     <div className="scan">
       <video ref={scanner.videoRef} className="scan__video" playsInline muted />
       <div className="scan__vignette" />
+      {started && scanning && (
+        /* The whole viewfinder is the shutter now: tap to force a fresh
+         * attempt that skips the same-frame miss cache and retry backoff. */
+        <button className="scan__tap" onClick={tapRescan} aria-label="Scan now" />
+      )}
       {!gated && (
         <div className="scan__top safe-top">
           <Seg
@@ -409,7 +438,9 @@ export function ScanView({ active }: { active: boolean }) {
             <i />
             <i />
             <i />
-            {scanner.status !== 'found' && scanner.status !== 'nomatch' && <span className="reticle__hint">{hint}</span>}
+            {scanner.status !== 'found' && scanner.status !== 'nomatch' && scanner.status !== 'thinking' && (
+              <span className="reticle__hint">{hint}</span>
+            )}
           </div>
           {(scanner.status === 'thinking' || scanner.status === 'found' || scanner.status === 'nomatch') && (
             <div className="chipslot">
@@ -422,29 +453,31 @@ export function ScanView({ active }: { active: boolean }) {
                 onOpen={() => hit && hitFinish && openSheet({ card: hit.card, origin: 'scan', finish: hitFinish })}
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}
+                onRetry={tapRescan}
+                onDetails={() => setDebugOpen(true)}
               />
+            </div>
+          )}
+          {iosHint && (
+            <div className="scan__ioshint">
+              <p>
+                iPhone asks for the camera on every Safari visit — that's Safari, not Cardstock.
+                <b> Add Cardstock to your Home Screen</b> (Share <Icon name="upload" size={11} /> → Add to Home Screen)
+                and the permission sticks.
+              </p>
+              <button
+                className="chip__searchbtn"
+                onClick={() => {
+                  config.set({ iosCameraHintShown: true })
+                }}
+              >
+                Got it
+              </button>
             </div>
           )}
         </>
       )}
-      {started && scanning && (
-        <div className={`shutterbar ${(tray?.length ?? 0) > 0 ? 'shutterbar--tray' : ''}`}>
-          <button
-            className={`shutter ${scanner.busy ? 'shutter--busy' : ''}`}
-            onClick={() => {
-              if (!scanner.busy) {
-                haptic(config.haptics ? 8 : 0)
-                scanner.scanNow()
-              }
-            }}
-            disabled={scanner.busy}
-            aria-label="Scan now"
-          >
-            <span className="shutter__ring" />
-            <span className="shutter__core" />
-          </button>
-        </div>
-      )}
+      {debugOpen && <ScanDebugPanel onClose={() => setDebugOpen(false)} />}
       {(tray?.length ?? 0) > 0 && (
         <div className="tray">
           {tray!.map((scan) => (

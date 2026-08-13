@@ -123,12 +123,14 @@ async function pokemon() {
     return raw
   }
 
-  /** Search briefs; hydrate every brief whose name equals/startsWith the target. */
+  /** Search briefs; hydrate every brief whose name equals/startsWith the target.
+   * Keep the TAIL on cap: dexMatch pools the LAST briefs (newest sets), so a
+   * head-biased capture would 404 exactly the hydrations the matcher needs. */
   const searchAndHydrate = async (name) => {
     const briefs = (await fetchRetry(`${DEX}/cards?name=${encodeURIComponent(name)}`)).filter((b) => b?.id && b?.name)
     briefsByName[name] = briefs
     const target = norm(name)
-    const wanted = briefs.filter((b) => norm(b.name) === target || norm(b.name).startsWith(target)).slice(0, 80)
+    const wanted = briefs.filter((b) => norm(b.name) === target || norm(b.name).startsWith(target)).slice(-120)
     await pool(wanted, 8, (b) => hydrate(b.id))
     return briefs
   }

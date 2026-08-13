@@ -110,6 +110,143 @@ function findCardRegion(colEdges: Float64Array, rowEdges: Float64Array, width: n
   }
 }
 
+/** Analysis resolution for locating the card inside a captured crop. */
+const REFINE_WIDTH = 192
+/** Rotations smaller than this aren't worth resampling; bigger than max is a misdetection. */
+const DESKEW_MIN_DEG = 1.2
+const DESKEW_MAX_DEG = 9
+
+export interface CropRefinement {
+  canvas: HTMLCanvasElement
+  /** The detected card region (fractions of the input), if one was used. */
+  region: Region | null
+  /** Roll angle that was removed, in degrees (0 when none). */
+  angle: number
+  applied: boolean
+}
+
+/**
+ * Tighten a captured frame to the card actually in it, and undo small
+ * hand-held roll. The capture crop is a fixed reticle-shaped window — the
+ * card is regularly smaller, off-center, or a few degrees rotated in it,
+ * which starves OCR of pixels and smears glyph baselines. Edge-projection
+ * finds the card; the dominant near-horizontal edge orientation gives the
+ * roll. Fails soft: anything implausible returns the input untouched.
+ */
+export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
+  const none: CropRefinement = { canvas: source, region: null, angle: 0, applied: false }
+  try {
+    const sw = REFINE_WIDTH
+    const sh = Math.max(24, Math.round((source.height / source.width) * REFINE_WIDTH))
+    const ctx = scaledContext(sw, sh)
+    ctx.drawImage(source, 0, 0, sw, sh)
+    const image = ctx.getImageData(0, 0, sw, sh)
+    const gray = grayscale(image)
+
+    const colEdges = new Float64Array(sw)
+    const rowEdges = new Float64Array(sh)
+    // Histogram of edge orientations near horizontal, weighted by magnitude:
+    // a rolled card shows up as a sharp peak off 0°.
+    const HALF_SPAN = 14
+    const angleBins = new Float64Array(HALF_SPAN * 4 + 1)
+    for (let y = 1; y < sh - 1; y++) {
+      const row = y * sw
+      for (let x = 1; x < sw - 1; x++) {
+        const i = row + x
+        const gx =
+          -gray[i - sw - 1] - 2 * gray[i - 1] - gray[i + sw - 1] + gray[i - sw + 1] + 2 * gray[i + 1] + gray[i + sw + 1]
+        const gy =
+          -gray[i - sw - 1] - 2 * gray[i - sw] - gray[i - sw + 1] + gray[i + sw - 1] + 2 * gray[i + sw] + gray[i + sw + 1]
+        const magnitude = Math.abs(gx) + Math.abs(gy)
+        if (magnitude > 160) {
+          colEdges[x] += 1
+          rowEdges[y] += 1
+        }
+        if (magnitude > 220) {
+          // Edge direction is perpendicular to the gradient.
+          let deg = (Math.atan2(gy, gx) * 180) / Math.PI - 90
+          while (deg <= -90) deg += 180
+          while (deg > 90) deg -= 180
+          if (Math.abs(deg) <= HALF_SPAN) angleBins[Math.round((deg + HALF_SPAN) * 2)] += magnitude
+        }
+      }
+    }
+
+    let angle = 0
+    {
+      // Weighted median of the near-horizontal orientation mass.
+      let total = 0
+      for (const w of angleBins) total += w
+      if (total > 0) {
+        let acc = 0
+        for (let b = 0; b < angleBins.length; b++) {
+          acc += angleBins[b]
+          if (acc >= total / 2) {
+            angle = b / 2 - HALF_SPAN
+            break
+          }
+        }
+      }
+    }
+    const deskew = Math.abs(angle) >= DESKEW_MIN_DEG && Math.abs(angle) <= DESKEW_MAX_DEG ? angle : 0
+
+    let region = findCardRegion(colEdges, rowEdges, sw, sh)
+    if (region) {
+      // Margin, then snap toward card shape by GROWING the short side — a
+      // wrong region must never cut the name off the crop.
+      const CARD_ASPECT = 63 / 88
+      let x0 = region.x - 0.025
+      let y0 = region.y - 0.025
+      let x1 = region.x + region.w + 0.025
+      let y1 = region.y + region.h + 0.025
+      const w = x1 - x0
+      const h = y1 - y0
+      const frameAspect = (source.width * w) / (source.height * h)
+      if (frameAspect < CARD_ASPECT * 0.92) {
+        const grow = ((CARD_ASPECT * 0.92) / frameAspect - 1) * w
+        x0 -= grow / 2
+        x1 += grow / 2
+      } else if (frameAspect > CARD_ASPECT * 1.35) {
+        const grow = (frameAspect / (CARD_ASPECT * 1.35) - 1) * h
+        y0 -= grow / 2
+        y1 += grow / 2
+      }
+      x0 = Math.max(0, x0)
+      y0 = Math.max(0, y0)
+      x1 = Math.min(1, x1)
+      y1 = Math.min(1, y1)
+      region = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+      // Too small to be the card, or basically the whole frame already.
+      if (region.w < 0.3 || region.h < 0.3) region = null
+      else if (region.w > 0.94 && region.h > 0.94) region = null
+    }
+
+    if (!region && !deskew) return none
+
+    const sx = (region?.x ?? 0) * source.width
+    const sy = (region?.y ?? 0) * source.height
+    const cw = Math.max(1, Math.round((region?.w ?? 1) * source.width))
+    const ch = Math.max(1, Math.round((region?.h ?? 1) * source.height))
+    const out = document.createElement('canvas')
+    out.width = cw
+    out.height = ch
+    const octx = out.getContext('2d')!
+    if (deskew) {
+      // Neutral fill so the revealed corners don't skew contrast stretching.
+      octx.fillStyle = '#7f7f7f'
+      octx.fillRect(0, 0, cw, ch)
+      octx.translate(cw / 2, ch / 2)
+      octx.rotate((-deskew * Math.PI) / 180)
+      octx.drawImage(source, sx, sy, cw, ch, -cw / 2, -ch / 2, cw, ch)
+    } else {
+      octx.drawImage(source, sx, sy, cw, ch, 0, 0, cw, ch)
+    }
+    return { canvas: out, region, angle: deskew, applied: true }
+  } catch {
+    return none
+  }
+}
+
 /**
  * Foil sheen detector — no cloud vision needed. A foil throws bright,
  * saturated specular streaks whose hues span the rainbow and spread across

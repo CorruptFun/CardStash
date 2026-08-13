@@ -37,7 +37,8 @@ export interface ScanTrace {
 
 const LIMIT = 24
 let seq = 0
-const ring: ScanTrace[] = []
+/** Reassigned (never mutated) on change, so UI snapshots compare by identity. */
+let ring: readonly ScanTrace[] = []
 let current: ScanTrace | null = null
 const listeners = new Set<() => void>()
 
@@ -53,8 +54,7 @@ export function traceEvent(stage: string, detail: Record<string, unknown> = {}):
 export function endScanTrace(outcome: NonNullable<ScanTrace['outcome']>): void {
   if (!current) return
   current.outcome = outcome
-  ring.unshift(current)
-  if (ring.length > LIMIT) ring.length = LIMIT
+  ring = [current, ...ring].slice(0, LIMIT)
   current = null
   for (const fn of listeners) fn()
 }
@@ -65,7 +65,7 @@ export function scanTraces(): readonly ScanTrace[] {
 }
 
 export function clearScanTraces(): void {
-  ring.length = 0
+  ring = []
   for (const fn of listeners) fn()
 }
 
