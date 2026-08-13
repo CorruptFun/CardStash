@@ -52,6 +52,12 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
   the group index merges the "Pokemon Japan" TCGplayer category so Japanese
   packs match by their printed set code ("sv4K").
+- Cards in ANY language identify off the collector line (Latin digits on
+  every print worldwide) when the name can't be read: MTG by exact
+  set+number, Yu-Gi-Oh by the 8-digit passcode, Pokémon by a multi-language
+  TCGdex sweep; Latin-script localized Pokémon names (Glurak, Dracaufeu)
+  resolve to the EN card. Requires picking the game — auto mode has no
+  collector rescue. Guards are documented in the `scan-harness` skill.
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
 - `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
   `builderSeeds` (cards handed to the AI builder to design around).

@@ -133,12 +133,18 @@ export type PrepVariant = 'normal' | 'binary' | 'binary-flip'
  * additionally thresholds to pure ink-on-paper — a different failure
  * surface that cracks stylized type over busy art.
  */
-function prepRegion(canvas: HTMLCanvasElement, rect: OcrRect, targetWidth: number, variant: PrepVariant = 'normal'): HTMLCanvasElement {
+function prepRegion(
+  canvas: HTMLCanvasElement,
+  rect: OcrRect,
+  targetWidth: number,
+  variant: PrepVariant = 'normal',
+  maxScale = 3,
+): HTMLCanvasElement {
   const sx = Math.max(0, Math.floor(rect.x * canvas.width))
   const sy = Math.max(0, Math.floor(rect.y * canvas.height))
   const sw = Math.max(1, Math.min(canvas.width - sx, Math.round(rect.w * canvas.width)))
   const sh = Math.max(1, Math.min(canvas.height - sy, Math.round(rect.h * canvas.height)))
-  const scale = Math.min(3, Math.max(0.1, targetWidth / sw))
+  const scale = Math.min(maxScale, Math.max(0.1, targetWidth / sw))
   const out = document.createElement('canvas')
   out.width = Math.max(16, Math.round(sw * scale))
   out.height = Math.max(16, Math.round(sh * scale))
@@ -474,20 +480,36 @@ export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string
 /** Tiny collector-line type needs upscaling before Tesseract can read it. */
 const CORNER_OCR_WIDTH = 1200
 
-/** OCR an arbitrary card region (e.g. the collector line) and return raw text. */
+/**
+ * OCR an arbitrary card region (e.g. the collector line) and return raw text.
+ *
+ * `sparse` switches to page-segmentation mode 11 for the read: the default
+ * single-block mode locks onto the dominant text block and DROPS a small
+ * detached line beside it — which is exactly the collector line sitting under
+ * a rules box. Sparse mode mines every text fragment instead, and pairs with
+ * a higher upscale cap since that line is the tiniest type on the card.
+ */
 export async function readRegionText(
   canvas: HTMLCanvasElement,
   rect: OcrRect,
-  opts: { variant?: PrepVariant } = {},
+  opts: { variant?: PrepVariant; upscale?: number; maxWidth?: number; sparse?: boolean } = {},
 ): Promise<string> {
   ensureCornerWorker()
   const worker = cornerWorker ?? (await getWorker())
   const variant = opts.variant ?? 'normal'
-  const region = prepRegion(canvas, rect, Math.min(CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * 3)), variant)
+  const upscale = opts.upscale ?? 3
+  const target = Math.min(opts.maxWidth ?? CORNER_OCR_WIDTH, Math.round(rect.w * canvas.width * upscale))
+  const region = prepRegion(canvas, rect, target, variant, upscale)
   const started = Date.now()
-  const { data } = await worker.recognize(region)
-  const raw = String(data?.text ?? '')
-  traceEvent('ocr-region', { ...rect, variant, ms: Date.now() - started, raw: raw.slice(0, 200) })
+  if (opts.sparse) await worker.setParameters({ tessedit_pageseg_mode: '11' }).catch(() => {})
+  let raw = ''
+  try {
+    const { data } = await worker.recognize(region)
+    raw = String(data?.text ?? '')
+  } finally {
+    if (opts.sparse) await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+  }
+  traceEvent('ocr-region', { ...rect, variant, sparse: !!opts.sparse, ms: Date.now() - started, raw: raw.slice(0, 200) })
   return raw
 }
 

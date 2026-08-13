@@ -83,6 +83,33 @@ export async function searchMtg(query: string, signal?: AbortSignal): Promise<Ca
   }
 }
 
+/**
+ * Exact printed set+collector lookup — the language-independent path: every
+ * MTG print worldwide carries "266/302 R … NEO・JP" in Latin, and Scryfall
+ * answers set+number with the default-language card. Deliberately NO fuzzy
+ * fallback: as the SOLE evidence of an identification, only the exact print
+ * may answer — a fuzzy rescue here would be a wrong-card factory.
+ *
+ * When the read came as a vintage-style fraction, its denominator must match
+ * the set's REAL printed size (fail-closed): collector numbers are dense, so
+ * this is the one independent check that separates "read the line" from
+ * "hallucinated a plausible line".
+ */
+export async function mtgBySetNumber(setCode: string, number: string, printedTotal?: string | null): Promise<Card | null> {
+  try {
+    const set = setCode.toLowerCase()
+    if (printedTotal != null) {
+      const info = await fetchJson(`${API}/sets/${set}`)
+      const size = Number(info?.printed_size ?? info?.card_count)
+      if (!Number.isFinite(size) || size !== Number(printedTotal)) return null
+    }
+    const res = await fetchJson(`${API}/cards/${set}/${encodeURIComponent(number.toLowerCase())}`)
+    return res?.id ? toCard(res) : null
+  } catch {
+    return null
+  }
+}
+
 /** Exact set+number lookup first, then fuzzy by name (optionally set-scoped). */
 export async function matchMtg(name: string, setCode?: string | null, number?: string | null): Promise<Card | null> {
   try {

@@ -1,19 +1,28 @@
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
-import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
+import {
+  CORNER_REGION,
+  CORNER_RETRY_REGIONS,
+  parseCornerInfo,
+  parsePasscode,
+  sameYgoCode,
+  SOLE_EVIDENCE_REGIONS,
+  YGO_PASSCODE_REGION,
+  type CornerRead,
+} from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
 import { matchPokemon, pokemonByCollector } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
-import { mtgMatchTraits, mtgPrintings } from './scryfall'
+import { mtgBySetNumber, mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import { catalogByCollector, isCatalogGame } from './tcgcsv'
 import type { Card, Game } from './types'
 import { detectFoil, hammingDistance, refineCardCrop } from './vision'
 import { normalizeName, similarity } from './util'
-import { ygoPrintingVariants } from './ygo'
+import { ygoById, ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed'
 
@@ -222,6 +231,10 @@ const OCR_MATCH_TIMEOUT_HINTED_MS = 9_000
 const OCR_NAMES_PER_BAND = 6
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
+/** Full-magnification OCR passes the sole-evidence corner sweep may spend.
+ * Every one of them is paid on a MISS, while the scanner is still running —
+ * keep it tight enough that an unreadable card doesn't cook the phone. */
+const SOLE_EVIDENCE_PASS_BUDGET = 5
 
 async function identifyViaOcr(
   frame: HTMLCanvasElement,
@@ -389,39 +402,78 @@ async function identifyViaOcr(
     /* the band sweep's verdict below stands */
   }
 
-  // Name reading is out of road (ornate faces, foil sheen over the title).
-  // The collector line alone still pins the card when BOTH halves of the
-  // printed fraction survived — "215/203" plus the game is unambiguous.
+  // Name reading is out of road (ornate faces, foil sheen over the title —
+  // or a non-Latin print the shipped English OCR simply cannot read). The
+  // collector line still pins the card, because it stays Latin digits on
+  // every print worldwide: a fraction + printed set size (Pokémon, catalog
+  // games), an exact set code + collector number (MTG), or the 8-digit
+  // passcode (Yu-Gi-Oh).
   if (gameHint) {
     bail()
     try {
       // cornerText (when queued) already covered the exact hinted region;
       // if no candidate ever queued it, let the normal-region read run.
-      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect)
-      // As the SOLE evidence, the fraction must have been printed with its
-      // slash actually read — a reconstructed digit run ("ILLUS 17208" →
-      // 17/208) resolving to some real card is exactly how a confident
-      // wrong identification would slip out. Reconstructed fractions still
-      // serve the refine path, where the name match corroborates them.
-      if (read.number && read.total && !read.fused) {
+      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect, true)
+      let card: Card | null = null
+      if (gameHint === 'pokemon' && read.number && read.total && (!read.fused || read.setCode)) {
+        // A printed slash stands alone; a RECONSTRUCTED fraction ("0207066"
+        // — the italic slash read as a digit) identifies only with the
+        // printed set code corroborating (pokemonByCollector's fused mode
+        // demands code + size + membership all agree). A bare digit run
+        // resolving to some real card is exactly how a confident wrong
+        // identification would slip out.
+        traceEvent('corner-id', { number: read.number, total: read.total, setCode: read.setCode ?? null, fused: read.fused ?? false })
+        card = await pokemonByCollector(read.number, read.total, config.pokemonKey, read.setCode, read.fused === true)
+      } else if (isCatalogGame(gameHint) && read.number && read.total && !read.fused) {
         traceEvent('corner-id', { number: read.number, total: read.total })
-        let card: Card | null = null
-        if (gameHint === 'pokemon') card = await pokemonByCollector(read.number, read.total, config.pokemonKey)
-        else if (isCatalogGame(gameHint)) card = await catalogByCollector(gameHint, read.number, read.total)
-        if (card) {
-          return {
-            ok: true,
-            card,
-            identification: {
-              game: card.game,
-              name: card.name,
-              setCode: read.setCode ?? card.setCode,
-              number: read.number,
-              confidence: 0.7,
-              via: 'ocr',
-              foil: detectFoil(canvas) ? true : undefined,
-            },
+        card = await catalogByCollector(gameHint, read.number, read.total)
+      } else if (
+        gameHint === 'mtg' &&
+        read.setCode &&
+        read.number &&
+        // Collector numbers are DENSE — a one-digit misread lands on a real
+        // neighboring card. Sole-evidence reads must carry the modern
+        // frame's zero-padding ("0266") or a self-consistent vintage
+        // fraction; the set code itself only parses beside a language token.
+        (read.padded === true || (read.total && Number(read.number) <= Number(read.total)))
+      ) {
+        traceEvent('corner-id', { setCode: read.setCode, number: read.number, total: read.total ?? null })
+        card = await mtgBySetNumber(read.setCode, read.number, read.total)
+      }
+      if (!card && gameHint === 'yugioh') {
+        // The passcode identifies the card in every language; the sparse id
+        // space means a misread digit resolves to nothing, not a wrong card.
+        const passcode = parsePasscode(
+          await readRegionText(canvas, mapRect(YGO_PASSCODE_REGION), {
+            variant: 'binary',
+            upscale: 5,
+            maxWidth: 1600,
+            sparse: true,
+          }).catch(() => ''),
+        )
+        if (passcode) {
+          traceEvent('corner-id', { passcode })
+          card = await ygoById(passcode)
+          // The mid-card set code, when it was also read, picks the exact
+          // printing (rarity moves YGO prices by orders of magnitude).
+          if (card && read.number) {
+            card = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? card
           }
+        }
+      }
+      if (card) {
+        return {
+          ok: true,
+          card,
+          identification: {
+            game: card.game,
+            name: card.name,
+            setCode: read.setCode ?? card.setCode,
+            number: read.number ?? card.number,
+            confidence: 0.7,
+            via: 'ocr',
+            foil: detectFoil(canvas) ? true : undefined,
+          },
         }
       }
     } catch {
@@ -432,7 +484,11 @@ async function identifyViaOcr(
   return {
     ok: false,
     reason: 'ocr-miss',
-    message: firstRead ? `Read “${firstRead}” but couldn’t match it` : 'Couldn’t read the card name — more light helps',
+    message: firstRead
+      ? `Read “${firstRead}” but couldn’t match it`
+      : gameHint
+        ? 'Couldn’t read the card — more light helps'
+        : 'Couldn’t read the card name — more light helps. For non-English cards, pick the game so the collector line can identify them',
     readName: firstRead,
   }
 }
@@ -458,6 +514,13 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
  * first, the game's own region, then narrow per-game slivers at full
  * magnification, binarized — the line is tiny type that drowns beside rules
  * text at strip scale.
+ *
+ * `thorough` (the corner-ONLY path, where this read is the sole evidence)
+ * keeps escalating until the read could actually identify something —
+ * number AND set code (AND total, where the game prints fractions) — and
+ * merges across passes, because the parts can live in opposite polarities:
+ * a Japanese Pokémon card prints its set code white-on-black in a badge
+ * right beside dark-on-light digits, so no single pass reads both.
  */
 async function readCornerInfo(
   game: Game,
@@ -465,17 +528,72 @@ async function readCornerInfo(
   cornerText: Promise<string> | null,
   cornerIsExact: boolean,
   mapRect: (rect: OcrRect) => OcrRect,
+  thorough = false,
 ): Promise<CornerRead> {
-  let read = parseCornerInfo(game, cornerText ? await cornerText : '')
-  if (!read.setCode && !read.number && !cornerIsExact) {
-    read = parseCornerInfo(game, await readRegionText(canvas, mapRect(CORNER_REGION[game])))
-  }
-  if (!read.setCode && !read.number) {
-    const retries = CORNER_RETRY_REGIONS[game] ?? [CORNER_REGION[game]]
-    for (const rect of retries) {
-      read = parseCornerInfo(game, await readRegionText(canvas, mapRect(rect), { variant: 'binary' }))
-      if (read.setCode || read.number) break
+  const done = (read: CornerRead) =>
+    thorough
+      ? !!(
+          read.number &&
+          read.setCode &&
+          !read.fused &&
+          (game === 'pokemon' ? !!read.total : true) &&
+          // Same bar the identify guard applies — a junk fraction that would
+          // be rejected there must not stop the escalation here.
+          (game === 'mtg'
+            ? read.padded === true || (!!read.total && Number(read.number) <= Number(read.total))
+            : true)
+        )
+      : !!(read.setCode || read.number)
+  // Keep the strongest fraction — self-consistent slashed > slashed >
+  // reconstructed > bare number — and take the set code from whichever pass
+  // caught it.
+  const merge = (a: CornerRead, b: CornerRead): CornerRead => {
+    const rank = (r: CornerRead) => {
+      if (!r.number) return 0
+      if (!r.total) return 1
+      if (r.fused) return 2
+      return Number(r.number) <= Number(r.total) ? 4 : 3
     }
+    const main = rank(b) > rank(a) ? b : a
+    return { ...main, setCode: a.setCode ?? b.setCode }
+  }
+  // Sole-evidence reads get extra magnification (the set-code badge on a
+  // Japanese card is a few pixels of type that 3× upscale smears) and sparse
+  // segmentation, which mines the small detached line the default
+  // single-block mode drops in favour of the rules box above it.
+  const zoom = thorough ? { upscale: 5, maxWidth: 1600, sparse: true } : {}
+  let read = parseCornerInfo(game, cornerText ? await cornerText : '')
+  // Escalation is bounded: these passes run only after every name read has
+  // already failed, and each is a full-magnification OCR — an unbounded
+  // sweep would turn every unreadable card into seconds of phone CPU.
+  let budget = thorough ? SOLE_EVIDENCE_PASS_BUDGET : 3
+  const pass = async (rect: OcrRect, opts: { variant?: 'normal' | 'binary' | 'binary-flip'; sparse?: boolean } = {}) => {
+    if (budget <= 0 || done(read)) return
+    budget--
+    read = merge(read, parseCornerInfo(game, await readRegionText(canvas, rect, { ...zoom, ...opts })))
+  }
+  // The speculative strip was read cheaply (single-block, 3×) for the refine
+  // path; when this read is the sole evidence, re-read the game's own region
+  // properly even if the strip already covered it.
+  if (!cornerIsExact || thorough) await pass(mapRect(CORNER_REGION[game]))
+  const retries = thorough
+    ? [...(SOLE_EVIDENCE_REGIONS[game] ?? []), ...(CORNER_RETRY_REGIONS[game] ?? [CORNER_REGION[game]])]
+    : (CORNER_RETRY_REGIONS[game] ?? [CORNER_REGION[game]])
+  // 'normal' first when thorough: Tesseract's own LOCAL binarization reads
+  // mixed-polarity lines (a white set-code badge beside dark digits) that a
+  // single global threshold cannot.
+  for (const variant of thorough ? (['normal', 'binary'] as const) : (['binary'] as const)) {
+    for (const rect of retries) await pass(mapRect(rect), { variant })
+  }
+  // The detected card region can end ABOVE the printed line (full-bleed
+  // captures: the bottom line hugs the card edge, outside the crop
+  // detector's floor) — last passes over the RAW frame's bottom band. One
+  // stays non-sparse: block segmentation reads the set-code/language line
+  // ("NEO・JP") that sparse mode shreds into fragments.
+  if (thorough) {
+    const bottom: OcrRect = { x: 0, y: 0.9, w: 0.55, h: 0.1 }
+    await pass(bottom, { variant: 'normal' })
+    await pass(bottom, { variant: 'normal', sparse: false })
   }
   return read
 }

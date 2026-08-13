@@ -99,6 +99,51 @@ explicit stop parks the live stream ~25s on iOS Home-Screen apps
 `getUserMedia` there is a permission dialog the user doesn't see — don't
 "simplify" them back to stop/reacquire.
 
+## Language-independent identification (the corner-only path)
+
+Names are read by an English-only Tesseract, so a non-Latin card can only be
+identified by what stays Latin on every print worldwide — the collector
+line. `readCornerInfo(..., thorough=true)` runs ONLY after every name pass
+failed, and differs from the refine-path read in four ways: it re-reads even
+when the speculative strip already covered the region, uses 5× upscale
+(`readRegionText({upscale, maxWidth})` — `prepRegion`'s scale cap is a
+parameter now, default 3), uses **sparse** page-segmentation (PSM 11; the
+default single-block mode locks onto the rules box and DROPS the small
+detached collector line), and merges partial reads across passes because the
+parts sit in opposite polarities (white set-code badge beside dark digits).
+Bounded by `SOLE_EVIDENCE_PASS_BUDGET` — every pass is paid on a miss while
+the scanner runs, so this is a phone-battery constant, not a tuning knob.
+
+Per-game sole evidence and its guards (all confidence 0.7, hinted mode only
+— auto mode has no collector rescue by design):
+- **MTG** `mtgBySetNumber` (exact set+number, NO fuzzy fallback). Needs the
+  set code (only parses beside a language token: "NEO・JP") AND either the
+  modern frame's zero-padding (`padded`) or a self-consistent fraction; a
+  fraction read verifies against the set's real `printed_size` fail-closed.
+  Collector numbers are DENSE — a one-digit misread lands on a real
+  neighboring card, so every one of these guards is load-bearing.
+- **Pokémon** `pokemonByCollector(..., setCode, fused)` → multi-language
+  TCGdex sweep (`DEX_COLLECTOR_LANGS`). Printed code wins outright; without
+  it the printed size must single out ONE set across ALL languages, judged
+  over the complete candidate list (Japanese pairs same-size sets —
+  sv4K/sv4M are both 66 — so this legitimately refuses). A `fused`
+  (slash-reconstructed) fraction identifies ONLY with code+size+membership
+  all agreeing. Rarity marks ("RR") and illustrator credits ("Illus." →
+  "HUS") are excluded from set-code parsing; off the fraction line a code
+  must carry a digit.
+- **Yu-Gi-Oh** the 8-digit passcode (`parsePasscode`, `YGO_PASSCODE_REGION`)
+  → `ygoById`. Same digits in every language and it IS the YGOPRODeck id;
+  the id space is sparse so a misread resolves to nothing, not a wrong card.
+- **Pokémon localized names** (DE/FR/ES/IT/PT) resolve through TCGdex
+  language catalogs to the shared-id EN card. Language-routed dex ids are
+  `dex-<lang>:<id>`; plain `dex-<id>` stays EN.
+
+Known limit, measured: at fixture resolution (~670px card width) the
+Japanese set-code badge and MTG's collector digits are NOT reliably
+readable — both ja fixtures correctly REFUSE rather than guess. They are
+kept as guard fixtures: if a future loosening turns either into a
+`wrong-card` stage, that loosening is wrong.
+
 ## Sealed set matching (lib/sealedmatch.ts)
 
 Three signals, best wins: whole-name containment 0.86+len bonus, per-line

@@ -127,9 +127,33 @@ async function runQueries(queries: string[], pageSize: number, apiKey?: string, 
  * shifted between releases), so the primary stays first for its pricing.
  */
 
-const DEX_API = 'https://api.tcgdex.net/v2/en'
+const DEX_BASE = 'https://api.tcgdex.net/v2'
+const DEX_API = `${DEX_BASE}/en`
 /** apiId prefix marking a TCGdex-sourced card, so refreshes route back to it. */
 const DEX_PREFIX = 'dex-'
+
+/**
+ * Languages the collector-line sweep consults, in evidence order. `en` covers
+ * every Western print — DE/FR/ES/IT/PT cards share the English sets'
+ * numbering — while Japanese sets are their own catalog with their own codes
+ * and sizes (Korean and Chinese too; extend here once TCGdex data for them
+ * proves out).
+ */
+const DEX_COLLECTOR_LANGS = ['en', 'ja'] as const
+/** Latin-script languages whose localized card names eng OCR can read. */
+const DEX_NAME_LANGS = ['de', 'fr', 'es', 'it', 'pt'] as const
+
+/** `dex-<id>` is an en card (legacy shape); other languages are `dex-<lang>:<id>`. */
+function dexApiId(lang: string, id: string): string {
+  return lang === 'en' ? `${DEX_PREFIX}${id}` : `${DEX_PREFIX}${lang}:${id}`
+}
+
+function parseDexApiId(apiId: string): { lang: string; id: string } | null {
+  if (!apiId.startsWith(DEX_PREFIX)) return null
+  const rest = apiId.slice(DEX_PREFIX.length)
+  const m = rest.match(/^([a-z]{2}(?:-[a-z]{2})?):(.+)$/)
+  return m ? { lang: m[1], id: m[2] } : { lang: 'en', id: rest }
+}
 
 interface DexBrief {
   id?: string
@@ -164,7 +188,7 @@ function dexPriceEntries(raw: any): PriceEntry[] {
   return entries
 }
 
-function dexToCard(raw: any): Card {
+function dexToCard(raw: any, lang = 'en'): Card {
   const variants = raw?.variants ?? {}
   const finishes: Finish[] = []
   if (variants.normal) finishes.push('nonfoil')
@@ -172,10 +196,11 @@ function dexToCard(raw: any): Card {
   if (variants.reverse) finishes.push('reverse')
   if (variants.firstEdition) finishes.push('firstEd')
   const name = String(raw?.name ?? 'Unknown card')
+  const apiId = dexApiId(lang, String(raw.id))
   return {
-    id: `pokemon:${DEX_PREFIX}${raw.id}`,
+    id: `pokemon:${apiId}`,
     game: 'pokemon',
-    apiId: `${DEX_PREFIX}${raw.id}`,
+    apiId,
     name,
     setCode: typeof raw?.set?.id === 'string' ? raw.set.id.toUpperCase() : undefined,
     setName: raw?.set?.name,
@@ -216,11 +241,11 @@ function dexBriefToCard(brief: DexBrief): Card {
   }
 }
 
-async function dexBriefs(name: string, signal?: AbortSignal): Promise<DexBrief[]> {
+async function dexBriefs(name: string, signal?: AbortSignal, lang = 'en'): Promise<DexBrief[]> {
   const clean = stripQuotes(name)
   if (!clean) return []
   const query = async (value: string) => {
-    const rows = await fetchJson(`${DEX_API}/cards?name=${encodeURIComponent(value)}`, { signal, timeoutMs: 10_000 })
+    const rows = await fetchJson(`${DEX_BASE}/${lang}/cards?name=${encodeURIComponent(value)}`, { signal, timeoutMs: 10_000 })
     return Array.isArray(rows) ? rows.filter((row: DexBrief) => row?.id && row?.name) : []
   }
   const exact = await query(clean)
@@ -241,18 +266,11 @@ const plainDigits = (value: unknown) =>
     .replace(/^0+(?=\d)/, '')
 
 /**
- * Match a card on TCGdex by name, then pin the printing: the collector
- * number narrows the briefs, and the printed set size ("…/086") picks the
- * set once a few candidates are hydrated.
+ * The name-tier ranking shared by every TCGdex language: exact names, then
+ * startsWith, then junk-tolerant scored fits; a matching printed collector
+ * number outranks all name tiers. Pools keep their TAIL (newest last).
  */
-async function dexMatch(
-  name: string,
-  number?: string | null,
-  printedTotal?: string | null,
-  signal?: AbortSignal,
-): Promise<Card | null> {
-  const briefs = await dexBriefs(name, signal)
-  if (!briefs.length) return null
+function rankBriefs(name: string, briefs: DexBrief[], number?: string | null): DexBrief[] {
   const target = normalizeName(name)
   const exact = briefs.filter((brief) => normalizeName(String(brief.name)) === target)
   const starts = briefs.filter((brief) => normalizeName(String(brief.name)).startsWith(target) && !exact.includes(brief))
@@ -272,7 +290,23 @@ async function dexMatch(
   // a Tauros ex must still land on the ex when 183/226 narrows to it — the
   // exact-name tier alone would lock in the plain card first.
   const numbered = digits ? [...exact, ...starts, ...scored].filter((brief) => plainDigits(brief.localId) === digits) : []
-  const named = numbered.length ? numbered : exact.length ? exact : starts.length ? starts : scored
+  return numbered.length ? numbered : exact.length ? exact : starts.length ? starts : scored
+}
+
+/**
+ * Match a card on TCGdex by name, then pin the printing: the collector
+ * number narrows the briefs, and the printed set size ("…/086") picks the
+ * set once a few candidates are hydrated.
+ */
+async function dexMatch(
+  name: string,
+  number?: string | null,
+  printedTotal?: string | null,
+  signal?: AbortSignal,
+): Promise<Card | null> {
+  const briefs = await dexBriefs(name, signal)
+  if (!briefs.length) return null
+  const named = rankBriefs(name, briefs, number)
   if (!named.length) return null
   // Newest last in practice — hydrate the tail few and let the set size decide.
   const pool = named.slice(-6)
@@ -286,6 +320,122 @@ async function dexMatch(
   const sized = Number.isFinite(total) ? fulls.filter((raw: any) => Number(raw?.set?.cardCount?.official) === total) : []
   const ranked = sized.length ? sized : fulls
   return dexToCard(ranked[ranked.length - 1])
+}
+
+/**
+ * A non-English (Latin-script) card name — "Glurak", "Dracaufeu" — matched
+ * through TCGdex's localized catalogs. Western prints share card ids across
+ * languages, so a localized hit is re-fetched as the EN card (the priced,
+ * displayable one); the localized card itself only answers when EN lacks it.
+ */
+async function dexMatchLocalized(name: string, number?: string | null, signal?: AbortSignal): Promise<Card | null> {
+  // Only a plausibly-alphabetic read is worth fanning out over languages.
+  const words = stripQuotes(name).split(' ').filter(queryWord)
+  if (!words.length) return null
+  for (const lang of DEX_NAME_LANGS) {
+    const briefs = await dexBriefs(name, signal, lang).catch(() => [] as DexBrief[])
+    if (!briefs.length) continue
+    const named = rankBriefs(name, briefs, number)
+    const brief = named[named.length - 1]
+    if (!brief) continue
+    const en = await fetchJson(`${DEX_API}/cards/${brief.id}`, { signal, timeoutMs: 10_000 }).catch(() => null)
+    if (en?.id) return dexToCard(en)
+    const local = await fetchJson(`${DEX_BASE}/${lang}/cards/${brief.id}`, { signal, timeoutMs: 10_000 }).catch(() => null)
+    if (local?.id) return dexToCard(local, lang)
+  }
+  return null
+}
+
+interface DexSetBrief {
+  id?: string
+  name?: string
+  cardCount?: { official?: number; total?: number }
+  releaseDate?: string
+}
+
+/** Per-language TCGdex set index, one fetch per session; failures retry. */
+const dexSetsListMemory = new Map<string, Promise<DexSetBrief[]>>()
+
+function dexSetsList(lang: string, signal?: AbortSignal): Promise<DexSetBrief[]> {
+  let load = dexSetsListMemory.get(lang)
+  if (!load) {
+    load = fetchJson(`${DEX_BASE}/${lang}/sets`, { signal, timeoutMs: 10_000 }).then((rows) =>
+      Array.isArray(rows) ? (rows as DexSetBrief[]) : [],
+    )
+    load.catch(() => dexSetsListMemory.delete(lang))
+    dexSetsListMemory.set(lang, load)
+  }
+  return load
+}
+
+/** How many candidate sets a collector sweep may hydrate, across languages. */
+const DEX_COLLECTOR_SET_BUDGET = 4
+
+/**
+ * Collector-line lookup across TCGdex's language catalogs — how a Japanese
+ * card ("046/066" + "SV4K") identifies with no readable name. The printed set
+ * code pins the set outright; without it, the printed size must single out
+ * ONE set across all languages — Japanese pairs sets of identical size
+ * (sv4K/sv4M are both 66), and guessing between them would be a confident
+ * wrong card, the worst failure class.
+ */
+async function dexByCollector(
+  number: string,
+  printedTotal: string,
+  setCodeHint?: string | null,
+  opts: { hintOnly?: boolean; signal?: AbortSignal } = {},
+): Promise<Card | null> {
+  const signal = opts.signal
+  const digits = plainDigits(number)
+  const total = Number(printedTotal)
+  if (!digits || !Number.isFinite(total)) return null
+  const hint = setCodeHint?.trim().toLowerCase() || null
+
+  const cardIn = async (lang: string, setId: string): Promise<Card | null> => {
+    const set = await fetchJson(`${DEX_BASE}/${lang}/sets/${encodeURIComponent(setId)}`, { signal, timeoutMs: 8_000 }).catch(
+      () => null,
+    )
+    const brief = (Array.isArray(set?.cards) ? (set.cards as DexBrief[]) : []).find(
+      (card) => plainDigits(card.localId) === digits,
+    )
+    if (!brief?.id) return null
+    const full = await fetchJson(`${DEX_BASE}/${lang}/cards/${brief.id}`, { signal, timeoutMs: 8_000 }).catch(() => null)
+    return full?.id ? dexToCard(full, lang) : null
+  }
+
+  const lists: [string, DexSetBrief[]][] = []
+  for (const lang of DEX_COLLECTOR_LANGS) {
+    lists.push([lang, await dexSetsList(lang, signal).catch(() => [] as DexSetBrief[])])
+  }
+  // The printed set code is decisive when it names a real set. In hintOnly
+  // mode (a RECONSTRUCTED fraction backing it) the named set's official size
+  // must ALSO agree — three independent reads (code, size, membership) have
+  // to line up before a slashless digit run may identify anything.
+  if (hint) {
+    for (const [lang, list] of lists) {
+      const hinted = list.find((set) => String(set.id ?? '').toLowerCase() === hint)
+      if (!hinted?.id) continue
+      if (opts.hintOnly && Number(hinted.cardCount?.official) !== total) continue
+      const card = await cardIn(lang, hinted.id)
+      if (card) return card
+    }
+  }
+  if (opts.hintOnly) return null
+  // Without a code, the printed size must single out ONE set — judged over
+  // the COMPLETE candidate list. More candidates than the hydration budget
+  // means uniqueness can't be verified, and a partial check that happened to
+  // find one match would be a guess wearing a certainty costume.
+  const candidates = lists.flatMap(([lang, list]) =>
+    list.filter((set) => Number(set.cardCount?.official) === total && set.id).map((set) => ({ lang, id: String(set.id) })),
+  )
+  if (!candidates.length || candidates.length > DEX_COLLECTOR_SET_BUDGET) return null
+  const matches: Card[] = []
+  for (const candidate of candidates) {
+    const card = await cardIn(candidate.lang, candidate.id)
+    if (card) matches.push(card)
+    if (matches.length > 1) return null // ambiguous — refuse to guess
+  }
+  return matches.length === 1 ? matches[0] : null
 }
 
 export async function searchPokemon(query: string, apiKey?: string, signal?: AbortSignal): Promise<Card[]> {
@@ -328,7 +478,13 @@ export async function matchPokemon(
   const withNumber = num ? [...queries.map((q) => `${q} number:"${num}"`), ...queries] : queries
   const results = await runQueries(withNumber, 10, apiKey).catch(() => [])
   // Primary erroring or blank — the TCGdex fallback still knows the card.
-  if (!results.length) return dexMatch(name, number, printedTotal).catch(() => null)
+  // A read no English catalog knows may be a localized (DE/FR/ES/IT/PT)
+  // name; those resolve through TCGdex's language catalogs to the EN card.
+  if (!results.length) {
+    const en = await dexMatch(name, number, printedTotal).catch(() => null)
+    if (en) return en
+    return dexMatchLocalized(name, number).catch(() => null)
+  }
   // The printed "123/198" total identifies the set even when no code is legible.
   let pool = results
   if (printedTotal) {
@@ -371,23 +527,61 @@ export async function matchPokemon(
 
 /**
  * Identify by the collector line ALONE — the last resort when no name could
- * be read (foil glare, ornate faces) but "215/203" survived: number + the
- * printed set size pin the card. Newest set wins the rare size collision.
+ * be read (foil glare, ornate faces, or a non-Latin print) but "215/203"
+ * survived: number + the printed set size pin the card, and the printed set
+ * code (when read) settles size collisions. English prints answer from the
+ * primary; everything else — Japanese sets above all — from the TCGdex
+ * language sweep.
  */
-export async function pokemonByCollector(number: string, printedTotal: string, apiKey?: string): Promise<Card | null> {
+export async function pokemonByCollector(
+  number: string,
+  printedTotal: string,
+  apiKey?: string,
+  setCode?: string | null,
+  fused = false,
+): Promise<Card | null> {
   const num = stripLucene(number)
   const total = Number(printedTotal)
   if (!num || !Number.isFinite(total)) return null
   const rows = await runQueries([`number:"${num}" set.printedTotal:${total}`], 10, apiKey).catch(() => [])
-  if (rows.length) return toCard(rows[0])
-  return null
+  if (fused) {
+    // A reconstructed fraction (the slash never read) is too weak to answer
+    // alone: it identifies only when the printed set code independently
+    // names the set — via the primary's exact set match, or the TCGdex
+    // hint-only path where code, size and membership must all agree.
+    if (!setCode) return null
+    const exact = rows.find(
+      (raw: any) =>
+        raw.set?.ptcgoCode?.toLowerCase() === setCode.toLowerCase() ||
+        raw.set?.id?.toLowerCase() === setCode.toLowerCase(),
+    )
+    if (exact) return toCard(exact)
+    return dexByCollector(num, printedTotal, setCode, { hintOnly: true })
+  }
+  if (rows.length) {
+    if (setCode) {
+      const exact = rows.find(
+        (raw: any) =>
+          raw.set?.ptcgoCode?.toLowerCase() === setCode.toLowerCase() ||
+          raw.set?.id?.toLowerCase() === setCode.toLowerCase(),
+      )
+      if (exact) return toCard(exact)
+      // The printed code names a set the primary doesn't know (Japanese
+      // sets, brand-new sets) — believe the code over a size-collision guess.
+      const dex = await dexByCollector(num, printedTotal, setCode)
+      if (dex) return dex
+    }
+    return toCard(rows[0])
+  }
+  return dexByCollector(num, printedTotal, setCode)
 }
 
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {
-  if (id.startsWith(DEX_PREFIX)) {
+  const dex = parseDexApiId(id)
+  if (dex) {
     try {
-      const raw = await fetchJson(`${DEX_API}/cards/${id.slice(DEX_PREFIX.length)}`, { timeoutMs: 15_000 })
-      return raw?.id ? dexToCard(raw) : null
+      const raw = await fetchJson(`${DEX_BASE}/${dex.lang}/cards/${dex.id}`, { timeoutMs: 15_000 })
+      return raw?.id ? dexToCard(raw, dex.lang) : null
     } catch {
       return null
     }

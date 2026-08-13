@@ -529,9 +529,35 @@ async function mtg() {
     fail('mtg/ja-collector', err)
   }
 
+  // Set objects for every pick's set: corner-only fraction reads verify the
+  // printed denominator against the set's real printed_size (fail-closed),
+  // so the stub must answer /sets/:code with the genuine numbers.
+  const setCodes = [
+    ...new Set(
+      manifest.fixtures.filter((f) => f.game === 'mtg' && f.setCode).map((f) => String(f.setCode).toLowerCase()),
+    ),
+  ]
+  const sets = {}
+  for (const code of setCodes) {
+    try {
+      const raw = await fetchRetry(`${SCRYFALL}/sets/${code}`)
+      sets[code] = {
+        code: raw.code,
+        name: raw.name,
+        printed_size: raw.printed_size,
+        card_count: raw.card_count,
+        released_at: raw.released_at,
+      }
+      await new Promise((r) => setTimeout(r, 120))
+    } catch (err) {
+      fail(`mtg/set-${code}`, err)
+    }
+  }
+
   const names = await fetchRetry(`${SCRYFALL}/catalog/card-names`)
   manifest.datasets.mtg = {
     prints: await save('api/scryfall-prints.json', printsByName),
+    sets: await save('api/scryfall-sets.json', sets),
     cardNames: await save('api/scryfall-card-names.json', { data: names?.data ?? [] }),
   }
   console.log(`  card-names catalog: ${names?.data?.length ?? 0} names`)

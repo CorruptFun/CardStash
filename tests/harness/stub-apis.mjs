@@ -86,6 +86,7 @@ export function createStubs(fixturesDir) {
     .filter((r) => (seenPtcg.has(r.id) ? false : (seenPtcg.add(r.id), true)))
   const scryfallPrints = maybe('api/scryfall-prints.json', {})
   const scryfallNames = maybe('api/scryfall-card-names.json', { data: [] }).data
+  const scryfallSets = maybe('api/scryfall-sets.json', {})
   const ygoRows = maybe('api/ygo-cards.json', { data: [] }).data
   const allPrints = Object.values(scryfallPrints).flat()
 
@@ -244,7 +245,12 @@ export function createStubs(fixturesDir) {
       const data = ids.map((id) => allPrints.find((p) => p.id === id)).filter(Boolean)
       return json({ object: 'list', data, not_found: [] })
     }
-    let m = path.match(/^\/cards\/([a-z0-9]{3,5})\/([^/]+)$/)
+    let m = path.match(/^\/sets\/([a-z0-9]{3,6})$/)
+    if (m) {
+      const set = scryfallSets[m[1].toLowerCase()]
+      return set ? json(set) : json({ object: 'error', code: 'not_found', details: 'No such set.' }, 404)
+    }
+    m = path.match(/^\/cards\/([a-z0-9]{3,5})\/([^/]+)$/)
     if (m) {
       const hit = allPrints.find(
         (p) => p.set === m[1].toLowerCase() && String(p.collector_number).toLowerCase() === decodeURIComponent(m[2]).toLowerCase(),

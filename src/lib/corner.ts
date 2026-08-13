@@ -45,6 +45,26 @@ export const CORNER_RETRY_REGIONS: Partial<Record<Game, CornerRect[]>> = {
   starwars: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
 }
 
+/**
+ * Windows tried when the collector line is the SOLE evidence (no name was
+ * readable — a non-Latin print, or glare over the title). Tighter than the
+ * refine-path regions on purpose: they must exclude the rules box above,
+ * whose text otherwise dominates segmentation and whose bright/dark mass
+ * skews the polarity decision away from the line itself.
+ */
+export const SOLE_EVIDENCE_REGIONS: Partial<Record<Game, CornerRect[]>> = {
+  mtg: [
+    { x: 0, y: 0.925, w: 0.5, h: 0.075 },
+    { x: 0, y: 0.88, w: 0.5, h: 0.12 },
+  ],
+  pokemon: [
+    { x: 0, y: 0.93, w: 0.55, h: 0.07 },
+    // Badge-tight: the Japanese set code is a white-on-dark chip a few
+    // pixels wide, legible only when it dominates its own crop.
+    { x: 0.02, y: 0.925, w: 0.28, h: 0.06 },
+  ],
+}
+
 export interface CornerRead {
   setCode?: string
   number?: string
@@ -52,14 +72,30 @@ export interface CornerRead {
   total?: string
   /**
    * The fraction was RECONSTRUCTED from a bare digit run (OCR ate the
-   * slash). Fine for refining a name-corroborated match; too weak to be the
-   * sole evidence of an identification.
+   * slash). Fine for refining a name-corroborated match; as sole evidence it
+   * identifies only with independent set-code corroboration.
    */
   fused?: boolean
+  /**
+   * MTG solo collector number carried its leading-zero padding ("0266") —
+   * the modern-frame shape. A read without it is either a vintage fraction
+   * (which corroborates itself via the set size) or a degraded read that
+   * must not serve as sole evidence: collector numbers are dense, so a
+   * one-digit misread lands on a real neighboring card, not on nothing.
+   */
+  padded?: boolean
 }
 
 const LANGS = new Set(['EN', 'DE', 'FR', 'IT', 'ES', 'PT', 'JA', 'JP', 'KO', 'RU', 'ZH', 'CN', 'CS', 'CT'])
 const YEAR = /^(19|20)\d{2}$/
+
+/**
+ * Pokémon rarity marks printed right beside the collector fraction — "020/066
+ * RR". They share the set code's shape, and mistaking one for a set code is
+ * worse than reading no code at all: it sends the lookup hunting a set that
+ * doesn't exist instead of falling back to size matching.
+ */
+const PKM_RARITY = new Set(['C', 'U', 'R', 'RR', 'RRR', 'SR', 'HR', 'UR', 'AR', 'SAR', 'CHR', 'CSR', 'ACE', 'K', 'A', 'S', 'PR'])
 
 /** Games whose collector number is a set-prefixed code like OP01-016. */
 const CODE_GAMES = new Set<Game>(['yugioh', 'onepiece', 'digimon', 'gundam'])
@@ -79,27 +115,34 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   if (game === 'mtg') {
     // Modern: "0269 M" then "MH3 • EN"; older: "269/350 U" then "M21 • EN".
     let number: string | undefined
+    let total: string | undefined
+    let padded: boolean | undefined
     for (const line of upper.split('\n')) {
       // The denominator is the SET size — a creature's "4/4" power/toughness
       // box also matches a bare fraction shape, but no set has 44 cards's
       // worth of ambiguity: real set sizes start well above P/T values.
+      // Denominator bounds are the sanity check: below 45 it's a P/T box,
+      // above 600 no set is that big and the digits doubled under OCR
+      // ("266/302" → "2886/7302").
       const frac = line.match(/\b0*(\d{1,4})\s*\/\s*0*(\d{2,4})\b/)
-      if (frac && Number(frac[2]) >= 45) {
+      if (frac && Number(frac[2]) >= 45 && Number(frac[2]) <= 600) {
         number = frac[1]
+        total = frac[2]
         break
       }
       // A line holding a REJECTED fraction is the P/T box or token rules
       // text — its digits must not feed the solo-number fallback either.
       if (/\d\s*\/\s*\d/.test(line)) continue
-      const solo = line.match(/(?:^|[^\dA-Z/])0*(\d{1,4})(?:[A-Z]\b|\b)/)
-      if (solo && !YEAR.test(solo[1])) {
-        number = solo[1]
+      const solo = line.match(/(?:^|[^\dA-Z/])(0*)(\d{1,4})(?:[A-Z]\b|\b)/)
+      if (solo && !YEAR.test(solo[2])) {
+        number = solo[2]
+        padded = solo[1].length > 0 || undefined
         break
       }
     }
     const nearLang = upper.match(/\b([A-Z][A-Z0-9]{2,4})\b[^A-Z0-9\n]{0,4}(EN|DE|FR|IT|ES|PT|JA|JP|KO|RU|ZH)\b/)
     const setCode = nearLang && !LANGS.has(nearLang[1]) ? nearLang[1] : undefined
-    return { setCode, number }
+    return { setCode, number, total, padded }
   }
 
   // Fraction-style games: Pokémon 123/198, Lorcana 23/204 · EN · 1, SWU 056/262.
@@ -113,9 +156,29 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   }
   if (game === 'pokemon') {
     if (frac) {
-      // SV era also prints the set code: "SVI EN 123/198".
-      const line = upper.split('\n').find((l) => l.includes(`${frac[1]}/${frac[2]}`) || /\d\s*\/\s*\d/.test(l)) ?? ''
-      const token = line.match(/\b([A-Z]{2,4}\d?)\b/g)?.find((t) => !LANGS.has(t) && !/^\d+$/.test(t))
+      // SV era also prints the set code: "SVI EN 123/198". Japanese prints
+      // use digit-bearing codes with a trailing letter — "SV4K 046/066",
+      // "S12a" — the second alternation's shape.
+      // Sparse OCR splits the corner into fragments, so the code can land on
+      // its own line — search the whole read, fraction line first.
+      const lines = upper.split('\n')
+      const fracLine = lines.find((l) => l.includes(`${frac[1]}/${frac[2]}`) || /\d\s*\/\s*\d/.test(l)) ?? ''
+      const codeIn = (text: string, needsDigit: boolean) =>
+        text
+          .match(/\b([A-Z]{2,4}\d?|[A-Z]{1,3}\d{1,2}[A-Z]{1,2})\b/g)
+          ?.find(
+            (t) =>
+              !LANGS.has(t) &&
+              !PKM_RARITY.has(t) &&
+              !/^\d+$/.test(t) &&
+              // Off the fraction line, only a digit-bearing code counts:
+              // sparse OCR scatters the illustrator credit ("Illus." →
+              // "HUS") into its own fragment, and a letters-only token there
+              // is far more likely to be that than a set code. Japanese
+              // codes — the ones that matter here — always carry a digit.
+              (!needsDigit || /\d/.test(t)),
+          )
+      const token = codeIn(fracLine, false) ?? codeIn(lines.filter((l) => l !== fracLine).join(' '), true)
       return { number: frac[1], total: frac[2], setCode: token, fused }
     }
     // Promos: SWSH250, SM210, XY67…
@@ -136,21 +199,54 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
  */
 function fusedFraction(upper: string): RegExpMatchArray | null {
   const run = upper.match(/(?:^|[^\d/])(\d{5,6})(?:[^\d/]|$)/)
-  if (!run) return null
-  const digits = run[1]
-  const splits = digits.length === 6 ? [3] : [2, 3]
-  for (const at of splits) {
-    const number = Number(digits.slice(0, at).replace(/^0+(?=\d)/, ''))
-    const total = Number(digits.slice(at).replace(/^0+(?=\d)/, ''))
-    const plausible =
-      total >= 30 && total <= 400 && number >= 1 && number <= total + 150 && !YEAR.test(digits.slice(0, 4))
-    if (plausible) {
-      // Shape-compatible with the RegExpMatchArray the fraction regex yields
-      // (which also strips leading zeros from both groups).
-      return [digits, String(number), String(total)] as unknown as RegExpMatchArray
+  if (run) {
+    const digits = run[1]
+    const splits = digits.length === 6 ? [3] : [2, 3]
+    for (const at of splits) {
+      const number = Number(digits.slice(0, at).replace(/^0+(?=\d)/, ''))
+      const total = Number(digits.slice(at).replace(/^0+(?=\d)/, ''))
+      const plausible =
+        total >= 30 && total <= 400 && number >= 1 && number <= total + 150 && !YEAR.test(digits.slice(0, 4))
+      if (plausible) {
+        // Shape-compatible with the RegExpMatchArray the fraction regex yields
+        // (which also strips leading zeros from both groups).
+        return [digits, String(number), String(total)] as unknown as RegExpMatchArray
+      }
+    }
+  }
+  // The italic slash of "020/066" also reads as a DIGIT (7 above all, 1 for
+  // upright faces): somewhere in the run hides a 3+slash+3 window. Junk
+  // digits glue onto either end (the set-code badge beside the fraction
+  // bleeds into the digits — "310207066"), so slide the window over runs up
+  // to 10 long. Still reconstructions — fused, so they identify only with
+  // set-code corroboration.
+  const runLong = upper.match(/(?:^|[^\d/])(\d{7,10})(?:[^\d/]|$)/)
+  if (runLong) {
+    const run = runLong[1]
+    for (let at = 0; at + 7 <= run.length; at++) {
+      const digits = run.slice(at, at + 7)
+      if (!/[71]/.test(digits[3]) || YEAR.test(digits.slice(0, 4))) continue
+      const number = Number(digits.slice(0, 3).replace(/^0+(?=\d)/, ''))
+      const total = Number(digits.slice(4).replace(/^0+(?=\d)/, ''))
+      if (total >= 30 && total <= 400 && number >= 1 && number <= total + 150) {
+        return [digits, String(number), String(total)] as unknown as RegExpMatchArray
+      }
     }
   }
   return null
+}
+
+/**
+ * The 8-digit passcode printed in every Yu-Gi-Oh card's bottom-left corner —
+ * the same digits in every language, and exactly YGOPRODeck's card id. The
+ * id space is sparse (~13k cards over 100M combinations), so a misread digit
+ * resolves to nothing rather than to a wrong card.
+ */
+export const YGO_PASSCODE_REGION: CornerRect = { x: 0, y: 0.93, w: 0.42, h: 0.07 }
+
+export function parsePasscode(text: string): string | null {
+  const m = text.match(/(?:^|\D)(\d{8})(?!\d)/)
+  return m ? m[1].replace(/^0+(?=\d)/, '') : null
 }
 
 /** Compare Yu-Gi-Oh print codes across languages: LOB-EN001 ≡ LOB-001. */
