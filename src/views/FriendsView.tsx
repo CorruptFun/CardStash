@@ -26,6 +26,8 @@ import {
   sideValue,
   tradeFromPayload,
   tradeStatusLabel,
+  wantKeyFor,
+  wantKeySet,
 } from '../lib/social'
 import type { CollectionItem, Friend, ShareScope, SocialPayload, TradeRecord } from '../lib/types'
 import { money, relativeAge, ymd } from '../lib/util'
@@ -48,6 +50,8 @@ export function FriendsView() {
   const friends = useLiveQuery(() => db.friends.orderBy('addedAt').reverse().toArray(), [])
   const trades = useLiveQuery(() => db.trades.toArray(), [])
   const items = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
+  const myWants = useLiveQuery(() => db.wants.orderBy('addedAt').reverse().toArray(), [])
+  const myWantKeys = useMemo(() => wantKeySet(myWants ?? []), [myWants])
   const config = useSettings()
   const toast = useUi((s) => s.toast)
   const [pack, setPack] = useState<SharePack | null>(null)
@@ -69,8 +73,8 @@ export function FriendsView() {
       toast('Add your name first — shares and trades carry it', 'error')
       return
     }
-    const payload = buildProfilePayload(items, myProfile())
-    if (!payload.cards.length) {
+    const payload = buildProfilePayload(items, myProfile(), myWants ?? [])
+    if (!payload.cards.length && !payload.wants?.length) {
       toast(
         config.shareScope === 'trade'
           ? 'Nothing marked for trade yet — flag copies from a card’s “Your copies” list first'
@@ -203,6 +207,29 @@ export function FriendsView() {
               <>Sharing your whole collection list — {totalQty(allRows)} cards across {allRows.length} rows.</>
             )}
           </p>
+          {(myWants?.length ?? 0) > 0 && (
+            <div className="wantlist">
+              <span className="wantlist__label">
+                <Icon name="heart" size={13} filled /> Want list · travels with your share
+              </span>
+              <div className="wantlist__chips">
+                {(myWants ?? []).map((want) => (
+                  <span key={want.key} className="wantchip">
+                    {want.name}
+                    <button
+                      className="wantchip__x"
+                      aria-label={`Remove ${want.name} from wants`}
+                      onClick={() => {
+                        guarded(async () => (await db.wants.delete(want.key), true), 'Want list')
+                      }}
+                    >
+                      <Icon name="x" size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <button className="btn btn--primary" onClick={buildPack}>
             <Icon name="share" size={16} /> Share my binder
           </button>
@@ -275,7 +302,7 @@ export function FriendsView() {
         )}
         <div className="social-list">
           {(friends ?? []).map((friend) => (
-            <FriendRow key={friend.id} friend={friend} />
+            <FriendRow key={friend.id} friend={friend} myWantKeys={myWantKeys} />
           ))}
         </div>
       </section>
@@ -283,21 +310,31 @@ export function FriendsView() {
   )
 }
 
-function FriendRow({ friend }: { friend: Friend }) {
+function FriendRow({ friend, myWantKeys }: { friend: Friend; myWantKeys: Set<string> }) {
   const stats = useMemo(() => {
     const cards = friend.cards
     const tradeCount = cards.reduce((sum, row) => sum + Math.min(row.qty, row.forTrade), 0)
-    return { count: cards.reduce((sum, row) => sum + row.qty, 0), tradeCount, value: sideValue(cards) }
-  }, [friend.cards])
+    const matches = cards.filter((row) => row.forTrade > 0 && myWantKeys.has(wantKeyFor(row.game, row.name))).length
+    return { count: cards.reduce((sum, row) => sum + row.qty, 0), tradeCount, matches, value: sideValue(cards) }
+  }, [friend.cards, myWantKeys])
+  const delta = friend.lastDelta
   return (
     <a className="social-row" href={`#/friends/${friend.id}`}>
       <span className="social-row__avatar" aria-hidden="true">
         {friend.name.slice(0, 1).toUpperCase()}
       </span>
       <span className="social-row__body">
-        <span className="social-row__name">{friend.name}</span>
+        <span className="social-row__name">
+          {friend.name}
+          {stats.matches > 0 && (
+            <em className="social-row__match">
+              <Icon name="heart" size={11} filled /> {stats.matches} {stats.matches === 1 ? 'match' : 'matches'}
+            </em>
+          )}
+        </span>
         <span className="social-row__meta">
           {stats.count} cards · {stats.tradeCount} for trade · {money(stats.value)} · updated {relativeAge(friend.updatedAt)} ago
+          {delta && (delta.added > 0 || delta.removed > 0) ? ` · +${delta.added}/−${delta.removed}` : ''}
         </span>
       </span>
       {friend.sourceUrl && <Icon name="link" size={14} className="social-row__linked" />}

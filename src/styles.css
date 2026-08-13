@@ -4883,3 +4883,111 @@ button {
   color: var(--signal);
   text-decoration: none;
 }
+
+/* --- Social v2: wants & matchmaking --------------------------------------- */
+
+.ownedchip--want {
+  color: var(--paper-2);
+}
+.ownedchip--wanton {
+  color: var(--signal);
+  border-color: var(--signal-rule);
+  background: var(--signal-fill);
+}
+
+.wantlist {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.wantlist__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+}
+.wantlist__label svg {
+  color: var(--signal);
+}
+.wantlist__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wantchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px 3px 9px;
+  border-radius: 999px;
+  background: var(--ink-100);
+  border: 1px solid var(--rule-strong);
+  font-size: 12px;
+  font-weight: 520;
+  color: var(--paper);
+}
+.wantchip__x {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--ink-150);
+  color: var(--paper-3);
+}
+.wantchip__x:active {
+  color: var(--paper);
+}
+
+.cardcell__want {
+  position: absolute;
+  right: 5px;
+  bottom: 50px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(29, 25, 50, 0.92);
+  border: 1px solid var(--signal-rule);
+  color: var(--signal);
+}
+
+.friendhead__match {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 540;
+  color: var(--signal);
+}
+.social-row__match {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+  font-style: normal;
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+
+.composer__matches {
+  align-self: flex-start;
+}
+.composer__matches svg {
+  color: var(--signal);
+}
+.pickrow__heart {
+  color: var(--signal);
+  margin-right: 4px;
+  vertical-align: -1px;
+}
