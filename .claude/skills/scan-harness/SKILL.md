@@ -109,6 +109,63 @@ keep `baseline.json` from before your change to gate against.
    verify the stub answered what the real API would, and LOOK at the actual
    pixels (render the crop to a PNG and view it) before writing code.
 
+## The foil suite (`npm run test:foil`)
+
+Foil is not a corner case: most cards anyone collects have shine on them,
+and it is the pipeline's worst input. It gets its own opt-in battery because
+**the fixtures structurally cannot show it** — TCGplayer and TCGdex both
+ship flat SCANS, which kill the diffraction a phone sees live. So this
+battery is a MODEL, and its worth depends entirely on the model staying
+honest (lesson 25).
+
+Two cells per fixture, opt-in like dim/dark so the standard battery's
+per-game gates stay comparable:
+
+| cell | spec | what it is |
+| --- | --- | --- |
+| `foil` | `foil: 0.62` | a well-lit foil held to the light |
+| `foil-worst` | `foil: 0.78`, downscale 0.7, blur 0.9, glare 0.4 | the ordinary hand-held phone photo of one |
+
+Standing numbers on the current fixture snapshot (main @ 42687f9):
+**33/46 overall — `foil` 21/23, `foil-worst` 12/23.** The gap between those
+two columns IS the problem; a lit foil mostly reads, a real-world one mostly
+doesn't. Worst cell: Pokémon `foil-worst` at 1/7.
+
+What the model DOES cover: a saturated, hue-varying pearlescent band riding
+the card in card coordinates, 55% white (`SHEEN_WHITE`), narrow envelope
+(0.17 of the diagonal), calibrated by eye against a real phone photo.
+
+**FOIL TEXT — the gap this suite did not cover, now its own battery**
+(`npm run test:foiltext`). The `foil` sheen rides the WHOLE card, so it models
+a foil BACKGROUND under neutral ink — the very assumption `chroma-min`/
+`chroma-max` rest on. Real cards invert it: Yu-Gi-Oh Ultra Rares print the
+NAME in metallic gold and Secret Rares in silver, on a comparatively neutral
+beige bar. `foil-text` (gold), `foil-text-silver` and `foil-text-worst`
+metallize the name band's GLYPHS instead of the card. On the unchanged
+pipeline that put Yu-Gi-Oh at **1/9**, against 6/6 on `foil`.
+
+The arithmetic that said gold-on-beige already favours `chroma-min` (contrast
+150 vs luma's 46) was **wrong, and instructively so**: it models gold as one
+flat colour. A metal is a RANGE — shadow → base → highlight — and that range
+straddles the bar's own level, so luma, chroma-min AND chroma-max all change
+SIGN inside a single glyph. Measured, chroma-max was the best of the three on
+gold, not chroma-min. Saturation (`chroma-sat` = max−min) is the projection
+that survives, because a metal's colourfulness barely moves while its
+brightness swings; silver, near-neutral by construction, has no other answer
+at all. Standing: foil-text **37/69**, Yu-Gi-Oh 1/9 → 5/9, and the standard
+battery's Yu-Gi-Oh went 34/36 → 36/36. See lessons 26–28.
+
+**Real photos are the way past the model, and they proved it.** They already
+contain the camera degradation, so they bypass `compose()` entirely — a photo
+cell feeds the image straight to `identifyFrame` with ground truth from
+`tests/harness/photos/manifest.json` (committed there, NOT on the
+CI-force-pushed `harness-fixtures`). `npm run test:photos`. The first eight
+confirmed chroma-sat on real foil — the only variant to read anything at all
+on one of them — and then found something the matrix structurally cannot:
+card-region DETECTION over-reaching on cluttered backgrounds (lessons 32–33).
+Grade a photo run by its traces, not its score: a photo whose card is absent
+from the captured API universe cannot pass however well it reads.
+
 ## Fixture lifecycle
 
 - `tests/harness/fetch-fixtures.mjs` needs open internet (TCGdex, TCGplayer
