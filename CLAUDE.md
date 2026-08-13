@@ -2,7 +2,9 @@
 
 Vite + React 19 + TypeScript PWA. Local-first: all user data in IndexedDB via
 Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
-(`src/lib/settings.ts`). No backend.
+(`src/lib/settings.ts`). The deployed app has no backend — the only server in
+the repo is `server/`, an optional self-hosted sync box the user opts into
+(see Conventions); the app must always work fully without it.
 
 ## History you should know
 
@@ -27,6 +29,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
   workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
   fallback only — don't use it when Actions works.
+- `npm run sync` — optional self-hosted live-sync server (`server/`, zero deps,
+  state in the gitignored `server/data/`). The app never requires it.
 - `npm run test:unit` — node tests (corner parsing, name candidates, harness
   stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
@@ -48,7 +52,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
   an `opened` flag and stop counting at the sealed price once opened),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
-  import/export (`importexport.ts`), local diagnostics (`analytics.ts`).
+  import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
+  serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
+  the Dexie writes for friends/trades live in `db.ts`), optional live sync
+  (`sync.ts` — publish/poll against `server/sync-server.mjs`).
   Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
   the group index merges the "Pokemon Japan" TCGplayer category so Japanese
   packs match by their printed set code ("sv4K").
@@ -82,3 +89,18 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
   pickers in `prices.ts` and history readers filter them out; don't reintroduce
   them into math or UI.
+- Social is serverless **by default**: everything works with no server, and
+  that path must keep working — never make links/files a second-class citizen
+  or route them through a server. Live sync (`sync.ts` + `server/`) is an
+  opt-in overlay the user turns on with a server address; when `syncOn` is
+  false nothing in `sync.ts` runs. Anything the server returns is untrusted
+  and goes through the same `social.ts` sanitizers as a pasted link. Profiles,
+  trade proposals and replies travel as deflate+base64url payloads in
+  `#/x?d=…` links (or plain-JSON files); friends/trades are local Dexie
+  tables; `forTrade` on a collection row is the count of copies offered
+  (≤ qty — every write clamps via `tradeCount` in db.ts). Everything decoded
+  from a link/file/backup is untrusted: route it through the sanitizers in
+  `social.ts`. `SharedCard.price` is the finish's market unit with condition
+  NOT applied — viewers multiply by condition factor. Wants are card-level,
+  keyed `${game}|${normalizeName(name)}` (any printing matches); matchmaking
+  compares want keys, never card ids.

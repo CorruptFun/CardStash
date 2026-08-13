@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Game } from './types'
+import type { Game, ShareScope } from './types'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest'
 const DEFAULT_DIAG_ENDPOINT = 'https://telemetry.corrupt.solutions/ingest/telemetry'
@@ -29,6 +29,23 @@ export interface Settings {
   diagShare: boolean
   diagEndpoint: string
   diagToken: string
+  /** Stable id this device shares binders/trades under — minted on first share. */
+  profileId: string
+  /** Display name on shared binders and trade proposals. */
+  profileName: string
+  /** Short blurb on the shared binder ("DM @rae on Discord to trade"). */
+  profileNote: string
+  /** What a profile share includes: the trade binder, or the whole collection. */
+  shareScope: ShareScope
+  /** Optional sync server origin; empty = link-sharing only (the default). */
+  syncUrl: string
+  syncOn: boolean
+  /** Proves this device owns its profile id on the sync server. */
+  syncToken: string
+  /** Newest inbox item already applied, as a server timestamp. */
+  syncCursor: number
+  /** Last successful sync. */
+  syncAt: number
   set: (patch: Partial<Settings>) => void
 }
 
@@ -46,6 +63,15 @@ export const useSettings = create<Settings>()(
       diagShare: false,
       diagEndpoint: DEFAULT_DIAG_ENDPOINT,
       diagToken: '',
+      profileId: '',
+      profileName: '',
+      profileNote: '',
+      shareScope: 'trade',
+      syncUrl: '',
+      syncOn: false,
+      syncToken: '',
+      syncCursor: 0,
+      syncAt: 0,
       set: (patch) => set(patch),
     }),
     { name: 'cardstock-settings' },

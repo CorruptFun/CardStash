@@ -471,6 +471,14 @@ export async function matchPokemon(
   number?: string | null,
   apiKey?: string,
   printedTotal?: string | null,
+  /**
+   * The caller committed to Pokémon (`ApiKeys.thorough`), so the
+   * localized-name sweep (DE/FR/ES/IT/PT) may run. It costs one query per
+   * language: in the auto fan-out, paying that per OCR candidate spends the
+   * attempt's lookup budget before a later, cleaner read is ever queried —
+   * measured on the matrix as a lost MTG cell, since the budget is shared.
+   */
+  thorough = false,
 ): Promise<Card | null> {
   const queries = nameQueries(name)
   if (!queries.length) return null
@@ -483,7 +491,7 @@ export async function matchPokemon(
   if (!results.length) {
     const en = await dexMatch(name, number, printedTotal).catch(() => null)
     if (en) return en
-    return dexMatchLocalized(name, number).catch(() => null)
+    return thorough ? dexMatchLocalized(name, number).catch(() => null) : null
   }
   // The printed "123/198" total identifies the set even when no code is legible.
   let pool = results

@@ -33,14 +33,14 @@ test('unique size without a code still answers', async () => {
 })
 
 test('localized (German) name resolves to the EN card via the shared id', async () => {
-  const card = await matchPokemon('Glurak')
+  const card = await matchPokemon('Glurak', null, null, undefined, null, true)
   assert.ok(card, 'expected a card')
   assert.equal(card.name, 'Charizard')
   assert.equal(card.apiId, 'dex-base1-4')
 })
 
 test('junk reads never reach the language sweep', async () => {
-  assert.equal(await matchPokemon('4) 2 x1'), null)
+  assert.equal(await matchPokemon('4) 2 x1', null, null, undefined, null, true), null)
 })
 
 test('language-routed dex ids refresh from their own catalog', async () => {
@@ -61,4 +61,17 @@ test('fused fraction identifies only with full set-code corroboration', async ()
   // No code → refuse; wrong size for the coded set → refuse.
   assert.equal(await pokemonByCollector('046', '66', undefined, undefined, true), null)
   assert.equal(await pokemonByCollector('046', '99', undefined, 'SV4K', true), null)
+})
+
+test('the language sweep stays OFF unless the caller committed to Pokémon', async () => {
+  // In auto mode four games fan out per OCR candidate; five extra language
+  // queries there spend the attempt's shared lookup budget before a later,
+  // cleaner read is ever queried (measured on the matrix as a lost MTG cell).
+  const { requested } = await import('./stubs/tcgdex-net.mjs')
+  requested.length = 0
+  assert.equal(await matchPokemon('Glurak'), null)
+  assert.ok(
+    !requested.some((u) => /\/v2\/(de|fr|es|it|pt)\//.test(u)),
+    `no localized queries expected, got: ${requested.filter((u) => /\/v2\/[a-z]{2}\//.test(u)).join(', ')}`,
+  )
 })

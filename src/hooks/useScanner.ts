@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { track } from '../lib/analytics'
-import { captureFrame, releaseCamera, startCamera, type CameraSession, type Region } from '../lib/camera'
+import {
+  captureFrame,
+  captureFrameStacked,
+  releaseCamera,
+  startCamera,
+  type CameraSession,
+  type Region,
+} from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { stopOcr, warmOcr } from '../lib/ocr'
@@ -33,6 +40,14 @@ const SENSE_MIN_INTERVAL_MS = 48
  * release the camera for privacy, exactly as before.
  */
 const HIDDEN_CAMERA_PROBE_MS = 2_000
+/** Below this mean luma the scene counts as dark: captures stack frames,
+ * and a sustained streak turns on what light the platform offers. */
+const DARK_LUMA = 58
+/** Scene must stay dark this long before the scanner reaches for the torch —
+ * a hand shadow passing over the card must not strobe the flash. */
+const DARK_STREAK_TORCH_MS = 2200
+/** Bright again this long → release the exposure boost. */
+const BRIGHT_RELEASE_MS = 1500
 
 interface ApiFailurePolicy {
   waitMs: number
@@ -141,6 +156,10 @@ export interface ScannerState {
   detail: string | null
   torchAvailable: boolean
   torchOn: boolean
+  /** The scanner turned the torch on itself (dark scene); cleared when off. */
+  autoTorch: boolean
+  /** The scene is currently too dark for comfortable reading. */
+  lowLight: boolean
   needsResume: boolean
 }
 
@@ -160,6 +179,8 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   /** Focus tracking: rolling sharpness peak + how long the gate has blocked. */
   const focusRef = useRef({ max: 0, blockedSince: 0 })
   const lastSenseRef = useRef(0)
+  /** Light adaptation: latest luma, dark/bright streak starts, torch etiquette. */
+  const lightRef = useRef({ luma: 255, darkSince: 0, brightSince: 0, boosted: false, torchDeclined: false })
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null)
   const regionStreakRef = useRef(0)
   const senseCtxRef = useRef<CanvasRenderingContext2D | null>(null)
@@ -176,6 +197,8 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     detail: null,
     torchAvailable: false,
     torchOn: false,
+    autoTorch: false,
+    lowLight: false,
     needsResume: false,
   })
   const [busy, setBusy] = useState(false)
@@ -198,6 +221,8 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     regionStreakRef.current = 0
     stillSinceRef.current = null
     focusRef.current = { max: 0, blockedSince: 0 }
+    // Torch etiquette survives camera restarts; the streaks don't.
+    lightRef.current = { ...lightRef.current, luma: 255, darkSince: 0, brightSince: 0, boosted: false }
     stopOcr()
   }, [])
 
@@ -315,6 +340,42 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     const updates: Partial<ScannerState> = {}
     if (sensing !== prev.sensing) updates.sensing = sensing
 
+    // Light adaptation: track dark/bright streaks; after a sustained dark
+    // streak reach for what the platform offers (exposure boost, then the
+    // torch — once, and never again if the user turns it back off).
+    const light = lightRef.current
+    light.luma = analysis.luma
+    const dark = analysis.luma < DARK_LUMA
+    if (dark) {
+      light.darkSince ||= now
+      light.brightSince = 0
+    } else {
+      light.darkSince = 0
+      if (analysis.luma > DARK_LUMA + 30) light.brightSince ||= now
+      else light.brightSince = 0
+    }
+    if (prev.lowLight !== dark) updates.lowLight = dark
+    if (dark && light.darkSince && now - light.darkSince > DARK_STREAK_TORCH_MS) {
+      if (!light.boosted && session.setLowLightBoost) {
+        light.boosted = true
+        session.setLowLightBoost(true).catch(() => {})
+      }
+      if (session.setTorch && !prev.torchOn && !light.torchDeclined) {
+        session
+          .setTorch(true)
+          .then(() => patch({ torchOn: true, autoTorch: true }))
+          // A torch that refuses is a torch we stop asking for — otherwise
+          // this retries every couple of seconds for the whole session.
+          .catch(() => {
+            light.torchDeclined = true
+          })
+        light.darkSince = now // don't re-fire every frame while it ramps
+      }
+    } else if (light.boosted && light.brightSince && now - light.brightSince > BRIGHT_RELEASE_MS) {
+      light.boosted = false
+      session.setLowLightBoost?.(false).catch(() => {})
+    }
+
     const jobRunning = jobRef.current?.running ?? false
     const scanState =
       prev.status === 'searching' || prev.status === 'locking' || prev.status === 'nomatch' || prev.status === 'found'
@@ -365,7 +426,22 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       patch({ status: 'thinking', miss: null, detail: null })
       const mode = modeRef.current
       const region = mode === 'sealed' ? sealedRegion() : reticleRegion(video.videoWidth, video.videoHeight)
-      const capture = captureFrame(video, region)
+      // Dark scene: average a short burst of frames — sensor noise is
+      // independent per frame, so the stack recovers what no single-frame
+      // processing can. The stillness gate already fired, so no ghosting.
+      const capture =
+        mode === 'card' && lightRef.current.luma < DARK_LUMA
+          ? await captureFrameStacked(video, region)
+          : captureFrame(video, region)
+      // The stack awaited ~140ms — the scanner may have been stopped or the
+      // video may have dropped out since. Hand the loop back to 'searching'
+      // rather than stranding the chip on "Identifying…" (a teardown, which
+      // sets its own status, wins the patch that follows anyway).
+      if (!video.videoWidth || !sessionRef.current) {
+        setBusy(false)
+        if (sessionRef.current) patch({ status: 'searching' })
+        return
+      }
       const hash = frameHash(capture.canvas)
       const startedAt = performance.now()
       await job.run((signal) => identifyFrame(capture, hash, { ignoreMisses: manual, mode, signal }), {
@@ -469,9 +545,12 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     const session = sessionRef.current
     if (!session?.setTorch) return
     const next = !stateRef.current.torchOn
+    // Turning OFF a torch the scanner lit is an answer: don't auto-light it
+    // again this session.
+    if (!next && stateRef.current.autoTorch) lightRef.current.torchDeclined = true
     try {
       await session.setTorch(next)
-      patch({ torchOn: next })
+      patch({ torchOn: next, autoTorch: next ? stateRef.current.autoTorch : false })
     } catch {
       patch({ torchAvailable: false })
     }

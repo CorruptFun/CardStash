@@ -1,6 +1,19 @@
 import { db } from './db'
 import { mergePrices } from './prices'
-import type { Card, CollectionItem, Deck, DeckCard, PricePoint, PriceEntry } from './types'
+import type {
+  Card,
+  CollectionItem,
+  Condition,
+  Deck,
+  DeckCard,
+  Finish,
+  Friend,
+  PriceEntry,
+  PricePoint,
+  SharedCard,
+  TradeRecord,
+  WantRow,
+} from './types'
 import { tcgplayerSearchLink, uid, ymd } from './util'
 
 /** `?demo=1` / Settings → Demo data: a believable starter collection. */
@@ -252,6 +265,8 @@ export async function seedDemoData(): Promise<void> {
     'Lightning Bolt': 0.75,
     Iono: 21,
   }
+  // Spares flagged for trade, so the Friends tab has a binder to share.
+  const forTradeByName: Record<string, number> = { 'Lightning Bolt': 3, Swamp: 4, Iono: 1 }
   const collection: CollectionItem[] = DEMO_CARDS.map((card, index) => ({
     id: `demo-item-${index}`,
     cardId: card.id,
@@ -262,6 +277,7 @@ export async function seedDemoData(): Promise<void> {
     finish: card.name === 'Charizard ex' || card.name === 'Ash Blossom & Joyous Spring' ? 'holo' : 'nonfoil',
     condition: 'NM',
     qty: card.name === 'Swamp' ? 8 : card.name === 'Lightning Bolt' ? 4 : card.supertype === 'Trainer' ? 2 : 1,
+    forTrade: forTradeByName[card.name],
     purchasePrice: purchasePrices[card.name],
     addedAt: now - DEMO_CARDS.indexOf(card) * 3_600_000,
     card,
@@ -319,13 +335,95 @@ export async function seedDemoData(): Promise<void> {
     demoHistory(card.id, card.prices.best!),
   )
 
-  await db.transaction('rw', db.collection, db.decks, db.deckCards, db.history, async () => {
-    await db.collection.bulkPut(collection)
-    await db.decks.put(deck)
-    await db.deckCards.where('deckId').equals(deck.id).delete()
-    await db.deckCards.bulkAdd(deckCards)
-    await db.history.bulkPut(history)
-  })
+  /* A followed friend + an incoming offer, so the Friends tab demos itself. */
+  const share = (
+    name: string,
+    opts: { qty?: number; forTrade?: number; condition?: Condition; finish?: Finish } = {},
+  ): SharedCard => {
+    const card = byName(name)
+    const qty = opts.qty ?? 1
+    return {
+      cardId: card.id,
+      game: card.game,
+      name: card.name,
+      setCode: card.setCode,
+      setName: card.setName,
+      number: card.number,
+      rarity: card.rarity,
+      finish: opts.finish ?? 'nonfoil',
+      condition: opts.condition ?? 'NM',
+      qty,
+      forTrade: Math.min(qty, opts.forTrade ?? 0),
+      image: card.imageSmall,
+      price: card.prices.best ?? card.prices.bestFoil ?? undefined,
+    }
+  }
+  const demoFriend: Friend = {
+    id: 'demo-friend-rae',
+    name: 'Rae',
+    note: 'LGS on Fridays — DM me for shipping trades',
+    scope: 'all',
+    addedAt: now - 6 * 86_400_000,
+    updatedAt: now - 20 * 3_600_000,
+    exportedAt: now - 20 * 3_600_000,
+    cards: [
+      share('Sheoldred, the Apocalypse', { qty: 1, forTrade: 1 }),
+      share('Iono', { qty: 2, forTrade: 2 }),
+      share('Pikachu', { qty: 3, forTrade: 2 }),
+      share('Dark Magician', { qty: 1, forTrade: 1, condition: 'LP' }),
+      share('Charizard ex', { qty: 1, finish: 'holo' }),
+    ],
+  }
+  // Wants: Sheoldred matches Rae's for-trade copy, so matchmaking demos too.
+  const demoWants: WantRow[] = [
+    {
+      key: 'mtg|sheoldred the apocalypse',
+      cardId: 'mtg:demo-sheoldred',
+      game: 'mtg',
+      name: 'Sheoldred, the Apocalypse',
+      setCode: 'DMU',
+      image: byName('Sheoldred, the Apocalypse').imageSmall,
+      price: 52,
+      addedAt: now - 2 * 86_400_000,
+    },
+  ]
+  demoFriend.wants = [
+    {
+      cardId: 'mtg:demo-ragavan',
+      game: 'mtg',
+      name: 'Ragavan, Nimble Pilferer',
+      image: byName('Ragavan, Nimble Pilferer').imageSmall,
+      price: 38.5,
+    },
+  ]
+
+  const demoTrade: TradeRecord = {
+    id: 'demo-trade-rae',
+    friendId: demoFriend.id,
+    friendName: demoFriend.name,
+    direction: 'in',
+    status: 'proposed',
+    createdAt: now - 5 * 3_600_000,
+    updatedAt: now - 5 * 3_600_000,
+    note: 'Your Ragavan for my Sheoldred + Iono?',
+    give: [share('Ragavan, Nimble Pilferer', { qty: 1 })],
+    get: [share('Sheoldred, the Apocalypse', { qty: 1 }), share('Iono', { qty: 1 })],
+  }
+
+  await db.transaction(
+    'rw',
+    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants],
+    async () => {
+      await db.collection.bulkPut(collection)
+      await db.decks.put(deck)
+      await db.deckCards.where('deckId').equals(deck.id).delete()
+      await db.deckCards.bulkAdd(deckCards)
+      await db.history.bulkPut(history)
+      await db.friends.put(demoFriend)
+      await db.trades.put(demoTrade)
+      await db.wants.bulkPut(demoWants)
+    },
+  )
 }
 
 export async function hasAnyData(): Promise<boolean> {

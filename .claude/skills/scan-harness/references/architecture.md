@@ -91,6 +91,14 @@ top-name games print, streak 2 crosses mid-plate), `lowlight`
 (brightness 0.42 + seeded noise), `worst` (compound). All deterministic
 (mulberry32 seeded from the spec) for cell-by-cell comparability.
 
+Opt-in harsh low light (NOT in the standard battery, so per-game regression
+gates stay comparable across reports): `dim` (brightness 0.26, noise 10) and
+`dark` (brightness 0.15, noise 15 + slow-shutter softness). Select with
+`--degradations=lowlight,dim,dark`; add `--stack=3` to simulate the phone's
+dark-scene temporal averaging (N seed-varied composes averaged in-page —
+noise decorrelates exactly like real sensor frames; don't stack glare cells,
+their streak geometry is seed-positioned).
+
 ## 6. Runner — `tests/harness/run-matrix.mjs` (node)
 
 Spawns vite (port 5197) + headless chromium (`--no-sandbox`), N pages

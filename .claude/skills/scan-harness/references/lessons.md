@@ -63,6 +63,36 @@ result seems absurd, check this list before writing code.
     Don't chase them with thresholds — that path leads to wrong cards. The
     corner path and (someday) a better OCR model are the levers.
 
+## Low light (the v0.7.1 round)
+
+16. **Don't pre-amplify — the pipeline already adapts locally.** A global
+    gamma "lift" before the pipeline measured as a net LOSS: the per-tile
+    contrast stretch is already a local exposure adaptation, and
+    pre-amplification defeats its flat-tile noise guard (lifted noisy tiles
+    stop inheriting stable global levels). Fix darkness where the specific
+    stage breaks instead: the DETECTION buffer gets its own full-range
+    stretch (its Sobel thresholds assume a lit frame), and OCR input gets
+    speckle damping only when texture MEASURES as speckle.
+17. **Tesseract dwells on amplified noise — minutes per pass.** Dark-cell
+    traces showed 68–92s of OCR per attempt ("thinks forever" verbatim).
+    Successful noisy reads finish in 4.5–5s; runaways run 20–60s — a 6.5s
+    watchdog (terminate + respawn the worker; nothing else interrupts wasm)
+    plus a 2-kill/18s attempt budget bounds the worst case. Calibrate the
+    cap ABOVE the slowest successful read you can find in traces — the
+    first 5s cap killed a winning 4.65s read.
+18. **Temporal stacking is the only true dark recovery.** Per-pixel SNR < 2
+    cannot be fixed after one frame is taken; averaging 3 frames (noise
+    independent per frame → σ/√3) took dark cells from 4/21 to 17/21. The
+    harness proves it with seed-varied composes (`--stack=3`), the phone
+    does it with real frames (`captureFrameStacked`, dark scenes only,
+    after the stillness gate). Camera-level adaptation (exposure boost,
+    auto-torch with decline etiquette) prevents the dark frame existing at
+    all — always prefer fixing the LIGHT to fixing the pixels.
+19. **Marginal cells flap ±1–2 across runs.** Dark/noisy cells sit at
+    threshold edges (a 4.65s read vs a 5s cap; a 0.66-score match). Never
+    conclude from a single-run ±1 delta on the hard rows — the stable wins
+    are the ones that repeat across three consecutive runs.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review
@@ -80,7 +110,16 @@ result seems absurd, check this list before writing code.
     policy-blocked; CI runners have open egress — hence fetch-in-CI +
     data-branch. npm/registry traffic bypasses the proxy. Probe with curl
     before assuming.
-15. **Real failure messages are the user's diagnostic.** "Read “X” but
+15. **A verification pass takes ~5 minutes; `main` can move in that time.**
+    Another session shipped 0.8.0→0.10.0 (and refactored the version into
+    `src/lib/version.ts`) while the low-light matrix runs were going. Always
+    `git fetch origin main` before merging, expect version files to be the
+    conflict, take the NEWER structure rather than reasserting yours, and
+    re-run the full gate on the merged tree — the merge is a new tree, and
+    the rule is about trees, not diffs. (Their work touched no pipeline
+    file, which the diff confirmed in seconds; check that before assuming a
+    re-baseline is needed.)
+16. **Real failure messages are the user's diagnostic.** "Read “X” but
     couldn't match it" = match layer (trace shows scores); "Couldn't read
     the card name" = OCR + corner both empty. Keep messages honest about
     which stage gave up — the eye-icon trace panel depends on it.

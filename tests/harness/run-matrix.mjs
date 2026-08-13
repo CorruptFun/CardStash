@@ -160,8 +160,11 @@ async function main() {
   // Cell list: hinted runs for everything; auto runs for a subset. Fixtures
   // marked hintedOnly (foreign-language prints — auto mode has no
   // collector-line rescue by design) never get auto cells.
+  // An explicit --degradations filter may also select the opt-in extras
+  // (dim/dark); the default battery stays the standard, comparable set.
   const cells = []
-  const degradations = (all) => (degFilter ? all.filter((d) => degFilter.includes(d)) : all)
+  const degradations = (all) =>
+    degFilter ? [...all, ...EXTRA_DEGRADATION_KEYS].filter((d) => degFilter.includes(d)) : all
   for (const fixture of fixtures) {
     const imageUrl = `/tests/harness/fixtures/${fixture.image}`
     for (const degradation of degradations(DEGRADATION_KEYS)) {
@@ -232,7 +235,7 @@ async function main() {
           const run = (p) =>
             p.evaluate(
               (c) => window.__harness.runCell(c),
-              { imageUrl: cell.imageUrl, degradation: cell.degradation, hint: cell.hint },
+              { imageUrl: cell.imageUrl, degradation: cell.degradation, hint: cell.hint, stack: Number(args.stack) || 1 },
             )
           let result
           try {
@@ -372,6 +375,10 @@ async function main() {
   }
 }
 
+/** The standard battery. dim/dark (harsh low light) are opt-in via
+ * --degradations so per-game regression gates stay comparable across
+ * reports that predate them. */
 const DEGRADATION_KEYS = ['clean', 'small-offset', 'soft-focus', 'rot+5', 'rot-5', 'perspective', 'glare', 'lowlight', 'worst']
+const EXTRA_DEGRADATION_KEYS = ['dim', 'dark']
 
 main()

@@ -59,6 +59,12 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
 | Focus gate | ratio 0.62 of rolling peak, floor 6, cap 1.2s, half-life 750ms (time-based) | phones hunt focus right after motion stops; cap prevents stalls; time-based decay so 120Hz ≡ 60Hz |
 | Sense cadence | ≥48ms between analyses | Sobel at display refresh is pure heat |
 | Fused fraction bounds | total ∈ [30,400], number ≤ total+150, 5–6 digit runs | OCR eats the tiny slash ("156/149"→"156149"); bounds keep years/HP out |
+| `RECOGNIZE_TIMEOUT_MS` | 6.5s (8s wide) | successful NOISY reads run 4.5–5s; runaway speckle dwells 20–60s — the cap sits between them; on expiry the worker is terminated + respawned (only way to interrupt the wasm) |
+| OCR attempt budget | 2 watchdog kills OR 18s | pathological texture won't read on pass 6 either; skip to the bounded collector path |
+| `DARK_LUMA` (scanner) | 58 | below it: stacked capture + dark streak logic |
+| `DARK_STREAK_TORCH_MS` | 2.2s | a passing hand shadow must not strobe the flash |
+| Stacked capture | 3 frames, 70ms apart | sensor noise is per-frame independent — the average divides it by √N; measured on the matrix: dark 4/21 → 17/21 |
+| Detection stretch | span < 110 → full-range LUT | Sobel thresholds (160/220) are calibrated for lit frames; dark edges fall under them while vignette/noise survive → half-card crops |
 
 ## Guard invariants — do not weaken one without its counterpart
 

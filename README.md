@@ -22,9 +22,31 @@ storage all work from there.
 - **AI builder** — bring a free Gemini key; it researches the current meta with
   live search and proposes decks from your collection, optionally built around
   specific seed cards you pick.
+- **Friends & trades** — mark copies "for trade", share your binder (or whole
+  collection) as a link or file, follow friends' binders the same way (host the
+  file at a stable URL — e.g. a GitHub Gist — and refresh anytime), then
+  propose trades card-by-card with both sides priced; accept/decline travels
+  back as a reply link, and booking a completed trade updates both inventories.
+- **Want list & matchmaking** — heart any card as a want (any printing counts);
+  wants travel with your binder share, so both sides see matches highlighted:
+  cards of theirs you're hunting, cards of yours they're hunting, one-tap
+  select in the trade composer, and +added/−removed diffs on every refresh.
+- **Live sync (optional)** — run `npm run sync` on any computer and point a
+  group at the address it prints: binders then refresh in the background and
+  trades arrive in-app instead of by link. Off by default, one tap to leave.
+  See [`server/README.md`](server/README.md).
 
-Everything is stored locally (IndexedDB). No accounts, no server — API keys live
-on-device and are sent only to their own services.
+Everything is stored locally (IndexedDB). No accounts, no server required — API
+keys live on-device and are sent only to their own services. Social works
+serverlessly by default: a share link *is* the data (compressed into the URL),
+so nothing is published anywhere unless you send it to someone.
+
+## Commands
+
+- `npm run dev` — dev server
+- `npm run build` — typecheck + production build
+- `npm run sync` — optional live-sync server (see `server/README.md`)
+- `npm run test:unit` / `npm run test:scan` — unit tests / scan matrix
 
 ## Development
 

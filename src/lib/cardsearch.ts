@@ -10,6 +10,12 @@ import { nameScore, normalizeName, sleep } from './util'
 export interface ApiKeys {
   pokemonKey?: string
   signal?: AbortSignal
+  /**
+   * The caller committed to one game (scan filter set), so matchers may
+   * spend extra requests on recovery retries. In the auto fan-out those
+   * same retries serially tax every OTHER game's wait, so they stay off.
+   */
+  thorough?: boolean
 }
 
 export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
@@ -39,9 +45,9 @@ export function matchGame(
     case 'mtg':
       return matchMtg(name, setCode, number)
     case 'pokemon':
-      return matchPokemon(name, setCode, number, keys.pokemonKey)
+      return matchPokemon(name, setCode, number, keys.pokemonKey, null, keys.thorough)
     case 'yugioh':
-      return matchYgo(name)
+      return matchYgo(name, keys.thorough)
     case 'lorcana':
       return matchLorcana(name, setCode, number)
     default:
@@ -200,7 +206,7 @@ export async function bestMatchAcrossGames(
   return new Promise((resolve) => {
     let unsettled = games.length
     for (const [at, game] of games.entries()) {
-      withBudget(matchGame(game, name, null, null, keys))
+      withBudget(matchGame(game, name, null, null, { ...keys, thorough: games.length === 1 }))
         .then((card) => {
           // nameScore, not raw similarity: a read of just "Jinx" must still
           // clear the match threshold against "Jinx, Loose Cannon".

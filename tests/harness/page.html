@@ -44,15 +44,31 @@
       },
 
       /**
-       * cell: { imageUrl, degradation, hint ('auto' | game), overrides? }
-       * Returns { outcome, ms, trace } — trace is the pipeline's own
-       * diagnostics record for the attempt.
+       * cell: { imageUrl, degradation, hint ('auto' | game), overrides?, stack? }
+       * stack: N simulates the phone's dark-scene temporal averaging —
+       * N composes of the SAME cell with different noise seeds, averaged.
+       * Sensor noise is independent per frame; the augment noise is seeded,
+       * so varying the seed per "frame" reproduces the same physics.
+       * Returns { outcome, ms, trace }.
        */
       async runCell(cell) {
         useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
         const img = await loadImage(cell.imageUrl)
         const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), ...(cell.overrides ?? {}) }
-        const canvas = compose(img, spec)
+        let canvas = compose(img, spec)
+        if ((cell.stack ?? 1) > 1) {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })
+          const base = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const sum = new Float32Array(base.data.length)
+          for (let i = 0; i < base.data.length; i++) sum[i] = base.data[i]
+          for (let n = 1; n < cell.stack; n++) {
+            const frame = compose(img, { ...spec, seed: (spec.seed ?? 1) + n * 7919 })
+            const data = frame.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height).data
+            for (let i = 0; i < data.length; i++) sum[i] += data[i]
+          }
+          for (let i = 0; i < base.data.length; i++) base.data[i] = sum[i] / cell.stack
+          ctx.putImageData(base, 0, 0)
+        }
         clearScanCache()
         clearScanTraces()
         const started = performance.now()
