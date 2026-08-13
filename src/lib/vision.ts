@@ -495,3 +495,325 @@ export function rotateQuarter(source: HTMLCanvasElement, turns: number): HTMLCan
   ctx.drawImage(source, -source.width / 2, -source.height / 2)
   return out
 }
+
+/**
+ * Cards sharing a photo sit on a lattice — a binder page is literally a grid,
+ * and even a loose row on a table lines up. Detections that already agree give
+ * the pitch, and a slot the sweep missed can then be scored where the grid
+ * says it must be rather than searched for blind.
+ *
+ * The missed ones are missed for ordinary reasons: glare across a row, a card
+ * whose border merges with its neighbour's, a top row clipped by the frame.
+ * Their own border evidence is real but under the bar, so the grid position
+ * pays for the difference — the same evidence-pairing rule the matcher uses.
+ * A predicted slot still has to MEASURE something (`GRID_FILL_SCORE_MIN`), so
+ * an empty pocket stays empty instead of becoming a card.
+ */
+function completeGrid(
+  cards: CardDetection[],
+  borderScore: (x: number, y: number, w: number, h: number) => number,
+  sw: number,
+  sh: number,
+): CardDetection[] {
+  const median = (xs: number[]): number => xs.slice().sort((a, b) => a - b)[xs.length >> 1]
+  const w = median(cards.map((c) => c.w))
+  const h = median(cards.map((c) => c.h))
+  if (!(w > 0) || !(h > 0)) return cards
+
+  /** 1D lattice from the observed centres: pitch = the smallest real gap. */
+  const lattice = (centres: number[], size: number): { origin: number; pitch: number } => {
+    const sorted = centres.slice().sort((a, b) => a - b)
+    const gaps: number[] = []
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = sorted[i] - sorted[i - 1]
+      // Same column/row, not a step.
+      if (gap > size * 0.5) gaps.push(gap)
+    }
+    if (!gaps.length) return { origin: sorted[0], pitch: 0 }
+    const base = median(gaps)
+    // Two slots apart reads as a double gap; fold those back down.
+    const pitch = median(gaps.map((g) => (g > base * 1.6 ? g / Math.round(g / base) : g)))
+    return { origin: sorted[0], pitch }
+  }
+
+  const cols = lattice(cards.map((c) => c.x + c.w / 2), w)
+  const rows = lattice(cards.map((c) => c.y + c.h / 2), h)
+  if (!(cols.pitch > 0) && !(rows.pitch > 0)) return cards
+
+  const colPitch = cols.pitch > 0 ? cols.pitch : w
+  const rowPitch = rows.pitch > 0 ? rows.pitch : h
+  const spanFrom = (origin: number, pitch: number, centres: number[]): number[] => {
+    const last = Math.max(...centres)
+    const out: number[] = []
+    for (let v = origin; v <= last + pitch * 0.5 && out.length < 12; v += pitch) out.push(v)
+    return out
+  }
+  const colCentres = spanFrom(cols.origin, colPitch, cards.map((c) => c.x + c.w / 2))
+  const rowCentres = spanFrom(rows.origin, rowPitch, cards.map((c) => c.y + c.h / 2))
+  if (colCentres.length * rowCentres.length > 24) return cards
+
+  // Snap to the lattice before filling it. A rectangle straddling the gap
+  // between two rows still has four strong borders — the sleeve edge above and
+  // the card sides running through both — so min-of-four cannot tell a card
+  // from half of two stacked ones, and such a box scores HIGH (measured 1.72,
+  // above several correct ones). What it cannot do is agree with its
+  // neighbours: the majority sit on the true rows, so conforming an outlier to
+  // the consensus fixes exactly the boxes that are wrong without touching the
+  // ones that are right.
+  const snap = (v: number, origin: number, pitch: number): number => {
+    if (!(pitch > 0)) return v
+    const k = Math.round((v - origin) / pitch)
+    const target = origin + k * pitch
+    return Math.abs(target - v) < pitch * 0.5 ? target : v
+  }
+  const out = cards.map((c) => {
+    const cx = snap(c.x + c.w / 2, cols.origin, colPitch)
+    const cy = snap(c.y + c.h / 2, rows.origin, rowPitch)
+    if (cx === c.x + c.w / 2 && cy === c.y + c.h / 2) return c
+    const score = borderScore((cx - w / 2) * sw, (cy - h / 2) * sh, w * sw, h * sh)
+    // Only move it if the lattice position is defensible on its own evidence.
+    return score >= GRID_FILL_SCORE_MIN ? { x: cx - w / 2, y: cy - h / 2, w, h, score } : c
+  })
+  for (const cx of colCentres) {
+    for (const cy of rowCentres) {
+      const taken = out.some((c) => Math.abs(c.x + c.w / 2 - cx) < w * 0.5 && Math.abs(c.y + c.h / 2 - cy) < h * 0.5)
+      if (taken) continue
+      const x = (cx - w / 2) * sw
+      const y = (cy - h / 2) * sh
+      if (x < -w * sw * 0.1 || y < -h * sh * 0.1 || x + w * sw > sw * 1.1 || y + h * sh > sh * 1.1) continue
+      const score = borderScore(x, y, w * sw, h * sh)
+      if (score < GRID_FILL_SCORE_MIN) continue
+      out.push({ x: cx - w / 2, y: cy - h / 2, w, h, score })
+    }
+  }
+  return out
+}
+
+/** A card-shaped rectangle found in a frame, in frame fractions. */
+export interface CardDetection extends Region {
+  /** Border strength relative to the frame's mean edge energy. Higher is safer. */
+  score: number
+}
+
+/** Analysis resolution for the multi-card sweep. Cheap, and card borders survive it. */
+const DETECT_WIDTH = 224
+/** Printed card aspect (63:88). Perspective and sleeves move it, so the sweep spans a range. */
+const CARD_ASPECT = 63 / 88
+const ASPECT_MIN = CARD_ASPECT * 0.82
+const ASPECT_MAX = CARD_ASPECT * 1.2
+/** A detection must beat the frame's average edge energy by this much on ALL four sides. */
+const BORDER_SCORE_MIN = 1.35
+/** Overlap above which two detections are the same card. */
+const NMS_IOU = 0.3
+/** A box this much swallowed by an already-taken one is a panel inside a card. */
+const CONTAINMENT_MAX = 0.6
+/** Cards in one photo share a size; this much spread around the median is kept. */
+const SIZE_CLUSTER_TOLERANCE = 1.45
+/** A grid-predicted slot needs less independent evidence — but not none. */
+const GRID_FILL_SCORE_MIN = 0.95
+
+/**
+ * Find every card-shaped rectangle in a frame.
+ *
+ * `refineCardCrop` answers a different question — "where is THE card" — with
+ * 1D projection profiles: the span of columns and the span of rows holding
+ * 92% of the edge mass. That is exactly right for one card on a plain surface
+ * and it degrades badly everywhere else, because background clutter puts edge
+ * mass at the frame's margins and drags both spans outward. Measured on real
+ * photographs, a card on a wooden table beside its packaging detects as
+ * 71–74% of the frame — which is over the 0.66 area gate, so the crop is
+ * skipped and every text band then reads the table instead of the card. It
+ * also cannot represent a second card at all, so a binder page is hopeless by
+ * construction.
+ *
+ * This is 2D and explicitly rectangular. Sobel splits into vertical-edge and
+ * horizontal-edge energy; integral images make any rectangle's border score
+ * O(1); the sweep walks card-aspect rectangles across position and scale.
+ *
+ * The scoring rule is the whole idea: a candidate scores the **minimum** of
+ * its four borders, not the sum. A card is a CLOSED rectangle, and requiring
+ * all four sides is what separates one from the many strong-but-open edge
+ * clusters a real scene is full of — a table edge, a sleeve, the side of a
+ * box. Summing lets three good sides carry a fourth that isn't there, which
+ * is the same failure the projection profiles have.
+ */
+export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): CardDetection[] {
+  try {
+    const sw = DETECT_WIDTH
+    const sh = Math.max(24, Math.round((source.height / source.width) * DETECT_WIDTH))
+    const ctx = scaledContext(sw, sh)
+    ctx.drawImage(source, 0, 0, sw, sh)
+    const gray = grayscale(ctx.getImageData(0, 0, sw, sh))
+
+    // Split the gradient: |gx| marks vertical edges (a card's left/right
+    // sides), |gy| horizontal ones (top/bottom). Keeping them apart is what
+    // lets a border be scored for the direction it should actually run in —
+    // a horizontal table edge must not vouch for a card's vertical side.
+    const vert = new Float64Array(sw * sh)
+    const horiz = new Float64Array(sw * sh)
+    for (let y = 1; y < sh - 1; y++) {
+      const row = y * sw
+      for (let x = 1; x < sw - 1; x++) {
+        const i = row + x
+        const gx =
+          -gray[i - sw - 1] - 2 * gray[i - 1] - gray[i + sw - 1] + gray[i - sw + 1] + 2 * gray[i + 1] + gray[i + sw + 1]
+        const gy =
+          -gray[i - sw - 1] - 2 * gray[i - sw] - gray[i - sw + 1] + gray[i + sw - 1] + 2 * gray[i + sw] + gray[i + sw + 1]
+        vert[i] = Math.abs(gx)
+        horiz[i] = Math.abs(gy)
+      }
+    }
+
+    const integral = (src: Float64Array): Float64Array => {
+      const out = new Float64Array((sw + 1) * (sh + 1))
+      for (let y = 0; y < sh; y++) {
+        let rowSum = 0
+        for (let x = 0; x < sw; x++) {
+          rowSum += src[y * sw + x]
+          out[(y + 1) * (sw + 1) + x + 1] = out[y * (sw + 1) + x + 1] + rowSum
+        }
+      }
+      return out
+    }
+    const iv = integral(vert)
+    const ih = integral(horiz)
+    const sum = (ii: Float64Array, x0: number, y0: number, x1: number, y1: number): number => {
+      const ax = Math.max(0, Math.min(sw, Math.round(x0)))
+      const ay = Math.max(0, Math.min(sh, Math.round(y0)))
+      const bx = Math.max(ax, Math.min(sw, Math.round(x1)))
+      const by = Math.max(ay, Math.min(sh, Math.round(y1)))
+      const W = sw + 1
+      return ii[by * W + bx] - ii[ay * W + bx] - ii[by * W + ax] + ii[ay * W + ax]
+    }
+    const mean = (ii: Float64Array, x0: number, y0: number, x1: number, y1: number): number => {
+      const area = Math.max(1, (Math.round(x1) - Math.round(x0)) * (Math.round(y1) - Math.round(y0)))
+      return sum(ii, x0, y0, x1, y1) / area
+    }
+
+    // Scene-relative baseline, so a flat scan and a noisy phone photo use the
+    // same threshold.
+    let energy = 0
+    for (let i = 0; i < vert.length; i++) energy += vert[i] + horiz[i]
+    const base = Math.max(1, energy / (2 * sw * sh))
+
+    /** Weakest of a rectangle's four borders, relative to the frame's energy. */
+    const borderScore = (x: number, y: number, w: number, h: number): number => {
+      const t = Math.max(1, w * 0.035)
+      const left = mean(iv, x - t, y, x + t, y + h)
+      const right = mean(iv, x + w - t, y, x + w + t, y + h)
+      const top = mean(ih, x, y - t, x + w, y + t)
+      const bottom = mean(ih, x, y + h - t, x + w, y + h + t)
+      return Math.min(left, right, top, bottom) / base
+    }
+
+    const candidates: CardDetection[] = []
+    const minW = Math.max(10, sw * 0.09)
+    const maxW = sw * 0.98
+    for (let w = minW; w <= maxW; w *= 1.14) {
+      for (let aspect = ASPECT_MIN; aspect <= ASPECT_MAX + 1e-9; aspect += (ASPECT_MAX - ASPECT_MIN) / 2) {
+        const h = w / aspect
+        if (h > sh * 0.995) continue
+        const step = Math.max(2, w * 0.11)
+        for (let x = 0; x + w <= sw; x += step) {
+          for (let y = 0; y + h <= sh; y += step) {
+            const weakest = borderScore(x, y, w, h)
+            if (weakest < BORDER_SCORE_MIN) continue
+            candidates.push({ x: x / sw, y: y / sh, w: w / sw, h: h / sh, score: weakest })
+          }
+        }
+      }
+    }
+
+    // Snap each survivor onto the card it nearly found. The sweep steps in
+    // coarse jumps (11% of a card) so its hits sit a little off, and that
+    // slop compounds: the lattice inferred from misaligned boxes predicts
+    // missing slots into the GAPS between cards, where they score nothing and
+    // are thrown away. A short hill-climb on the same integral images — a few
+    // hundred O(1) probes — costs almost nothing and is what makes the grid
+    // step work at all.
+    const refine = (c: CardDetection): CardDetection => {
+      let best = c
+      let bestScore = c.score
+      const W = c.w * sw
+      const H = c.h * sh
+      for (let pass = 0; pass < 2; pass++) {
+        const reach = pass === 0 ? 0.09 : 0.035
+        const steps = 4
+        for (let dx = -steps; dx <= steps; dx++) {
+          for (let dy = -steps; dy <= steps; dy++) {
+            for (const ds of [1 - reach, 1, 1 + reach]) {
+              const w2 = W * ds
+              const h2 = H * ds
+              const x2 = best.x * sw + (dx * reach * W) / steps
+              const y2 = best.y * sh + (dy * reach * H) / steps
+              if (x2 < -w2 * 0.15 || y2 < -h2 * 0.15 || x2 + w2 > sw * 1.15 || y2 + h2 > sh * 1.15) continue
+              const score = borderScore(x2, y2, w2, h2)
+              if (score > bestScore) {
+                bestScore = score
+                best = { x: x2 / sw, y: y2 / sh, w: w2 / sw, h: h2 / sh, score }
+              }
+            }
+          }
+        }
+      }
+      return best
+    }
+
+    // Suppress LARGEST-first, not best-first. A card's artwork panel is also a
+    // bordered rectangle, and at some scales a card-shaped one — scored on its
+    // own merits it often beats the card containing it, which is how the first
+    // pass returned art panels for eight of nine binder slots. Taking the
+    // outer rectangle first and then dropping anything it swallows encodes the
+    // one thing that is always true here: a card is never inside another card.
+    /**
+     * Greedy largest-first selection. Comparing a candidate against boxes that
+     * have already MOVED under refinement makes the two geometries
+     * inconsistent and over-suppresses (measured: six cards down to three), so
+     * this runs on one geometry at a time and refinement happens between the
+     * two passes.
+     */
+    const select = (list: CardDetection[]): CardDetection[] => {
+      const out: CardDetection[] = []
+      for (const c of list.slice().sort((a, b) => b.w * b.h - a.w * a.h)) {
+        const clash = out.some((k) => {
+          const ix = Math.max(0, Math.min(c.x + c.w, k.x + k.w) - Math.max(c.x, k.x))
+          const iy = Math.max(0, Math.min(c.y + c.h, k.y + k.h) - Math.max(c.y, k.y))
+          const inter = ix * iy
+          if (!inter) return false
+          // Contained in something already taken → a panel, not a card.
+          if (inter / (c.w * c.h) > CONTAINMENT_MAX) return true
+          return inter / (c.w * c.h + k.w * k.h - inter) > NMS_IOU
+        })
+        if (!clash) out.push(c)
+      }
+      return out
+    }
+    // Coarse pass picks WHICH rectangles; refinement snaps each onto the card
+    // it nearly found; the second pass removes the duplicates that snapping
+    // creates when two coarse boxes converge on one card.
+    const kept = select(select(candidates).map(refine))
+
+    // Cards photographed together are the same size — a binder page is a grid
+    // of one card shape. That is a strong constraint and nothing else in the
+    // sweep uses it: take the dominant area cluster and drop the outliers,
+    // which is what removes the leftover panels and half-cards at the frame
+    // edge. Only applied when a real cluster exists, so a single card in frame
+    // is never second-guessed.
+    if (kept.length >= 3) {
+      const areas = kept.map((k) => k.w * k.h).sort((a, b) => a - b)
+      const median = areas[areas.length >> 1]
+      const cluster = kept.filter((k) => {
+        const ratio = (k.w * k.h) / median
+        return ratio >= 1 / SIZE_CLUSTER_TOLERANCE && ratio <= SIZE_CLUSTER_TOLERANCE
+      })
+      if (cluster.length >= 3) {
+        const filled = completeGrid(cluster, borderScore, sw, sh)
+        return filled.sort((a, b) => b.score - a.score).slice(0, maxCards)
+      }
+    }
+    return kept.sort((a, b) => b.score - a.score).slice(0, maxCards)
+  } catch {
+    /* detection is an optimization; callers fall back to the whole frame */
+    return []
+  }
+}

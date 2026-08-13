@@ -294,6 +294,45 @@ result seems absurd, check this list before writing code.
     A model can be wrong in its details and still be right about the physics;
     what it cannot do is tell you which failure dominates in the field.
 
+## Multi-card detection (binder pages)
+
+34. **"Where is THE card" and "where are the cards" are different algorithms.**
+    `refineCardCrop`'s 1D projection profiles cannot represent two cards, and
+    on clutter they over-reach (lesson 32). `detectCardRegions` sweeps
+    card-aspect rectangles with integral images, and the scoring rule is the
+    whole idea: a candidate scores the **minimum** of its four borders, not the
+    sum. A card is a CLOSED rectangle, and requiring all four sides is what
+    separates one from the strong-but-open edge clusters a real scene is full
+    of. Summing lets three good sides carry a fourth that isn't there — the
+    same failure the projection profiles have.
+35. **A card is never inside another card, and that one fact does the most
+    work.** Scored on its own merits a card's ARTWORK PANEL is also a bordered,
+    card-shaped rectangle and often beats the card containing it: the first
+    pass returned art panels for eight of nine binder slots. Suppressing
+    largest-first and dropping anything an already-taken box swallows fixed it
+    outright. IoU alone cannot — a small box inside a big one has low IoU, so
+    plain NMS keeps both.
+36. **Order the phases so one geometry is compared at a time.** Refining boxes
+    as they were selected meant the clash test compared UNREFINED candidates
+    against REFINED keepers; the inconsistency over-suppressed and took a
+    binder page from six cards to three. Select coarse → refine all → select
+    again. The refinement itself is worth having: a short hill-climb on the
+    same integral images lifted scores from ~1.45 to 1.94 and is what makes the
+    grid step possible at all.
+37. **The grid is evidence, and it can outvote a box's own score.** A rectangle
+    straddling the gap between two rows still has four strong borders — the
+    sleeve edge above, the card sides running through both — so min-of-four
+    cannot tell a card from half of two stacked ones, and such a box scored
+    1.72, above several correct ones. Nothing local fixes that. What does is
+    consensus: the majority of boxes sit on the true lattice, so snapping
+    outliers to it corrects exactly the wrong ones and leaves the right ones
+    alone. Same shape as every other guard here — a prediction from the grid
+    still has to MEASURE something before it is accepted, or an empty pocket
+    becomes a card.
+38. **Look at the boxes, every time.** A detector graded by a count is the
+    easiest thing in this repo to fool: six boxes on a nine-card page looked
+    like progress and was eight art panels. `preview.mjs --detect` draws them.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review

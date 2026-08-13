@@ -19,6 +19,7 @@
     import { warmOcr, stopOcr } from '/src/lib/ocr'
     import { scanTraces, clearScanTraces } from '/src/lib/scandebug'
     import { compose, DEGRADATIONS } from '/tests/harness/augment.mjs'
+    import { detectCardRegions } from '/src/lib/vision'
 
     const images = new Map()
     async function loadImage(url) {
@@ -145,6 +146,38 @@
         if (cell.photo) return fitPhoto(img, cell.maxEdge ?? 1600).toDataURL('image/png')
         const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), game: cell.game, ...(cell.overrides ?? {}) }
         return compose(img, spec).toDataURL('image/png')
+      },
+
+      /**
+       * Run the multi-card sweep over an image and draw what it found, so a
+       * human can LOOK at the boxes. A detector graded only by a pass rate
+       * hides which cards it missed and which of its hits are the table.
+       */
+      async detect(cell) {
+        const img = await loadImage(cell.imageUrl)
+        const canvas = cell.photo
+          ? fitPhoto(img, cell.maxEdge ?? 1600)
+          : compose(img, { ...(DEGRADATIONS[cell.degradation] ?? {}), game: cell.game })
+        const started = performance.now()
+        const found = detectCardRegions(canvas, cell.maxCards ?? 12)
+        const ms = Math.round(performance.now() - started)
+        const ctx = canvas.getContext('2d')
+        ctx.lineWidth = Math.max(2, canvas.width / 300)
+        ctx.font = `${Math.max(14, Math.round(canvas.width / 45))}px sans-serif`
+        found.forEach((r, i) => {
+          const hue = (i * 47) % 360
+          ctx.strokeStyle = `hsl(${hue} 95% 50%)`
+          ctx.fillStyle = `hsl(${hue} 95% 50%)`
+          const x = r.x * canvas.width
+          const y = r.y * canvas.height
+          const w = r.w * canvas.width
+          const h = r.h * canvas.height
+          ctx.strokeRect(x, y, w, h)
+          ctx.fillRect(x, y - 20, 78, 20)
+          ctx.fillStyle = '#000'
+          ctx.fillText(`${i + 1}:${r.score.toFixed(2)}`, x + 3, y - 4)
+        })
+        return { image: canvas.toDataURL('image/jpeg', 0.85), found, ms }
       },
 
       async shutdown() {

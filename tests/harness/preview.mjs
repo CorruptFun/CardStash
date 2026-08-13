@@ -65,6 +65,27 @@ const page = await browser.newPage({ viewport: { width: 900, height: 1200 } })
 await page.goto(`http://127.0.0.1:${PORT}/tests/harness/page.html`)
 await page.waitForFunction(() => !!window.__harness)
 
+// --detect: run the multi-card sweep over the photos and draw the boxes.
+if (args.detect) {
+  const { readFileSync: rf } = await import('node:fs')
+  const manifest = JSON.parse(rf(join(HERE, 'photos', 'manifest.json'), 'utf8'))
+  const all = [...(manifest.photos ?? []), ...(manifest.binders ?? [])]
+  for (const photo of all.filter((p) => !keys || keys.includes(p.key))) {
+    const out = await page.evaluate((c) => window.__harness.detect(c), {
+      imageUrl: `/tests/harness/photos/${photo.file}`,
+      photo: true,
+      maxCards: Number(args.maxCards) || 12,
+    })
+    const file = join(OUT, `detect-${photo.key}.jpg`)
+    writeFileSync(file, Buffer.from(out.image.split(',')[1], 'base64'))
+    const truth = photo.cards ? photo.cards.length : 1
+    console.log(`${photo.key.padEnd(32)} found ${String(out.found.length).padStart(2)} / ${truth} truth  ${out.ms}ms  ${file}`)
+  }
+  await browser.close()
+  vite.kill('SIGTERM')
+  process.exit(0)
+}
+
 for (const fixture of fixtures) {
   for (const degradation of degradations) {
     const dataUrl = await page.evaluate(
