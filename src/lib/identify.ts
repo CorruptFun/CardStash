@@ -13,7 +13,7 @@ import {
   YGO_PASSCODE_REGION,
   type CornerRead,
 } from './corner'
-import { LIGHT_MATCH_GAMES } from './games'
+import { GAME_LABEL, LIGHT_MATCH_GAMES } from './games'
 import {
   latinWordCount,
   nameBands,
@@ -270,6 +270,14 @@ const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
  */
 const TURNED_MATCH_THRESHOLD = 0.95
 
+/**
+ * Confidence for an identification resting on the printed collector line
+ * rather than on the name: two agreeing numbers against an independent
+ * catalog row. Deliberately under the 0.75 cache-write gate, so these
+ * re-derive per attempt instead of being re-served as certainty.
+ */
+const CORNER_CONFIDENCE = 0.7
+
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
  * keep it tight enough that an unreadable card doesn't cook the phone. */
@@ -510,6 +518,7 @@ async function identifyViaOcr(
         number: refined?.read.number ?? null,
         total: refined?.read.total ?? null,
         edition: refined ? refined.card.setCode : null,
+        ...(refined?.viaCollector ? { viaCollector: true, overrode: best.card.name } : {}),
         foil,
       })
       // Sheen on a printing that never came foil: the copy in hand must be
@@ -523,10 +532,12 @@ async function identifyViaOcr(
         card,
         identification: {
           game: card.game,
-          name,
+          // On a collector-line override the name read is what got REJECTED
+          // — reporting it would misdescribe the evidence that answered.
+          name: refined?.viaCollector ? card.name : name,
           setCode: refined?.read.setCode,
           number: refined?.read.number,
-          confidence: best.score,
+          confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
         },
@@ -672,7 +683,7 @@ async function identifyViaOcr(
             name: card.name,
             setCode: read.setCode ?? card.setCode,
             number: read.number ?? card.number,
-            confidence: 0.7,
+            confidence: CORNER_CONFIDENCE,
             via: 'ocr',
             foil: detectFoil(canvas) ? true : undefined,
           },
@@ -704,16 +715,33 @@ async function identifyViaOcr(
     }
   }
 
+  // Auto mode never sweeps the catalog-backed games — each would pull a whole
+  // TCGplayer catalog per lookup — so a Riftbound (or One Piece, SWU, Digimon,
+  // Gundam) card cannot match here however good the photo is. That is a
+  // property of the filter, not of the frame, and the old copy blamed the
+  // light for it. Say which games need picking, and only while they are
+  // actually enabled and actually excluded.
+  const needsPicking = !gameHint
+    ? config.enabledGames.filter((game) => isCatalogGame(game) && !games.includes(game))
+    : []
+  // Kept short: this lands in the no-match chip, not a dialog. Naming the
+  // first few is what makes it recognisable ("that's my game") — the count
+  // carries the rest.
+  const named = needsPicking.slice(0, 2).map((game) => GAME_LABEL[game])
+  const rest = needsPicking.length - named.length
+  const pickHint = named.length
+    ? ` ${named.join(', ')}${rest ? ` and ${rest} more` : ''} only scan when you pick the game above.`
+    : ''
   return {
     ok: false,
     reason: 'ocr-miss',
     message: firstRead
-      ? `Read “${firstRead}” but couldn’t match it`
+      ? `Read “${firstRead}” but couldn’t match it.${pickHint}`
       : darkFrame
         ? 'Too dark to read — add light or turn on the flash'
         : gameHint
           ? 'Couldn’t read the card — more light helps'
-          : 'Couldn’t read the card name — more light helps. For non-English cards, pick the game so the collector line can identify them',
+          : `Couldn’t read the card name — more light helps.${pickHint || ' For non-English cards, pick the game so the collector line can identify them'}`,
     readName: firstRead,
   }
 }
@@ -851,10 +879,25 @@ async function refineFromCorner(
   cornerIsExact: boolean,
   mapRect: (rect: OcrRect) => OcrRect,
   pokemonKey?: string,
-): Promise<{ card: Card; read: CornerRead } | null> {
+): Promise<{ card: Card; read: CornerRead; viaCollector?: boolean } | null> {
   // This read is what tells "Tauros" from "Tauros ex" — it earns the work.
   const read = await readCornerInfo(card.game, canvas, cornerText, cornerIsExact, mapRect)
   if (!read.setCode && !read.number) return null
+  // The printed fraction is independent of whatever the name band read, and
+  // it is the SAME evidence the corner-only path identifies on. When it
+  // resolves a card of its own and that card is unrelated to the name match,
+  // the two disagree about what is physically in frame — and the line is the
+  // stronger claim: two printed numbers agreeing with a catalog row, against
+  // one fuzzy name read. Measured: an artist credit ("Kudos Productions")
+  // matched "Production Surge" at 0.688 on a card whose line read 120/166,
+  // which is exactly the correct card. Guarded like every other sole-evidence
+  // use — a printed slash actually read (`!fused`), both halves agreeing with
+  // a catalog row — so a mangled line resolves to nothing rather than to a
+  // neighbour.
+  if (isCatalogGame(card.game) && read.number && read.total && !read.fused) {
+    const byLine = await catalogByCollector(card.game, read.number, read.total).catch(() => null)
+    if (byLine && !relatedNames(byLine.name, card.name)) return { card: byLine, read, viaCollector: true }
+  }
   let exact: Card | null = null
   if (card.game === 'yugioh') {
     exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null

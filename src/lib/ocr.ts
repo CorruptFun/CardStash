@@ -126,6 +126,14 @@ export function warmOcr(): void {
 export interface OcrBand {
   y: number
   h: number
+  /**
+   * Target OCR width for this band, overriding OCR_WIDTH. `prepRegion`
+   * scales a region by its WIDTH, and every band spans the full card width —
+   * so narrowing a band vertically isolates its text but does not magnify a
+   * single glyph. A name printed on a thin plate (Riftbound's champion
+   * plate is ~7% of the card) needs the pixels as well as the isolation.
+   */
+  width?: number
 }
 
 /**
@@ -147,8 +155,24 @@ const MID_BAND: OcrBand = { y: 0.44, h: 0.3 }
 const BOTTOM_BAND: OcrBand = { y: 0.66, h: 0.32 }
 const DEFAULT_BANDS: readonly OcrBand[] = [...TOP_BANDS, MID_BAND]
 
+/**
+ * Riftbound's champion/unit plate: name over epithet on a narrow gradient
+ * plate, wedged between the type line above and the rules box below. The
+ * wide mid-card band reads both neighbours cleanly and mangles the plate
+ * itself (measured: "Masa, Crashing Thunder" → "paar G7 u! 2"), because the
+ * plate is thin, ornately set and low-contrast against its own filigree.
+ * Isolating and magnifying it is a different, better failure surface.
+ *
+ * It runs AFTER the wide band, not before: the wide band already reads the
+ * other layouts (Runes plate lower, ~0.70–0.78) and most champion plates
+ * fine, so leading with the tight one spent an OCR pass on every scan and
+ * cost two degraded cells to the attempt budget. Second, it is only paid by
+ * the cards the wide band actually loses.
+ */
+const RIFT_PLATE_BAND: OcrBand = { y: 0.55, h: 0.13, width: 1280 }
+
 const GAME_BANDS: Partial<Record<Game, readonly OcrBand[]>> = {
-  riftbound: [{ y: 0.46, h: 0.32 }, ...TOP_BANDS],
+  riftbound: [{ y: 0.46, h: 0.32 }, RIFT_PLATE_BAND, ...TOP_BANDS],
   lorcana: [MID_BAND, ...TOP_BANDS],
   starwars: [MID_BAND, ...TOP_BANDS],
   onepiece: [BOTTOM_BAND, ...TOP_BANDS],
@@ -521,12 +545,14 @@ export async function readCardNames(
   const worker = await getWorker()
   const variant = opts.variant ?? 'normal'
   // The binary retry runs at higher resolution: thresholding sharpens glyph
-  // edges, and the extra pixels are what let it crack stylized type.
-  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, variant === 'normal' ? OCR_WIDTH : 960, variant)
+  // edges, and the extra pixels are what let it crack stylized type. A band
+  // that asks for magnification of its own keeps it in either pass.
+  const target = Math.max(variant === 'normal' ? OCR_WIDTH : 960, band.width ?? 0)
+  const region = prepRegion(canvas, { x: 0, y: band.y, w: 1, h: band.h }, target, variant)
   const started = Date.now()
   const raw = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_MS)
   const candidates = candidatesFromText(raw)
-  traceEvent('ocr-band', { y: band.y, h: band.h, variant, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
+  traceEvent('ocr-band', { y: band.y, h: band.h, variant, width: target, ms: Date.now() - started, raw: raw.slice(0, 300), candidates })
   return candidates
 }
 

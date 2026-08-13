@@ -118,8 +118,19 @@ export async function startCamera(
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        // The collector line is the smallest type on a card and the whole
+        // language-independent identification path reads it, so captured
+        // detail is the scanner's real ceiling — at 1080p the card reaches
+        // OCR about 790px wide and those digits land near 15px tall, which
+        // is where the harness's soft-focus column stops resolving them.
+        // `ideal` degrades to the nearest mode the device actually has, so
+        // asking for more costs nothing on a camera that hasn't got it.
+        width: { ideal: 2560 },
+        height: { ideal: 1440 },
+        // Paired deliberately with the resolution: the sense loop analyses
+        // at most every 48ms, so frames past 30/s are heat and battery for
+        // no accuracy, and heat is what makes a phone camera drop modes.
+        frameRate: { ideal: 30 },
       },
     }))
   video.srcObject = stream
@@ -129,6 +140,7 @@ export async function startCamera(
   const track = stream.getVideoTracks()[0]
   const capabilities = (track.getCapabilities?.() ?? {}) as MediaTrackCapabilities & {
     torch?: boolean
+    focusMode?: string[]
     exposureMode?: string[]
     exposureCompensation?: { min?: number; max?: number; step?: number }
   }
@@ -139,6 +151,13 @@ export async function startCamera(
   // default on phones, but explicit beats assumed.
   if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes('continuous')) {
     track.applyConstraints({ advanced: [{ exposureMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {})
+  }
+  // Same for focus. A card held at arm's length sits near the close end of
+  // the focus range, which is exactly where a camera left on a single-shot
+  // or fixed mode parks out of focus — and the scanner's focus gate then
+  // patiently refuses to fire on frames the camera is never going to sharpen.
+  if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+    track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => {})
   }
   const exposure = capabilities.exposureCompensation
   const canBoost =
@@ -192,8 +211,19 @@ export interface FrameCapture {
   canvas: HTMLCanvasElement
 }
 
+/**
+ * How much of the captured card to keep. Every per-frame analysis downsamples
+ * to its own fixed size (192px detection, 9x8 hash, foil sample), and OCR
+ * bands prep to their own target width, so this cap governs one thing only:
+ * how much real detail survives for the magnified collector-line reads. At
+ * 1100 a card crop is ~790px wide and the printed fraction sits at the edge
+ * of legibility; 1600 carries it clear while still downscaling from a
+ * 1440p-class stream rather than upsampling.
+ */
+const CAPTURE_MAX_EDGE = 1600
+
 /** Crop a region of the live video into a canvas for OCR/analysis, capped at maxEdge. */
-export function captureFrame(video: HTMLVideoElement, region: Region | null, maxEdge = 1100): FrameCapture {
+export function captureFrame(video: HTMLVideoElement, region: Region | null, maxEdge = CAPTURE_MAX_EDGE): FrameCapture {
   const vw = video.videoWidth
   const vh = video.videoHeight
   const r = region ?? { x: 0, y: 0, w: 1, h: 1 }
@@ -221,12 +251,16 @@ export async function captureFrameStacked(
   region: Region | null,
   frames = 3,
   gapMs = 70,
-  maxEdge = 1100,
+  maxEdge = CAPTURE_MAX_EDGE,
 ): Promise<FrameCapture> {
   const first = captureFrame(video, region, maxEdge)
   if (frames <= 1) return first
   const { width, height } = first.canvas
-  const sum = new Float32Array(width * height * 4)
+  // Uint16 holds frames*255 (3 frames -> 765) with room to spare and costs
+  // half of what a Float32 accumulator does — worth having now that the
+  // capture keeps more pixels, since this buffer is the one allocation here
+  // that scales with them.
+  const sum = new Uint16Array(width * height * 4)
   const accumulate = (canvas: HTMLCanvasElement) => {
     const data = canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, width, height).data
     for (let i = 0; i < data.length; i++) sum[i] += data[i]
