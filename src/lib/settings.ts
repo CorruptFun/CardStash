@@ -10,6 +10,11 @@ export interface Settings {
   /** Scan view: every confident hit is added to the collection. */
   collectMode: boolean
   haptics: boolean
+  /**
+   * The camera has been approved here before — skip the start gate and open
+   * it silently on the next launch (cleared again if the browser revokes).
+   */
+  cameraApproved: boolean
   /** Powers the AI deck builder only — scanning is fully on-device. */
   geminiKey: string
   geminiModel: string
@@ -26,6 +31,7 @@ export const useSettings = create<Settings>()(
       gameFilter: 'auto',
       collectMode: false,
       haptics: true,
+      cameraApproved: false,
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
       pokemonKey: '',
