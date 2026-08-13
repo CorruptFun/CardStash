@@ -107,3 +107,38 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   NOT applied — viewers multiply by condition factor. Wants are card-level,
   keyed `${game}|${normalizeName(name)}` (any printing matches); matchmaking
   compares want keys, never card ids.
+
+## Planned paid tier — binder scanning and photo upload
+
+**Photo upload and binder/multi-card scanning are intended to become a paid
+subscription option.** Neither is gated today and neither should be gated
+while it is still being built — the note exists so the seam is designed in
+rather than retrofitted.
+
+Where the seam goes matters more than the note. Gate the ENTRY POINTS — the
+upload control, the multi-card review screen, the "scan a whole page" path —
+and **never `detectCardRegions` itself.** That primitive is shared: it also
+fixes ordinary single-card detection on cluttered backgrounds, which is the
+free path and the dominant real-world failure (see the scan-harness skill,
+lessons 32 and 34-38). Gating the detector would quietly degrade free
+scanning for everyone.
+
+Entitlement has no home in this architecture yet, and that is a real decision
+rather than an oversight. The deployed app is a static gh-pages bundle with no
+backend; `server/` is an opt-in self-hosted sync box the user runs themselves,
+so it can never be the authority on whether that same user has paid. Three
+honest options, in the order they preserve the local-first promise:
+
+- **Soft/client-side gating** — a flag in settings, trivially bypassable by
+  anyone who opens devtools. Fine if the subscription is treated as support
+  rather than enforcement; needs no backend and keeps the app offline-first.
+- **A third-party entitlement check** (Stripe/RevenueCat/similar) called on
+  launch, with the result cached and the app fully usable offline afterwards.
+  Introduces the first hard network dependency — decide deliberately what
+  happens when it is unreachable, and make that "keep working", not "lock out".
+- **A first-party backend**, which contradicts "the app must always work fully
+  without a server" as written above and would be a much larger change.
+
+Whichever is chosen: scanning must keep working offline, and analytics stay
+content-free (`analytics.ts`) — subscription state is not an excuse to start
+sending card data anywhere.
