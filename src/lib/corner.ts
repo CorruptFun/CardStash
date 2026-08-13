@@ -50,6 +50,12 @@ export interface CornerRead {
   number?: string
   /** Printed set size from "123/198" — disambiguates Pokémon sets. */
   total?: string
+  /**
+   * The fraction was RECONSTRUCTED from a bare digit run (OCR ate the
+   * slash). Fine for refining a name-corroborated match; too weak to be the
+   * sole evidence of an identification.
+   */
+  fused?: boolean
 }
 
 const LANGS = new Set(['EN', 'DE', 'FR', 'IT', 'ES', 'PT', 'JA', 'JP', 'KO', 'RU', 'ZH', 'CN', 'CS', 'CT'])
@@ -97,18 +103,20 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   }
 
   // Fraction-style games: Pokémon 123/198, Lorcana 23/204 · EN · 1, SWU 056/262.
-  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/) ?? fusedFraction(upper)
+  const slashed = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  const frac = slashed ?? fusedFraction(upper)
+  const fused = !slashed && frac ? true : undefined
   if (game === 'lorcana') {
     if (!frac) return {}
     const set = upper.match(/\b(?:EN|FR|DE|IT)\b[^A-Z0-9\n]{0,4}(Q?\d{1,2})\b/)
-    return { number: frac[1], total: frac[2], setCode: set?.[1] }
+    return { number: frac[1], total: frac[2], setCode: set?.[1], fused }
   }
   if (game === 'pokemon') {
     if (frac) {
       // SV era also prints the set code: "SVI EN 123/198".
       const line = upper.split('\n').find((l) => l.includes(`${frac[1]}/${frac[2]}`) || /\d\s*\/\s*\d/.test(l)) ?? ''
       const token = line.match(/\b([A-Z]{2,4}\d?)\b/g)?.find((t) => !LANGS.has(t) && !/^\d+$/.test(t))
-      return { number: frac[1], total: frac[2], setCode: token }
+      return { number: frac[1], total: frac[2], setCode: token, fused }
     }
     // Promos: SWSH250, SM210, XY67…
     const promo = upper.match(/\b(SWSH|SVP|SM|XY|BW)\s?0*(\d{1,3})\b/)
@@ -116,7 +124,7 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     return {}
   }
   // Riftbound / Star Wars: Unlimited and friends — the number alone helps.
-  return frac ? { number: frac[1], total: frac[2] } : {}
+  return frac ? { number: frac[1], total: frac[2], fused } : {}
 }
 
 /**

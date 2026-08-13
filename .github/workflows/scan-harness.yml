@@ -7,7 +7,7 @@ name: Scan harness fixtures
 # machine-generated data branch (like gh-pages): force-pushed, never merged,
 # never edited by hand. Consumers run:
 #   git fetch origin harness-fixtures
-#   git --work-tree=tests/harness/fixtures checkout origin/harness-fixtures -- .
+#   git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
 
 on:
   workflow_dispatch:

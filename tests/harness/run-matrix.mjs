@@ -16,9 +16,10 @@
  *     --min-rate=0.0              # exit 1 if a game's overall rate dips below
  *
  * Fixtures come from tests/harness/fixtures (see fetch-fixtures.mjs); in
- * sandboxes without open internet pull the machine-generated branch:
+ * sandboxes without open internet pull the machine-generated branch
+ * (git archive: unlike a --work-tree checkout it leaves the index alone):
  *   git fetch origin harness-fixtures
- *   git --work-tree=tests/harness/fixtures checkout origin/harness-fixtures -- .
+ *   git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
  */
 
 import { spawn } from 'node:child_process'
@@ -128,7 +129,8 @@ async function waitFor(url, ms = 30_000) {
 async function main() {
   if (!existsSync(join(FIXTURES, 'manifest.json'))) {
     console.error(`No fixtures at ${FIXTURES}.\nRun tests/harness/fetch-fixtures.mjs (open internet) or pull the harness-fixtures branch:`)
-    console.error('  git fetch origin harness-fixtures && git --work-tree=tests/harness/fixtures checkout origin/harness-fixtures -- .')
+    console.error('  git fetch origin harness-fixtures')
+    console.error('  mkdir -p tests/harness/fixtures && git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures')
     process.exit(2)
   }
   const manifest = JSON.parse(readFileSync(join(FIXTURES, 'manifest.json'), 'utf8'))
