@@ -5,7 +5,7 @@ import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatal
 import { sealedVariants } from './sealed'
 import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
 import type { Card, Game } from './types'
-import { normalizeName, similarity, sleep } from './util'
+import { nameScore, normalizeName, sleep } from './util'
 
 export interface ApiKeys {
   pokemonKey?: string
@@ -202,7 +202,9 @@ export async function bestMatchAcrossGames(
     for (const [at, game] of games.entries()) {
       withBudget(matchGame(game, name, null, null, keys))
         .then((card) => {
-          results[at] = card ? { card, score: similarity(name, card.name) } : null
+          // nameScore, not raw similarity: a read of just "Jinx" must still
+          // clear the match threshold against "Jinx, Loose Cannon".
+          results[at] = card ? { card, score: nameScore(name, card.name) } : null
         })
         .catch(() => {
           results[at] = null
