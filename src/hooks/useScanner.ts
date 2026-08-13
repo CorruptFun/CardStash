@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { track } from '../lib/analytics'
+import { hashToken, track } from '../lib/analytics'
 import {
   captureFrame,
   captureFrameStacked,
@@ -11,6 +11,7 @@ import {
 import { isAbort } from '../lib/fetchJson'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { stopOcr, warmOcr } from '../lib/ocr'
+import { settings } from '../lib/settings'
 import { analyzeFrame, frameHash } from '../lib/vision'
 
 /* Scanner tuning */
@@ -446,16 +447,42 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       const startedAt = performance.now()
       await job.run((signal) => identifyFrame(capture, hash, { ignoreMisses: manual, mode, signal }), {
         outcome: (outcome) => {
+          const ms = Math.round(performance.now() - startedAt)
+          const filter = settings().gameFilter
           track('scan_attempt', {
             engine: outcome.ok ? outcome.identification.via : outcome.reason === 'cached-miss' ? 'cache' : 'ocr',
             outcome: outcome.ok ? 'hit' : 'miss',
             ...(outcome.ok ? {} : { reason: outcome.reason }),
             ...(outcome.ok && outcome.identification.foil != null ? { foil: outcome.identification.foil } : {}),
             ...(outcome.ok && outcome.identification.number != null ? { edition: true } : {}),
+            game: outcome.ok ? outcome.identification.game : (outcome.readGame ?? 'unknown'),
+            filter,
             mode,
-            ms: Math.round(performance.now() - startedAt),
+            ms,
             manual,
           })
+          // Which cards fail, and where. A cached miss is the same frame the
+          // pipeline already gave up on once — counting it again would only
+          // weight whichever card sat in front of the lens longest.
+          if (!outcome.ok && outcome.reason !== 'cached-miss') {
+            const card = outcome.readName ? hashToken(outcome.readName) : ''
+            track('scan_failure', {
+              // Read nothing, read something we couldn't match, or never got
+              // an answer out of the network.
+              stage: outcome.reason === 'api' ? 'api' : outcome.readName ? 'no-match' : 'no-text',
+              reason: outcome.reason,
+              game: outcome.readGame ?? 'unknown',
+              filter,
+              mode,
+              read: !!outcome.readName,
+              ...(card ? { card } : {}),
+              // Separates "our pipeline can't do this card" from "this was a
+              // photograph of a dark blur".
+              luma: Math.round(lightRef.current.luma),
+              ms,
+              manual,
+            })
+          }
           if (outcome.ok) {
             failureRef.current = freshFailureState()
             patch({ status: 'found', hit: outcome, miss: null, detail: null })

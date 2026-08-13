@@ -7,10 +7,25 @@ import { APP_VERSION } from './version'
  * Local-first diagnostics: counts, timings and hashed errors — never card
  * names, never queries, never keys. Upload happens only when the user turns
  * on sharing AND provides an ingest token.
+ *
+ * Three questions this log exists to answer, and how each is answered without
+ * ever carrying content:
+ *   who is using the app — a per-install id, session opens and lengths, and
+ *     the device shape (`app_open`, `session_end`, `screen_view`);
+ *   which cards fail to scan — `scan_failure` carries the stage the pipeline
+ *     died at plus `card`, a hash of the text that was read. The hash groups
+ *     repeat failures of one card across devices while the payload stays
+ *     free of card names; a maintainer resolves a bucket by hashing catalog
+ *     names, which needs the catalog rather than the log (see hashToken);
+ *   what people do with it — the per-feature counters below.
  */
 
 export const EVENT_TYPES = [
+  'app_open',
+  'session_end',
+  'screen_view',
   'scan_attempt',
+  'scan_failure',
   'card_added',
   'variant_selected',
   'import_completed',
@@ -96,7 +111,12 @@ const FORBIDDEN_KEYS = new Set([
 const SAFE_STRING = /^[A-Za-z0-9_.:-]{1,32}$/
 const SAFE_KEY = /^[a-z][A-Za-z0-9]{0,20}$/
 
-function redact(data: Record<string, unknown>): Record<string, string | number | boolean> {
+/**
+ * The content-free contract, in one function: an unknown key or a value that
+ * looks like prose never reaches the log. Exported so a test can hold it to
+ * that, since every `track` call in the app depends on it.
+ */
+export function redact(data: Record<string, unknown>): Record<string, string | number | boolean> {
   const clean: Record<string, string | number | boolean> = {}
   for (const [key, value] of Object.entries(data)) {
     if (!SAFE_KEY.test(key) || FORBIDDEN_KEYS.has(key.toLowerCase())) continue
@@ -121,6 +141,35 @@ function fnv1a(text: string): string {
   return hash.toString(16).padStart(8, '0')
 }
 
+/* Sessions: one visit's worth of events, so opens, screens and scans can be
+ * counted per person rather than per event. */
+
+const DAY_MS = 86_400_000
+/** Foreground gap that ends a visit — glancing at another app doesn't. */
+const SESSION_GAP_MS = 30 * 60_000
+
+let sessionId = ''
+let sessionStartedAt = 0
+let sessionScreens = 0
+let sessionScans = 0
+let sessionOpen = false
+let hiddenAt = 0
+
+/**
+ * Grouping key for text the scanner read — a hash, never the text. Repeat
+ * failures of one card collapse into a single bucket, so "this card fails
+ * everywhere" is answerable, while the log itself stays content-free.
+ * Case, spacing, punctuation and accents are normalised away first so the
+ * same card hashes the same however cleanly it was read.
+ */
+export function hashToken(text: string): string {
+  const normal = text
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+  return normal ? fnv1a(normal) : ''
+}
+
 let queue: Promise<void> = Promise.resolve()
 
 function enqueue(work: () => Promise<void>): void {
@@ -129,6 +178,11 @@ function enqueue(work: () => Promise<void>): void {
 
 export function track(type: EventType, data: Record<string, unknown> = {}): void {
   const event: AnalyticsEvent = { t: type, at: Date.now(), data: redact(data) }
+  // Stamped after redaction: the session id is ours, not caller data, and
+  // it's what turns loose events into visits.
+  if (sessionId) event.data.sid = sessionId
+  if (type === 'screen_view') sessionScreens++
+  else if (type === 'scan_attempt') sessionScans++
   enqueue(async () => {
     await adb.events.add(event)
     if (++sincePrune >= PRUNE_EVERY) {
@@ -168,6 +222,206 @@ async function deviceId(): Promise<string> {
     if (devicePromise === pending) devicePromise = null
   })
   return pending
+}
+
+export interface Identity {
+  /** Random per-install id. Not a login, not derived from the device. */
+  device: string
+  firstSeen: number
+  sessions: number
+  activeDays: number
+}
+
+/** Reads the install record and counts this open against it. */
+async function bumpIdentity(): Promise<Identity> {
+  const device = await deviceId()
+  const now = Date.now()
+  const today = Math.floor(now / DAY_MS)
+  const firstSeen = (await metaNumber('firstSeen', 0)) || now
+  const sessions = (await metaNumber('sessions', 0)) + 1
+  const lastDay = await metaNumber('lastDay', 0)
+  const activeDays = (await metaNumber('activeDays', 0)) + (lastDay === today ? 0 : 1)
+  await adb.meta.bulkPut([
+    { key: 'firstSeen', value: firstSeen },
+    { key: 'sessions', value: sessions },
+    { key: 'lastDay', value: today },
+    { key: 'activeDays', value: activeDays },
+  ])
+  return { device, firstSeen, sessions, activeDays }
+}
+
+const SIZE_BUCKETS: [number, string][] = [
+  [10, '1-9'],
+  [50, '10-49'],
+  [250, '50-249'],
+  [1000, '250-999'],
+  [5000, '1k-5k'],
+]
+
+/** Collection sizes travel as a bucket, never an exact count — the shape of
+ * the user base without a figure precise enough to single anybody out. */
+export function sizeBucket(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0'
+  for (const [limit, label] of SIZE_BUCKETS) if (n < limit) return label
+  return '5k-up'
+}
+
+const PLATFORMS: [RegExp, string][] = [
+  [/iPhone|iPad|iPod/i, 'ios'],
+  [/Android/i, 'android'],
+  [/Macintosh|Mac OS/i, 'mac'],
+  [/Windows/i, 'windows'],
+  [/Linux|CrOS/i, 'linux'],
+]
+/** Order matters: Edge, Opera and Samsung all carry "Chrome" in their user
+ * agent, and every browser on this list carries "Safari" — the impostors
+ * have to be ruled out before the names they borrow. */
+const BROWSERS: [RegExp, string][] = [
+  [/Edg\//, 'edge'],
+  [/OPR\/|Opera/, 'opera'],
+  [/SamsungBrowser/, 'samsung'],
+  [/Firefox\/|FxiOS/, 'firefox'],
+  [/CriOS|Chrome\//, 'chrome'],
+  [/Safari\//, 'safari'],
+]
+
+function firstMatch(table: [RegExp, string][], text: string): string {
+  for (const [pattern, label] of table) if (pattern.test(text)) return label
+  return 'other'
+}
+
+interface NavLike {
+  userAgent?: string
+  language?: string
+  onLine?: boolean
+  /** iOS Safari's home-screen flag; absent everywhere else. */
+  standalone?: boolean
+}
+
+interface WinLike {
+  innerWidth?: number
+  devicePixelRatio?: number
+  matchMedia?: (query: string) => { matches: boolean }
+}
+
+export interface DeviceShape {
+  platform: string
+  browser: string
+  /** Launched from a home screen — i.e. installed as an app. */
+  standalone: boolean
+  lang: string
+  tzo: number
+  dpr: number
+  vw: number
+  online: boolean
+}
+
+/** Device shape from an injected navigator/window, so the parsing is pure and
+ * node-testable and can never reach for a global that isn't there. */
+export function describeDevice(nav: NavLike = {}, win: WinLike = {}): DeviceShape {
+  const ua = nav.userAgent ?? ''
+  return {
+    platform: firstMatch(PLATFORMS, ua),
+    browser: firstMatch(BROWSERS, ua),
+    standalone: nav.standalone === true || win.matchMedia?.('(display-mode: standalone)').matches === true,
+    // A language tag is a locale, not a person: keep the region ("pt-BR"
+    // separates a real audience from "pt-PT") and drop anything else.
+    lang: (nav.language ?? '').slice(0, 12).replace(/[^A-Za-z-]/g, '') || 'unknown',
+    tzo: new Date().getTimezoneOffset(),
+    dpr: Math.round((win.devicePixelRatio ?? 1) * 10) / 10,
+    vw: Math.round(win.innerWidth ?? 0),
+    online: nav.onLine !== false,
+  }
+}
+
+/** Coarse shape of what the user keeps — resolved by the caller, which is
+ * where the database lives. */
+export interface Cohort {
+  cards?: number
+  decks?: number
+  friends?: number
+  games?: number
+}
+
+function cohortFields(cohort: Cohort): Record<string, string | number> {
+  const fields: Record<string, string | number> = {}
+  if (cohort.cards != null) fields.owned = sizeBucket(cohort.cards)
+  if (cohort.decks != null) fields.decks = cohort.decks
+  if (cohort.friends != null) fields.friends = cohort.friends
+  if (cohort.games != null) fields.games = cohort.games
+  return fields
+}
+
+async function openSession(kind: 'boot' | 'resume', loadCohort?: () => Promise<Cohort>): Promise<void> {
+  // Set before the awaits: anything tracked while the cohort loads belongs
+  // to this visit already.
+  sessionId = uid().slice(0, 12)
+  sessionStartedAt = Date.now()
+  sessionScreens = 0
+  sessionScans = 0
+  sessionOpen = true
+  hiddenAt = 0
+  const [identity, cohort] = await Promise.all([
+    bumpIdentity().catch(() => null),
+    (loadCohort?.() ?? Promise.resolve({})).catch(() => ({}) as Cohort),
+  ])
+  track('app_open', {
+    ...describeDevice(typeof navigator === 'undefined' ? {} : navigator, typeof window === 'undefined' ? {} : window),
+    ...cohortFields(cohort),
+    version: APP_VERSION,
+    kind,
+    sessions: identity?.sessions ?? 1,
+    activeDays: identity?.activeDays ?? 1,
+    ageDays: identity ? Math.floor((Date.now() - identity.firstSeen) / DAY_MS) : 0,
+    returning: (identity?.sessions ?? 1) > 1,
+    sw: typeof navigator !== 'undefined' && !!navigator.serviceWorker?.controller,
+  })
+}
+
+function closeSession(): void {
+  if (!sessionOpen) return
+  sessionOpen = false
+  hiddenAt = Date.now()
+  track('session_end', {
+    secs: Math.round((hiddenAt - sessionStartedAt) / 1000),
+    screens: sessionScreens,
+    scans: sessionScans,
+  })
+}
+
+/** Screen names come from the router's fixed set — no free text reaches here. */
+export function trackScreen(screen: string): void {
+  track('screen_view', { screen, first: sessionScreens === 0 })
+}
+
+let sessionInstalled = false
+
+/**
+ * Opens a session now and keeps it in step with the foreground. A session_end
+ * emitted as the app hides may not survive the tab closing — it is written
+ * locally either way and ships with the next batch, so counts settle rather
+ * than vanish.
+ */
+export function installSessionTracking(loadCohort?: () => Promise<Cohort>): void {
+  if (sessionInstalled || typeof window === 'undefined') return
+  sessionInstalled = true
+  openSession('boot', loadCohort)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      closeSession()
+      return
+    }
+    // Never hidden yet — nothing to resume.
+    if (!hiddenAt) return
+    if (Date.now() - hiddenAt > SESSION_GAP_MS) {
+      openSession('resume', loadCohort)
+      return
+    }
+    // Same visit continuing: only foreground time is counted towards it.
+    sessionStartedAt = Date.now()
+    sessionOpen = true
+  })
+  window.addEventListener('pagehide', closeSession)
 }
 
 function percentile(values: number[], p: number): number {
@@ -224,15 +478,87 @@ function countByType(events: AnalyticsEvent[]): Record<EventType, number> {
   return counts
 }
 
+export interface FailureStats {
+  total: number
+  /** Where the pipeline gave up: no-text, no-match, api, repeat. */
+  byStage: Record<string, number>
+  byGame: Record<string, number>
+  /** Repeat offenders, hashed, most-failed first. */
+  cards: { card: string; game: string; n: number }[]
+}
+
+export function failureStats(events: AnalyticsEvent[], topN = 8): FailureStats {
+  const byStage: Record<string, number> = {}
+  const byGame: Record<string, number> = {}
+  const perCard = new Map<string, { card: string; game: string; n: number }>()
+  let total = 0
+  for (const event of events) {
+    if (event.t !== 'scan_failure') continue
+    total++
+    const stage = typeof event.data.stage === 'string' ? event.data.stage : 'unknown'
+    const game = typeof event.data.game === 'string' ? event.data.game : 'unknown'
+    byStage[stage] = (byStage[stage] ?? 0) + 1
+    byGame[game] = (byGame[game] ?? 0) + 1
+    // Only failures that read *something* can name a repeat offender; a frame
+    // the scanner never read has nothing to group by.
+    const card = typeof event.data.card === 'string' ? event.data.card : ''
+    if (!card) continue
+    const row = perCard.get(card) ?? { card, game, n: 0 }
+    row.n++
+    perCard.set(card, row)
+  }
+  const cards = [...perCard.values()].sort((a, b) => b.n - a.n).slice(0, topN)
+  return { total, byStage, byGame, cards }
+}
+
+export interface UsageStats {
+  sessions: number
+  screens: Record<string, number>
+  /** Median foreground seconds per visit. */
+  medianSecs: number
+  platforms: Record<string, number>
+  /** Opens from an installed (home-screen) copy. */
+  installs: number
+}
+
+export function usageStats(events: AnalyticsEvent[]): UsageStats {
+  const screens: Record<string, number> = {}
+  const platforms: Record<string, number> = {}
+  const lengths: number[] = []
+  let sessions = 0
+  let installs = 0
+  for (const event of events) {
+    if (event.t === 'app_open') {
+      sessions++
+      const platform = typeof event.data.platform === 'string' ? event.data.platform : 'unknown'
+      platforms[platform] = (platforms[platform] ?? 0) + 1
+      if (event.data.standalone === true) installs++
+    } else if (event.t === 'screen_view') {
+      const screen = typeof event.data.screen === 'string' ? event.data.screen : 'unknown'
+      screens[screen] = (screens[screen] ?? 0) + 1
+    } else if (event.t === 'session_end' && typeof event.data.secs === 'number') {
+      lengths.push(event.data.secs)
+    }
+  }
+  return { sessions, screens, medianSecs: percentile(lengths, 50), platforms, installs }
+}
+
 export interface Insights {
   days: number
   since: number
   scans: ScanStats
+  failures: FailureStats
+  usage: UsageStats
   counts: Record<EventType, number>
   total: number
   oldestAt: number | null
   lastFlushAt: number | null
   queued: number
+  /** Install record — lifetime, not windowed by `days`. */
+  device: string | null
+  firstSeen: number | null
+  allSessions: number
+  activeDays: number
 }
 
 function emptyInsights(days: number, since: number): Insights {
@@ -240,11 +566,17 @@ function emptyInsights(days: number, since: number): Insights {
     days,
     since,
     scans: { attempts: 0, hits: 0, successRate: 0, byEngine: {}, missReasons: {} },
+    failures: { total: 0, byStage: {}, byGame: {}, cards: [] },
+    usage: { sessions: 0, screens: {}, medianSecs: 0, platforms: {}, installs: 0 },
     counts: countByType([]),
     total: 0,
     oldestAt: null,
     lastFlushAt: null,
     queued: 0,
+    device: null,
+    firstSeen: null,
+    allSessions: 0,
+    activeDays: 0,
   }
 }
 
@@ -262,15 +594,24 @@ export async function insights(days: number): Promise<Insights> {
     const flushedThrough = await metaNumber('flushedThrough', 0)
     const queued = await adb.events.where('id').above(flushedThrough).count()
     const lastFlushAt = await metaNumber('lastFlushAt', 0)
+    // Read the install id rather than deviceId(): opening Settings shouldn't
+    // mint an identity for someone who has never sent anything.
+    const device = await adb.meta.get('device')
     return {
       days,
       since,
       scans: scanStats(events),
+      failures: failureStats(events),
+      usage: usageStats(events),
       counts: countByType(events),
       total,
       oldestAt: oldest?.at ?? null,
       lastFlushAt: lastFlushAt || null,
       queued,
+      device: typeof device?.value === 'string' ? device.value : null,
+      firstSeen: (await metaNumber('firstSeen', 0)) || null,
+      allSessions: await metaNumber('sessions', 0),
+      activeDays: await metaNumber('activeDays', 0),
     }
   } catch {
     return emptyInsights(days, since)
@@ -280,7 +621,10 @@ export async function insights(days: number): Promise<Insights> {
 export async function clearAnalytics(): Promise<void> {
   try {
     await adb.events.clear()
-    await adb.meta.bulkDelete(['flushedThrough', 'lastFlushAt'])
+    // The install record is part of the log: "clear" has to mean the counts
+    // and the identity behind them, or the next upload re-links the two.
+    await adb.meta.bulkDelete(['flushedThrough', 'lastFlushAt', 'device', 'firstSeen', 'sessions', 'lastDay', 'activeDays'])
+    devicePromise = null
     sincePrune = 0
   } catch {
     /* diagnostics only */
@@ -295,11 +639,18 @@ const KEEPALIVE_BYTES = 60_000
 const FLUSH_MIN_GAP_MS = 30_000
 let flushing = false
 
-function payload(events: AnalyticsEvent[], device: string) {
+interface InstallRecord {
+  firstSeen: number
+  sessions: number
+  activeDays: number
+}
+
+function payload(events: AnalyticsEvent[], device: string, install: InstallRecord) {
   return {
     app: 'cardstock',
     v: APP_VERSION,
     device,
+    ...install,
     sentAt: new Date().toISOString(),
     events: events.map((event) => ({ t: event.t, at: event.at, ...event.data })),
   }
@@ -325,10 +676,15 @@ export async function flushTelemetry({ force = false, keepalive = false } = {}):
     let events = await adb.events.where('id').above(flushedThrough).limit(FLUSH_BATCH).toArray()
     if (!events.length) return
     const device = await deviceId()
-    let body = JSON.stringify(payload(events, device))
+    const install: InstallRecord = {
+      firstSeen: await metaNumber('firstSeen', 0),
+      sessions: await metaNumber('sessions', 0),
+      activeDays: await metaNumber('activeDays', 0),
+    }
+    let body = JSON.stringify(payload(events, device, install))
     while (keepalive && events.length > 1 && byteLength(body) > KEEPALIVE_BYTES) {
       events = events.slice(0, Math.floor(events.length / 2))
-      body = JSON.stringify(payload(events, device))
+      body = JSON.stringify(payload(events, device, install))
     }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), FLUSH_TIMEOUT_MS)

@@ -21,6 +21,25 @@ const ENGINE_LABEL: Record<string, string> = {
   unknown: 'Other',
 }
 
+const STAGE_LABEL: Record<string, string> = {
+  'no-text': 'Read nothing',
+  'no-match': 'Read, no match',
+  api: 'Network',
+  unknown: 'Other',
+}
+
+const SCREEN_LABEL: Record<string, string> = {
+  scan: 'Scan',
+  search: 'Search',
+  collection: 'Collection',
+  decks: 'Decks',
+  builder: 'AI builder',
+  friends: 'Friends',
+  trades: 'Trades',
+  ingest: 'Shared link',
+  settings: 'Settings',
+}
+
 const MISS_LABEL: Record<string, string> = {
   api: 'API error',
   'no-card': 'No card',
@@ -258,8 +277,11 @@ export function SettingsView() {
         <h3>Diagnostics</h3>
         <p className="setsec__note">
           A private log of counts and timings kept on this device — hit rate, how long an identification took, which
-          step missed, crashes as a hash rather than a message. Never card names, never search text, never your keys.
-          Sharing is off by default; switch it on and the same anonymous log is posted to our own server.
+          step missed, which screens you opened, crashes as a hash rather than a message. Cards that fail to scan are
+          logged as a hash too, so a card that defeats the scanner can be counted without recording what it was. It
+          also holds a random id for this install and how big your collection is as a range, so repeat visits count
+          once. Never card names, never search text, never your keys. Sharing is off by default; switch it on and the
+          same anonymous log is posted to our own server.
         </p>
         <div className="diag__tiles">
           <div className="diag__tile">
@@ -273,6 +295,13 @@ export function SettingsView() {
             <span className="diag__legend">Events logged</span>
             <span className="num diag__fig">{(stats?.total ?? 0).toLocaleString()}</span>
             <span className="diag__foot">{stats?.oldestAt ? `Oldest ${relativeAge(stats.oldestAt)}` : 'Empty'}</span>
+          </div>
+          <div className="diag__tile">
+            <span className="diag__legend">Visits</span>
+            <span className="num diag__fig">{(stats?.usage.sessions ?? 0).toLocaleString()}</span>
+            <span className="diag__foot">
+              {stats?.firstSeen ? `Since ${relativeAge(stats.firstSeen)} · ${stats.activeDays}d active` : 'This is the first'}
+            </span>
           </div>
           {config.diagShare && (
             <div className="diag__tile">
@@ -318,6 +347,61 @@ export function SettingsView() {
                   <span className="num num--quiet">{Math.round((count / Math.max(1, stats.scans.attempts)) * 100)}%</span>
                 </div>
               ))}
+          </div>
+        )}
+        {stats && stats.failures.total > 0 && (
+          <div className="diag__table diag__table--stages">
+            <div className="diag__row diag__row--head">
+              <span>Where scans fail</span>
+              <span className="num">N</span>
+              <span className="num">Share</span>
+            </div>
+            {Object.entries(stats.failures.byStage)
+              .sort((a, b) => b[1] - a[1])
+              .map(([stage, count]) => (
+                <div key={stage} className="diag__row">
+                  <span className="diag__cell">{STAGE_LABEL[stage] ?? stage}</span>
+                  <span className="num">{count}</span>
+                  <span className="num num--quiet">{Math.round((count / stats.failures.total) * 100)}%</span>
+                </div>
+              ))}
+          </div>
+        )}
+        {stats && stats.failures.cards.length > 0 && (
+          <div className="diag__table diag__table--cards">
+            <div className="diag__row diag__row--head">
+              <span>Cards that keep failing</span>
+              <span className="num">Game</span>
+              <span className="num">N</span>
+            </div>
+            {stats.failures.cards.map((row) => (
+              <div key={row.card} className="diag__row">
+                <span className="diag__cell num num--quiet">{row.card}</span>
+                <span className="num">{(GAME_SHORT as Record<string, string>)[row.game] ?? row.game}</span>
+                <span className="num">{row.n}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {stats && Object.keys(stats.usage.screens).length > 0 && (
+          <div className="diag__table diag__table--screens">
+            <div className="diag__row diag__row--head">
+              <span>Screens opened</span>
+              <span className="num">N</span>
+              <span className="num">Share</span>
+            </div>
+            {Object.entries(stats.usage.screens)
+              .sort((a, b) => b[1] - a[1])
+              .map(([screen, count]) => {
+                const seen = Object.values(stats.usage.screens).reduce((sum, n) => sum + n, 0)
+                return (
+                  <div key={screen} className="diag__row">
+                    <span className="diag__cell">{SCREEN_LABEL[screen] ?? screen}</span>
+                    <span className="num">{count}</span>
+                    <span className="num num--quiet">{Math.round((count / Math.max(1, seen)) * 100)}%</span>
+                  </div>
+                )
+              })}
           </div>
         )}
         {stats && stats.total === 0 && (

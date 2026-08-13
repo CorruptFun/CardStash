@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Icon, type IconName } from './components/Icon'
 import { Toasts } from './components/Toasts'
+import { trackScreen } from './lib/analytics'
 import { warmOwnedCatalogs } from './lib/tcgcsv'
 import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
@@ -74,6 +75,10 @@ export function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
+  // Screen names come from the route union — a fixed set, never free text.
+  useEffect(() => {
+    trackScreen(route.name)
+  }, [route.name])
   const navigate = useCallback((hash: string) => {
     location.hash = hash
   }, [])

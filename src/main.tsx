@@ -1,9 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
-import { installErrorHooks, installTelemetryFlusher } from './lib/analytics'
-import { requestPersistence, pruneHistory } from './lib/db'
+import { installErrorHooks, installSessionTracking, installTelemetryFlusher } from './lib/analytics'
+import { db, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
+import { settings } from './lib/settings'
 import { startSyncLoop } from './lib/sync'
 import { APP_VERSION } from './lib/version'
 import { uiStore } from './store/ui'
@@ -72,6 +73,12 @@ async function boot(): Promise<void> {
   )
   pruneHistory().catch(() => {})
   installErrorHooks()
+  // Before the flusher, so a session_end is written ahead of the flush that
+  // the same visibility change triggers.
+  installSessionTracking(async () => {
+    const [cards, decks, friends] = await Promise.all([db.collection.count(), db.decks.count(), db.friends.count()])
+    return { cards, decks, friends, games: settings().enabledGames.length }
+  })
   installTelemetryFlusher()
   startSyncLoop()
   if ('serviceWorker' in navigator && params.get('nosw') !== '1') {
