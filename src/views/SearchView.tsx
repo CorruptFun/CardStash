@@ -5,7 +5,7 @@ import { track } from '../lib/analytics'
 import { searchGame } from '../lib/cardsearch'
 import { recordPricePoint } from '../lib/db'
 import { isAbort } from '../lib/fetchJson'
-import { GAME_LABEL, GAMES } from '../lib/games'
+import { GAME_LABEL } from '../lib/games'
 import { warmCatalog } from '../lib/tcgcsv'
 import { useSettings } from '../lib/settings'
 import type { Card, Game } from '../lib/types'
@@ -14,8 +14,12 @@ import { uiStore, useUi } from '../store/ui'
 
 export function SearchView() {
   const config = useSettings()
+  const games = config.enabledGames
   const openSheet = useUi((s) => s.openSheet)
-  const [game, setGame] = useState<Game>(config.gameFilter === 'auto' ? 'mtg' : config.gameFilter)
+  const [game, setGame] = useState<Game>(() => {
+    const preferred = config.gameFilter === 'auto' ? 'mtg' : config.gameFilter
+    return games.includes(preferred) ? preferred : games[0]
+  })
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Card[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -75,8 +79,10 @@ export function SearchView() {
     const prefill = uiStore.getState().searchPrefill
     if (!prefill) return
     uiStore.getState().setSearchPrefill(null)
-    const searchIn = prefill.game ?? game
-    if (prefill.game) setGame(prefill.game)
+    // A prefill naming a turned-off game keeps its query but not the game.
+    const prefillGame = prefill.game && games.includes(prefill.game) ? prefill.game : undefined
+    const searchIn = prefillGame ?? game
+    if (prefillGame) setGame(prefillGame)
     if (prefill.query) {
       setQuery(prefill.query)
       runSearch(prefill.query, searchIn)
@@ -100,7 +106,7 @@ export function SearchView() {
         <Seg
           ariaLabel="Game"
           scroll
-          options={GAMES.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
+          options={games.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
           value={game}
           onChange={setGame}
         />

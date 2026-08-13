@@ -1,6 +1,6 @@
-import { GAMES } from './games'
 import { traceEvent } from './scandebug'
 import { sealedEvidence, sealedSetScore } from './sealedmatch'
+import { settings } from './settings'
 import { groupContents, sealedKind, tcgplayerGroups, type TcgGroup } from './tcgcsv'
 import type { Card, Game } from './types'
 import { normalizeName, similarity, tcgplayerSearchLink } from './util'
@@ -49,7 +49,7 @@ const SET_MATCH_THRESHOLD = 0.72
  * so the first sealed frame spends its time on OCR instead of the network.
  */
 export function warmSealedIndex(games?: Game[]): void {
-  for (const game of games?.length ? games : GAMES) tcgplayerGroups(game).catch(() => {})
+  for (const game of games?.length ? games : settings().enabledGames) tcgplayerGroups(game).catch(() => {})
 }
 
 /**
@@ -57,7 +57,7 @@ export function warmSealedIndex(games?: Game[]): void {
  * Games with no group data (offline, new category) simply don't compete.
  */
 export async function identifySealedText(lines: string[], games?: Game[], signal?: AbortSignal): Promise<SealedMatch | null> {
-  const pool = games?.length ? games : GAMES
+  const pool = games?.length ? games : settings().enabledGames
   const evidence = sealedEvidence(lines)
   const text = evidence.text
   if (text.length < 4) return null

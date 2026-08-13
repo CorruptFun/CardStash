@@ -33,8 +33,14 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
     if (handed?.length) uiStore.getState().setBuilderSeeds(null)
     return handed ?? []
   })
-  const [game, setGame] = useState<Game>(seeds[0]?.game ?? 'mtg')
-  const [format, setFormat] = useState(seeds[0]?.game && seeds[0].game !== 'mtg' ? '' : 'Standard')
+  // Seeds pick the starting game; otherwise MTG when enabled, else the first
+  // game the user keeps on.
+  const initialGame = seeds[0]?.game ?? (config.enabledGames.includes('mtg') ? 'mtg' : config.enabledGames[0])
+  const [game, setGame] = useState<Game>(initialGame)
+  // Owned cards stay visible after their game is turned off, so a seed can
+  // arrive for one — keep that game pickable while it's the selected game.
+  const gameOptions = GAMES.filter((g) => config.enabledGames.includes(g) || g === game)
+  const [format, setFormat] = useState(initialGame === 'mtg' ? 'Standard' : '')
   const [style, setStyle] = useState('')
   const [budget, setBudget] = useState<number | null>(50)
   const [useCollection, setUseCollection] = useState(true)
@@ -181,7 +187,7 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
           <Seg
             ariaLabelledBy="builder-game"
             scroll
-            options={GAMES.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
+            options={gameOptions.map((g) => ({ value: g, label: GAME_LABEL[g] }))}
             value={game}
             onChange={pickGame}
           />

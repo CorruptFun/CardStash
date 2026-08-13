@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, type Insights } from '../lib/analytics'
 import { clearAllData } from '../lib/db'
 import { seedDemoData } from '../lib/demo'
+import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
 import { testGeminiKey } from '../lib/gemini'
 import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
@@ -64,6 +65,38 @@ export function SettingsView() {
       <header className="screenhead">
         <h1>Settings</h1>
       </header>
+      <section className="setsec">
+        <h3>Card games</h3>
+        <p className="setsec__note">
+          Pick the games you play. The rest disappear from search, scanning and deck building — and their card catalogs
+          are never downloaded in the background. Cards you already own always stay in your collection.
+        </p>
+        <div className="gamegrid" role="group" aria-label="Games shown in the app">
+          {GAMES.map((game) => {
+            const on = config.enabledGames.includes(game)
+            return (
+              <button
+                key={game}
+                className={`gamepick ${on ? 'gamepick--on' : ''}`}
+                aria-pressed={on}
+                onClick={() => {
+                  if (on && config.enabledGames.length === 1) {
+                    toast('Keep at least one game on', 'info')
+                    return
+                  }
+                  config.toggleGame(game)
+                }}
+              >
+                <span className="gamepick__name">{GAME_LABEL[game]}</span>
+                <em className="gamepick__code">{GAME_SHORT[game]}</em>
+                <span className="gamepick__tick" aria-hidden="true">
+                  <Icon name="check" size={13} />
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
       <section className="setsec">
         <h3>Scanning</h3>
         <div className="setrow">

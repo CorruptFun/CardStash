@@ -1,6 +1,7 @@
 import { db, kvGet, kvPut } from './db'
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
+import { settings } from './settings'
 import type { Card, CatalogCache, Finish, Game, PriceEntry } from './types'
 import { ebaySoldLink, normalizeName, similarity, sleep, tcgplayerSearchLink } from './util'
 
@@ -461,8 +462,10 @@ export function warmCatalog(game: Game): void {
 /**
  * Warm the catalogs of the games the user demonstrably plays (collection +
  * decks), one at a time so a phone isn't parsing three catalogs at once.
- * Skipped under Data Saver; refreshes are incremental, so on a typical day
- * this moves only each game's price files.
+ * Games turned off in settings never warm — owning cards in one keeps the
+ * data visible but shouldn't keep pulling its catalog. Skipped under Data
+ * Saver; refreshes are incremental, so on a typical day this moves only each
+ * game's price files.
  */
 export async function warmOwnedCatalogs(): Promise<void> {
   try {
@@ -471,8 +474,9 @@ export async function warmOwnedCatalogs(): Promise<void> {
       db.collection.orderBy('game').uniqueKeys(),
       db.decks.orderBy('game').uniqueKeys(),
     ])
+    const enabled = settings().enabledGames
     for (const game of new Set([...collectionGames, ...deckGames] as Game[])) {
-      if (isCatalogGame(game)) await catalog(game).catch(() => {})
+      if (isCatalogGame(game) && enabled.includes(game)) await catalog(game).catch(() => {})
     }
   } catch {
     /* warming is best-effort */

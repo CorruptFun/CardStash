@@ -7,7 +7,7 @@ import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/u
 import { track } from '../lib/analytics'
 import { CAMERA_REPROMPTS_EACH_ACQUIRE, cameraPermissionState, IS_STANDALONE } from '../lib/camera'
 import { addToCollection, db, recordScan, removeCopies } from '../lib/db'
-import { FINISH_LABEL, finishOptions, GAMES, GAME_SHORT } from '../lib/games'
+import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
 import type { IdentifyOutcome, ScanMode } from '../lib/identify'
 import { warmOcr } from '../lib/ocr'
 import { headlineFinish, itemUnitPrice } from '../lib/prices'
@@ -231,12 +231,15 @@ export function ScanView({ active }: { active: boolean }) {
 
   // The game filter names intent: preload that game's catalog (Riftbound &
   // co. have no search API, so the first match otherwise downloads it all),
-  // and in pack mode the set indexes sealed scans match against.
+  // and in pack mode the set indexes sealed scans match against. A lone
+  // enabled game counts as intent too — identification hints it the same way.
   useEffect(() => {
     if (!visible) return
-    if (config.gameFilter !== 'auto') warmCatalog(config.gameFilter)
-    if (scanMode === 'sealed') warmSealedIndex(config.gameFilter === 'auto' ? undefined : [config.gameFilter])
-  }, [visible, config.gameFilter, scanMode])
+    const hinted =
+      config.gameFilter !== 'auto' ? config.gameFilter : config.enabledGames.length === 1 ? config.enabledGames[0] : null
+    if (hinted) warmCatalog(hinted)
+    if (scanMode === 'sealed') warmSealedIndex(hinted ? [hinted] : config.enabledGames)
+  }, [visible, config.gameFilter, config.enabledGames, scanMode])
 
   /* Camera memory: approving once is enough. If the persisted flag was lost
    * but the browser still remembers the grant, skip the gate anyway. */
@@ -324,17 +327,19 @@ export function ScanView({ active }: { active: boolean }) {
       )}
       {!gated && (
         <div className="scan__top safe-top">
-          <Seg
-            ariaLabel="Game filter"
-            size="sm"
-            scroll
-            options={[
-              { value: 'auto' as const, label: 'Auto' },
-              ...GAMES.map((game) => ({ value: game, label: GAME_SHORT[game] })),
-            ]}
-            value={config.gameFilter}
-            onChange={(gameFilter) => config.set({ gameFilter })}
-          />
+          {config.enabledGames.length > 1 && (
+            <Seg
+              ariaLabel="Game filter"
+              size="sm"
+              scroll
+              options={[
+                { value: 'auto' as const, label: 'Auto' },
+                ...config.enabledGames.map((game) => ({ value: game, label: GAME_SHORT[game] })),
+              ]}
+              value={config.gameFilter}
+              onChange={(gameFilter) => config.set({ gameFilter })}
+            />
+          )}
           <div className="scan__topbtns">
             <button
               className={`collectpill ${scanMode === 'sealed' ? 'collectpill--on' : ''}`}
