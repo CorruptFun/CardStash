@@ -229,6 +229,41 @@ result seems absurd, check this list before writing code.
     — CI force-pushes that branch and a photograph cannot be regenerated.
     Where a photo disagrees with the model, the photo wins.
 
+## Where Pokémon actually stands (measured, for whoever picks it up next)
+
+31. **Pokémon's remaining failures are three different problems wearing one
+    number.** 42/81, or 42/72 excluding the `ja-collector` guard fixture. Over
+    two runs, of 60 non-guard failures the species name IS readable somewhere
+    in the band text in 40 of them — so this is not mostly an OCR-can't-see-it
+    problem, and the tempting single fix is to mine the species out and pair
+    it with the rules-box variant guard. Measured per fixture, that tempting
+    fix is three different situations:
+    - `umbreon-vmax-alt` (24 fails): species readable 24/24, VMAX declared
+      18/24. A species rescue would fire on ~75% of them and be correct, since
+      VMAX and VSTAR always evolve from the SAME species' V — "Evolves from
+      Umbreon V" on an Umbreon VMAX. Sound, and evidenced by exactly ONE
+      fixture, which is why it is written down here instead of shipped.
+    - `pikachu-modern` (16 fails): species readable only 8/24, and the rules
+      box reads as **"Pokémon €X rule"** — Tesseract corrupting é and e — so
+      `parsePokemonVariant` correctly declares nothing. Its collector line
+      reads "247/797" where the card is 247/191: the NUMBER is right and the
+      total is mangled, which the both-halves-must-agree guard rightly
+      refuses. Loosening either the parser or that guard to catch this is the
+      lesson-6 trap wearing new clothes.
+    - `iono-modern` (14 fails): the possessive prefix is what's lost —
+      "Iono's Bellibolt ex" reads as "ABEllibolt EX", "insaBelliBolt". The
+      species IS readable, and using it would be **actively unsafe**: bare
+      "Bellibolt" is a real card and so is "Bellibolt ex", so a species rescue
+      here manufactures a confident wrong card. Same trap generally: a Stage-1
+      ex evolves from a DIFFERENT species, and that species often has its own
+      ex printing (a Raichu ex evolving from Pikachu would resolve to
+      "Pikachu ex"). Any species rescue must be restricted to VMAX/VSTAR,
+      where the pre-evolution shares the species by rule.
+    The blocker is evidence, not ideas: one VMAX fixture cannot tell a real
+    mechanism from an overfit. Add more suffix-variant Pokémon picks to
+    `fetch-fixtures.mjs`, let CI regenerate, re-baseline (lesson 3), and the
+    VMAX/VSTAR rescue becomes measurable.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review
