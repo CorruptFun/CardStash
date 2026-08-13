@@ -27,6 +27,13 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
   workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
   fallback only — don't use it when Actions works.
+- `npm run test:unit` — node tests (corner parsing, name candidates, harness
+  stubs). `npm run test:scan` — the real-image scan regression matrix
+  (headless Chromium over real card photos; fixtures come from the
+  machine-generated `harness-fixtures` branch — never merge it). **Never
+  change scan-pipeline code without running the matrix before and after** —
+  the workflow, thresholds, guard invariants and hard-won gotchas live in
+  the `scan-harness` skill (`.claude/skills/scan-harness/`); read it first.
 
 ## Layout
 

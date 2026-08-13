@@ -1,0 +1,114 @@
+---
+name: scan-harness
+description: >
+  Run, extend, and debug Cardstock's real-image scan regression harness, and
+  follow the proven methodology for fixing card-scanning accuracy. Use this
+  skill whenever a task touches the scan pipeline (src/lib/identify.ts,
+  ocr.ts, vision.ts, corner.ts, pokemon.ts, ygo.ts, tcgcsv.ts matching,
+  hooks/useScanner.ts) or scanning behavior in any form — "scanning fails",
+  "card misidentified", "wrong card", "OCR problems", "identify rate",
+  "test the scanner", "run the matrix", "refresh fixtures", "add a game /
+  card to the tests", tuning thresholds, or evaluating any scanning change
+  before merge. Never change scan-pipeline code without running this
+  harness before and after — that rule is the reason scanning works.
+---
+
+# Cardstock scan-harness
+
+Real card photographs + the REAL `identifyFrame()` pipeline in headless
+Chromium, graded against ground truth, with per-stage failure attribution.
+Built and battle-tested in the v0.7.0 overhaul that took the matrix from 36%
+to 67% (Pokémon 3%→32%, Riftbound 48%→74%, One Piece 39%→100%, MTG 73%→88%,
+YGO 31%→81%). Everything below exists because synthetic tests passed while
+real cards failed on-device — only real imagery finds these bugs.
+
+## Quick commands
+
+```sh
+# One-time per sandbox: fixtures (real card images + captured API datasets).
+# Restricted sandboxes can't reach card CDNs — pull the CI-generated branch.
+# git archive, NEVER a --work-tree checkout (that stages 60 fixture files
+# into the SOURCE repo's index):
+git fetch origin harness-fixtures
+mkdir -p tests/harness/fixtures
+git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
+
+npm run test:unit          # 28 node tests: corner parsing, candidates, stubs
+npm run test:scan          # full matrix (~5 min, 228 cells, 3 pages)
+node tests/harness/run-matrix.mjs \
+  --games=pokemon,riftbound --degradations=clean,glare --mode=hinted \
+  --keys=tauros-fa-secret --pages=3 --verbose          # fast slice (~1 min)
+node tests/harness/run-matrix.mjs \
+  --baseline=tests/harness/report/baseline.json        # exit 1 on any
+                                                       # per-game regression
+npm run build && node tests/harness/smoke-app.mjs      # built-bundle smoke
+```
+
+Chromium resolves from `$CHROMIUM_PATH` → `/opt/pw-browsers/chromium` →
+playwright registry. Reports land in `tests/harness/report/` (gitignored);
+keep `baseline.json` from before your change to gate against.
+
+## The methodology (this is the valuable part)
+
+1. **Measure before touching code.** Run the full matrix, save the report as
+   your baseline. If fixtures were refreshed since the stored baseline,
+   re-run the baseline on the current snapshot first — absolute numbers are
+   only comparable within one fixture snapshot (the dying pokemontcg.io
+   answers differently every capture round).
+2. **Diagnose from traces, not vibes.** Every cell carries the pipeline's own
+   diagnostics trace (`src/lib/scandebug.ts`): raw band text, candidates,
+   lookup scores, collector-line parses, crop/deskew decisions. Slice
+   `report/*.json` with `node -e` — never guess which stage lost a cell when
+   the trace says exactly. On a phone, the same trace is behind the eye icon
+   on the no-match chip.
+3. **Attribute, then fix ONE layer at a time.** Stage labels: `ocr-noread`
+   (no text at all), `ocr-misread` (text, but nothing name-like),
+   `match-none` / `match-low` (the name WAS read — the match layer lost it),
+   `wrong-card` (confident wrong answer — the worst class), `api-error`.
+   Beware: the classifier under-blames the match layer when the name sits
+   inside a fused junk row — read raw band text before trusting the label.
+4. **Guard every tolerance with evidence.** The overhaul's one big regression
+   was adding retrieval tolerance without guards: honest misses became
+   confident wrong cards (16 in one run). Every loosening needs a matching
+   evidence requirement — see the guard invariants in
+   `references/pipeline-map.md` before touching any threshold.
+5. **Adversarially verify.** Re-run the FULL matrix with
+   `--baseline=<pre-change report>`; a fix ships only if no game drops. Then
+   `npm run test:unit`, `npm run build`, `smoke-app.mjs`. For large diffs,
+   fan out reviewer subagents per lens (pipeline correctness, phone
+   perf/battery, UI, harness integrity) and have separate agents try to
+   REFUTE each finding against the working tree before acting on it.
+6. **Suspect the harness too.** Several "pipeline bugs" were fixture/stub
+   artifacts (see `references/lessons.md`). When a failure makes no sense,
+   verify the stub answered what the real API would, and LOOK at the actual
+   pixels (render the crop to a PNG and view it) before writing code.
+
+## Fixture lifecycle
+
+- `tests/harness/fetch-fixtures.mjs` needs open internet (TCGdex, TCGplayer
+  via tcgcsv, Scryfall, YGOPRODeck). Sandboxes here can typically reach ONLY
+  GitHub — so `.github/workflows/scan-harness.yml` runs the fetcher in CI
+  (unrestricted egress) and force-pushes results to the **harness-fixtures**
+  branch (machine-generated, like gh-pages: never merge, never hand-edit).
+- CI triggers on pushes to `claude/**` touching the fetcher or the workflow,
+  or via workflow_dispatch. It refuses to publish partial fetches (fixture
+  floor + whole-game failure gate).
+- Fixture picks must be PAPER cards. TCGdex also indexes Pokémon TCG Pocket
+  (set ids `A1`/`B1`…) whose digital frames print no collector line — the
+  fetcher filters them; keep that filter when adding picks.
+- Adding a game/card: extend the pick logic in `fetch-fixtures.mjs` AND the
+  stub semantics in `stub-apis.mjs` for any new API endpoint, push to a
+  `claude/**` branch, let CI regenerate, re-pull, then re-baseline.
+
+## When you need more depth
+
+- `references/architecture.md` — how fetcher → data branch → stubs → harness
+  page → runner fit together; stub semantics and their DOCUMENTED biases;
+  degradation battery; grading rules; the dev-server/HMR trap.
+- `references/pipeline-map.md` — the identify pipeline pass-by-pass with
+  every threshold and guard invariant, and which file owns each fix. Read
+  BEFORE changing any constant in identify.ts/ocr.ts/useScanner.ts.
+- `references/lessons.md` — the war stories as transferable rules: fixture
+  artifacts that masqueraded as pipeline bugs, the tolerance→wrong-card
+  seesaw, why corner-first demands a printed slash, and more. Read when a
+  result seems absurd — the explanation is probably in there.
