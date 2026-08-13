@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { ShareActions, type SharePack } from '../components/ShareActions'
+import { SyncPanel } from '../components/SyncPanel'
 import { track } from '../lib/analytics'
 import { readFileText } from '../lib/csv'
 import {
@@ -235,11 +236,25 @@ export function FriendsView() {
           </button>
           {pack && <ShareActions pack={pack} />}
           <p className="setsec__note">
-            No accounts, no server: the link <em>is</em> the data — a snapshot of what’s listed above. People see it
-            only if you send it to them. Re-share after big changes, or keep the file at a stable link (a GitHub Gist
-            works) so friends can refresh from it.
+            {config.syncOn && config.syncUrl ? (
+              <>
+                Live sync is on, so this binder republishes itself and friends see changes without a new link. Links
+                still work for anyone not on your sync server.
+              </>
+            ) : (
+              <>
+                No accounts, no server: the link <em>is</em> the data — a snapshot of what’s listed above. People see
+                it only if you send it to them. Re-share after big changes, or keep the file at a stable link (a
+                GitHub Gist works) so friends can refresh from it.
+              </>
+            )}
           </p>
         </div>
+      </section>
+
+      <section className="setsec">
+        <h3>Live sync</h3>
+        <SyncPanel />
       </section>
 
       <section className="setsec">

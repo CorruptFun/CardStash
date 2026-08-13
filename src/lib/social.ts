@@ -583,6 +583,9 @@ export async function decodeShareText(text: string): Promise<SocialPayload> {
     } catch {
       throw new Error(NOT_SOCIAL)
     }
+    // A sync server wraps the payload ({updatedAt, payload}) — unwrap it so a
+    // binder endpoint can be pasted in like any other link.
+    if (isRecord(raw) && raw.kind == null && isRecord(raw.payload)) raw = raw.payload
     return sanitizePayload(raw)
   }
   const fromParam = /[?&]d=([A-Za-z0-9_-]+)/.exec(trimmed)?.[1]

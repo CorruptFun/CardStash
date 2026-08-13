@@ -36,6 +36,15 @@ export interface Settings {
   profileNote: string
   /** What a profile share includes: the trade binder, or the whole collection. */
   shareScope: ShareScope
+  /** Optional sync server origin; empty = link-sharing only (the default). */
+  syncUrl: string
+  syncOn: boolean
+  /** Proves this device owns its profile id on the sync server. */
+  syncToken: string
+  /** Newest inbox item already applied, as a server timestamp. */
+  syncCursor: number
+  /** Last successful sync. */
+  syncAt: number
   set: (patch: Partial<Settings>) => void
 }
 
@@ -57,6 +66,11 @@ export const useSettings = create<Settings>()(
       profileName: '',
       profileNote: '',
       shareScope: 'trade',
+      syncUrl: '',
+      syncOn: false,
+      syncToken: '',
+      syncCursor: 0,
+      syncAt: 0,
       set: (patch) => set(patch),
     }),
     { name: 'cardstock-settings' },

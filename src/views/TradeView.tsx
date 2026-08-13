@@ -16,6 +16,7 @@ import {
   sideQty,
   tradeStatusLabel,
 } from '../lib/social'
+import { sendToInbox, syncConfigured } from '../lib/sync'
 import type { TradeRecord } from '../lib/types'
 import { dateTime, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
@@ -27,6 +28,7 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
   )
   const toast = useUi((s) => s.toast)
   const [pack, setPack] = useState<SharePack | null>(null)
+  const [delivered, setDelivered] = useState(false)
   const [confirmComplete, setConfirmComplete] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -43,6 +45,16 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
         <Empty icon="swap" title="No such trade" body="It may have been deleted on this device." />
       </div>
     )
+  }
+
+  const resend = async () => {
+    try {
+      await sendToInbox(trade.friendId, buildTradePayload(trade, myProfile()))
+      setDelivered(true)
+      toast(`Sent to ${trade.friendName}`, 'success')
+    } catch (err: any) {
+      toast(err?.message ?? 'Could not deliver', 'error')
+    }
   }
 
   const shareOffer = async () => {
@@ -83,6 +95,17 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
     const next = await guarded(() => setTradeStatus(trade.id, status), 'Update trade')
     if (!next) return
     track('trade_update', { action: status, direction: trade.direction })
+    // Synced: the answer goes straight back; otherwise they need the link.
+    if (syncConfigured() && next.friendId) {
+      try {
+        await sendToInbox(next.friendId, buildReplyPayload(next, myProfile(), status))
+        setDelivered(true)
+        toast(`${status === 'accepted' ? 'Accepted' : 'Declined'} — ${next.friendName} has been told`, 'success')
+        return
+      } catch {
+        /* fall through to the link */
+      }
+    }
     toast(status === 'accepted' ? 'Accepted — now send them the reply link' : 'Declined — send them the reply link', 'info')
     await shareReply(status, next)
   }
@@ -146,7 +169,12 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
         )}
         {open && mine && (
           <>
-            <button className="btn btn--primary" onClick={shareOffer}>
+            {syncConfigured() && trade.friendId ? (
+              <button className="btn btn--primary" onClick={resend}>
+                <Icon name="swap" size={16} /> Send again to {trade.friendName}
+              </button>
+            ) : null}
+            <button className={syncConfigured() && trade.friendId ? 'btn btn--ghost' : 'btn btn--primary'} onClick={shareOffer}>
               <Icon name="share" size={16} /> Share the offer
             </button>
             <button className="btn btn--ghost" onClick={cancel}>
@@ -176,6 +204,11 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
         </button>
       </div>
 
+      {delivered && (
+        <p className="deliveredline">
+          <Icon name="check" size={15} /> Delivered over live sync — no link needed.
+        </p>
+      )}
       {pack && <ShareActions pack={pack} />}
 
       {trade.status === 'accepted' && (
