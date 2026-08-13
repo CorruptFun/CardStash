@@ -20,6 +20,8 @@ import {
   shareUrl,
   sideQty,
   sideValue,
+  wantKeyFor,
+  wantKeySet,
 } from '../lib/social'
 import type { CollectionItem, Friend, Game, SharedCard, TradeRecord } from '../lib/types'
 import { money, relativeAge, uid, ymd } from '../lib/util'
@@ -39,6 +41,7 @@ function matchesFilter(row: SharedCard, needle: string): boolean {
 export function FriendBinderView({ friendId }: { friendId: string }) {
   const friend = useLiveQuery(() => db.friends.get(friendId), [friendId])
   const myItems = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
+  const myWants = useLiveQuery(() => db.wants.toArray(), [])
   const openSheet = useUi((s) => s.openSheet)
   const toast = useUi((s) => s.toast)
   const [tab, setTab] = useState<'trade' | 'all' | null>(null)
@@ -53,6 +56,18 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
   const hasBoth = friend?.scope === 'all' && tradeRows.length > 0 && tradeRows.length < cards.length
   const activeTab = tab ?? (tradeRows.length > 0 ? 'trade' : 'all')
   const games = useMemo(() => GAMES.filter((game) => cards.some((row) => row.game === game)), [cards])
+
+  /* Matchmaking: their cards I want, and my cards they want. */
+  const myWantKeys = useMemo(() => wantKeySet(myWants ?? []), [myWants])
+  const iWantHere = useMemo(
+    () => cards.filter((row) => myWantKeys.has(wantKeyFor(row.game, row.name))).length,
+    [cards, myWantKeys],
+  )
+  const theirWantKeys = useMemo(() => wantKeySet(friend?.wants ?? []), [friend?.wants])
+  const theyWantMine = useMemo(
+    () => myItems.filter((item) => item.qty > 0 && theirWantKeys.has(wantKeyFor(item.game, item.name))).length,
+    [myItems, theirWantKeys],
+  )
 
   const shown = useMemo(() => {
     let rows = activeTab === 'trade' && hasBoth ? tradeRows : cards
@@ -126,7 +141,18 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
           <span className="friendhead__meta friendhead__meta--dim">
             snapshot from {relativeAge(friend.exportedAt)} ago
             {friend.sourceUrl ? ' · linked' : ''}
+            {friend.lastDelta && (friend.lastDelta.added > 0 || friend.lastDelta.removed > 0)
+              ? ` · last refresh +${friend.lastDelta.added}/−${friend.lastDelta.removed}`
+              : ''}
           </span>
+          {(iWantHere > 0 || theyWantMine > 0) && (
+            <span className="friendhead__match">
+              <Icon name="heart" size={12} filled />
+              {iWantHere > 0 ? ` ${iWantHere} here ${iWantHere === 1 ? 'is' : 'are'} on your want list` : ''}
+              {iWantHere > 0 && theyWantMine > 0 ? ' · ' : ''}
+              {theyWantMine > 0 ? `they want ${theyWantMine} of yours` : ''}
+            </span>
+          )}
           {friend.note && <span className="friendhead__note">“{friend.note}”</span>}
         </div>
       </header>
@@ -196,6 +222,7 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
           <BinderCell
             key={rowKey(row)}
             row={row}
+            wanted={myWantKeys.has(wantKeyFor(row.game, row.name))}
             onPick={() => openSheet({ card: sharedCardToCard(row, friend.exportedAt), origin: 'friend' })}
           />
         ))}
@@ -214,13 +241,15 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
         </div>
       </Modal>
       <Sheet open={composing} onClose={() => setComposing(false)} tall>
-        {composing && <TradeComposer friend={friend} myItems={myItems} />}
+        {composing && (
+          <TradeComposer friend={friend} myItems={myItems} myWantKeys={myWantKeys} theirWantKeys={theirWantKeys} />
+        )}
       </Sheet>
     </div>
   )
 }
 
-function BinderCell({ row, onPick }: { row: SharedCard; onPick: () => void }) {
+function BinderCell({ row, wanted, onPick }: { row: SharedCard; wanted: boolean; onPick: () => void }) {
   const card = useMemo(() => sharedCardToCard(row), [row])
   return (
     <button className="cardcell" onClick={onPick}>
@@ -230,6 +259,11 @@ function BinderCell({ row, onPick }: { row: SharedCard; onPick: () => void }) {
         <span className="cardcell__trade">
           <Icon name="swap" size={11} />
           {row.forTrade < row.qty ? ` ${row.forTrade}` : ''}
+        </span>
+      )}
+      {wanted && (
+        <span className="cardcell__want" aria-label="On your want list">
+          <Icon name="heart" size={11} filled />
         </span>
       )}
       {row.finish !== 'nonfoil' && <span className="cardcell__finish">{FINISH_LABEL[row.finish]}</span>}
@@ -247,7 +281,17 @@ function BinderCell({ row, onPick }: { row: SharedCard; onPick: () => void }) {
 
 type Step = 'want' | 'give' | 'review' | 'share'
 
-function TradeComposer({ friend, myItems }: { friend: Friend; myItems: CollectionItem[] }) {
+function TradeComposer({
+  friend,
+  myItems,
+  myWantKeys,
+  theirWantKeys,
+}: {
+  friend: Friend
+  myItems: CollectionItem[]
+  myWantKeys: Set<string>
+  theirWantKeys: Set<string>
+}) {
   const toast = useUi((s) => s.toast)
   const [step, setStep] = useState<Step>('want')
   const [want, setWant] = useState<Map<string, number>>(new Map())
@@ -257,15 +301,22 @@ function TradeComposer({ friend, myItems }: { friend: Friend; myItems: Collectio
   const [tradeId, setTradeId] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
 
-  /* Their side: for-trade rows first — asking for unlisted cards is allowed. */
+  const isMyWant = (row: SharedCard) => myWantKeys.has(wantKeyFor(row.game, row.name))
+  const isTheirWant = (row: SharedCard) => theirWantKeys.has(wantKeyFor(row.game, row.name))
+
+  /* Their side: cards I want first, then for-trade — unlisted asks allowed. */
   const theirRows = useMemo(
     () =>
       [...friend.cards].sort(
-        (a, b) => Number(b.forTrade > 0) - Number(a.forTrade > 0) || sharedRowValue(b) - sharedRowValue(a),
+        (a, b) =>
+          Number(isMyWant(b)) - Number(isMyWant(a)) ||
+          Number(b.forTrade > 0) - Number(a.forTrade > 0) ||
+          sharedRowValue(b) - sharedRowValue(a),
       ),
-    [friend.cards],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [friend.cards, myWantKeys],
   )
-  /* My side as shared rows (full qty; the stepper picks how many to offer). */
+  /* My side as shared rows: cards they want first, then my for-trade rows. */
   const myRows = useMemo(
     () =>
       myItems
@@ -273,10 +324,26 @@ function TradeComposer({ friend, myItems }: { friend: Friend; myItems: Collectio
         .map((item) => ({ key: item.id, row: itemToSharedCard(item) }))
         .sort(
           (a, b) =>
+            Number(isTheirWant(b.row)) - Number(isTheirWant(a.row)) ||
             Number(b.row.forTrade > 0) - Number(a.row.forTrade > 0) ||
             sharedRowValue(b.row, 1) - sharedRowValue(a.row, 1),
         ),
-    [myItems],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [myItems, theirWantKeys],
+  )
+
+  /* One tap: ask for every for-trade card of theirs that's on my want list. */
+  const selectMatches = () => {
+    const next = new Map(want)
+    for (const row of theirRows) {
+      if (row.forTrade > 0 && isMyWant(row) && !next.has(rowKey(row))) next.set(rowKey(row), 1)
+    }
+    setWant(next)
+  }
+  const matchable = useMemo(
+    () => theirRows.filter((row) => row.forTrade > 0 && isMyWant(row)).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [theirRows, myWantKeys],
   )
 
   const wantRows = useMemo(
@@ -383,6 +450,11 @@ function TradeComposer({ friend, myItems }: { friend: Friend; myItems: Collectio
               aria-label="Filter cards"
             />
           </div>
+          {step === 'want' && matchable > 0 && (
+            <button className="btn btn--ghost btn--sm composer__matches" onClick={selectMatches}>
+              <Icon name="heart" size={14} filled /> Select your {matchable} want-list {matchable === 1 ? 'match' : 'matches'}
+            </button>
+          )}
           <div className="composer__list">
             {step === 'want' &&
               theirRows
@@ -396,6 +468,7 @@ function TradeComposer({ friend, myItems }: { friend: Friend; myItems: Collectio
                       picked={want.get(key)}
                       max={row.qty}
                       unlisted={row.forTrade === 0}
+                      match={isMyWant(row) ? 'you want this' : undefined}
                       onToggle={() => toggle(want, setWant, key)}
                       onQty={(qty) => setQty(want, setWant, key, Math.min(qty, row.qty))}
                     />
@@ -411,6 +484,7 @@ function TradeComposer({ friend, myItems }: { friend: Friend; myItems: Collectio
                     picked={give.get(key)}
                     max={row.qty}
                     unlisted={false}
+                    match={isTheirWant(row) ? 'they want this' : undefined}
                     onToggle={() => toggle(give, setGive, key)}
                     onQty={(qty) => setQty(give, setGive, key, Math.min(qty, row.qty))}
                   />
@@ -484,6 +558,7 @@ function PickRow({
   picked,
   max,
   unlisted,
+  match,
   onToggle,
   onQty,
 }: {
@@ -492,6 +567,8 @@ function PickRow({
   max: number
   /** Their card that is not marked for trade — selectable, but flagged. */
   unlisted: boolean
+  /** Want-list match callout ("you want this" / "they want this"). */
+  match?: string
   onToggle: () => void
   onQty: (qty: number) => void
 }) {
@@ -512,8 +589,14 @@ function PickRow({
         <span className={`pickrow__check ${on ? 'pickrow__check--on' : ''}`}>{on && <Icon name="check" size={13} />}</span>
         <CardImg card={card} className="sharedrow__thumb" />
         <span className="sharedrow__body">
-          <span className="sharedrow__name">{row.name}</span>
-          <span className={`sharedrow__meta ${unlisted ? 'sharedrow__meta--unlisted' : ''}`}>{meta || '—'}</span>
+          <span className="sharedrow__name">
+            {match && <Icon name="heart" size={11} filled className="pickrow__heart" />}
+            {row.name}
+          </span>
+          <span className={`sharedrow__meta ${unlisted ? 'sharedrow__meta--unlisted' : ''}`}>
+            {match ? `${match}${meta ? ' · ' : ''}` : ''}
+            {meta || (match ? '' : '—')}
+          </span>
         </span>
         <span className="sharedrow__price">{row.price != null ? money(sharedRowValue(row, 1)) : '—'}</span>
       </button>

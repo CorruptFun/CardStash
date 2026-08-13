@@ -14,9 +14,11 @@ import {
   priceHistory,
   removeCopies,
   setItemQty,
+  toggleWant,
   updateDeck,
   updateItem,
 } from '../lib/db'
+import { wantKeyFor } from '../lib/social'
 import { addedToBoardToast, boardForCard } from '../lib/deckstats'
 import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, SOURCE_LABEL } from '../lib/games'
 import { cardTrend } from '../lib/portfolio'
@@ -137,6 +139,15 @@ function CardSheet() {
   const bestFoil = card.prices.bestFoil
   const history = useLiveQuery(() => priceHistory(card.id), [card.id])
   const copies = useLiveQuery(() => db.collection.where('cardId').equals(card.id).toArray(), [card.id])
+  const wanted = useLiveQuery(() => db.wants.get(wantKeyFor(card.game, card.name)), [card.game, card.name])
+
+  const toggleWanted = async () => {
+    const on = await guarded(() => toggleWant(card), 'Want list')
+    if (on === undefined) return
+    track('want_update', { game: card.game, on })
+    haptic(6)
+    toast(on ? `${card.name} added to your want list` : `${card.name} removed from wants`, 'success')
+  }
   const gameDecks = useLiveQuery(() => db.decks.where('game').equals(card.game).toArray(), [card.game])
   const targetDeck = useLiveQuery(async () => (sheet.deckId ? db.decks.get(sheet.deckId) : undefined), [sheet.deckId])
   const membership = useDeckMembership(card.id)
@@ -322,20 +333,27 @@ function CardSheet() {
             {card.releasedAt ? ` · ${card.releasedAt.slice(0, 4)}` : ''}
           </p>
           {card.manaCost ? <ManaCost cost={card.manaCost} /> : card.typeLine && <p className="cardsheet__type">{card.typeLine}</p>}
-          {(copiesCount > 0 || memberDecks.length > 0) && (
-            <span className="cardsheet__chips">
-              {copiesCount > 0 && (
-                <span className="ownedchip">
-                  <Icon name="check" size={13} /> {copiesCount} in collection
-                </span>
-              )}
-              {memberDecks.length > 0 && (
-                <button className="ownedchip ownedchip--deck" onClick={() => setDeckPickOpen(true)}>
-                  <Icon name="decks" size={13} /> in {memberDecks.length === 1 ? memberDecks[0].name : `${memberDecks.length} decks`}
-                </button>
-              )}
-            </span>
-          )}
+          <span className="cardsheet__chips">
+            {copiesCount > 0 && (
+              <span className="ownedchip">
+                <Icon name="check" size={13} /> {copiesCount} in collection
+              </span>
+            )}
+            {memberDecks.length > 0 && (
+              <button className="ownedchip ownedchip--deck" onClick={() => setDeckPickOpen(true)}>
+                <Icon name="decks" size={13} /> in {memberDecks.length === 1 ? memberDecks[0].name : `${memberDecks.length} decks`}
+              </button>
+            )}
+            {!sealed && (
+              <button
+                className={`ownedchip ownedchip--want ${wanted ? 'ownedchip--wanton' : ''}`}
+                onClick={toggleWanted}
+                aria-pressed={!!wanted}
+              >
+                <Icon name="heart" size={13} filled={!!wanted} /> {wanted ? 'On your want list' : 'Want'}
+              </button>
+            )}
+          </span>
         </div>
       </header>
       <section className="pricehero">

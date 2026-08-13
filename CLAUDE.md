@@ -82,4 +82,6 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   (≤ qty — every write clamps via `tradeCount` in db.ts). Everything decoded
   from a link/file/backup is untrusted: route it through the sanitizers in
   `social.ts`. `SharedCard.price` is the finish's market unit with condition
-  NOT applied — viewers multiply by condition factor.
+  NOT applied — viewers multiply by condition factor. Wants are card-level,
+  keyed `${game}|${normalizeName(name)}` (any printing matches); matchmaking
+  compares want keys, never card ids.

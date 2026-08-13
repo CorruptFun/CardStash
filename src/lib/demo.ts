@@ -12,6 +12,7 @@ import type {
   PricePoint,
   SharedCard,
   TradeRecord,
+  WantRow,
 } from './types'
 import { tcgplayerSearchLink, uid, ymd } from './util'
 
@@ -373,6 +374,29 @@ export async function seedDemoData(): Promise<void> {
       share('Charizard ex', { qty: 1, finish: 'holo' }),
     ],
   }
+  // Wants: Sheoldred matches Rae's for-trade copy, so matchmaking demos too.
+  const demoWants: WantRow[] = [
+    {
+      key: 'mtg|sheoldred the apocalypse',
+      cardId: 'mtg:demo-sheoldred',
+      game: 'mtg',
+      name: 'Sheoldred, the Apocalypse',
+      setCode: 'DMU',
+      image: byName('Sheoldred, the Apocalypse').imageSmall,
+      price: 52,
+      addedAt: now - 2 * 86_400_000,
+    },
+  ]
+  demoFriend.wants = [
+    {
+      cardId: 'mtg:demo-ragavan',
+      game: 'mtg',
+      name: 'Ragavan, Nimble Pilferer',
+      image: byName('Ragavan, Nimble Pilferer').imageSmall,
+      price: 38.5,
+    },
+  ]
+
   const demoTrade: TradeRecord = {
     id: 'demo-trade-rae',
     friendId: demoFriend.id,
@@ -386,15 +410,20 @@ export async function seedDemoData(): Promise<void> {
     get: [share('Sheoldred, the Apocalypse', { qty: 1 }), share('Iono', { qty: 1 })],
   }
 
-  await db.transaction('rw', [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades], async () => {
-    await db.collection.bulkPut(collection)
-    await db.decks.put(deck)
-    await db.deckCards.where('deckId').equals(deck.id).delete()
-    await db.deckCards.bulkAdd(deckCards)
-    await db.history.bulkPut(history)
-    await db.friends.put(demoFriend)
-    await db.trades.put(demoTrade)
-  })
+  await db.transaction(
+    'rw',
+    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants],
+    async () => {
+      await db.collection.bulkPut(collection)
+      await db.decks.put(deck)
+      await db.deckCards.where('deckId').equals(deck.id).delete()
+      await db.deckCards.bulkAdd(deckCards)
+      await db.history.bulkPut(history)
+      await db.friends.put(demoFriend)
+      await db.trades.put(demoTrade)
+      await db.wants.bulkPut(demoWants)
+    },
+  )
 }
 
 export async function hasAnyData(): Promise<boolean> {

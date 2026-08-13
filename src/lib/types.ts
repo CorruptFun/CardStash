@@ -215,6 +215,35 @@ export interface SharedCard {
   price?: number
 }
 
+/** One card on a want list — card-level, not printing-level. */
+export interface WantRow {
+  /** `${game}|${normalized name}` — any printing of the card matches. */
+  key: string
+  cardId: string
+  game: Game
+  name: string
+  setCode?: string
+  image?: string
+  price?: number
+  addedAt: number
+}
+
+/** A want as it travels in a profile share (subset of WantRow). */
+export interface SharedWant {
+  cardId: string
+  game: Game
+  name: string
+  image?: string
+  price?: number
+}
+
+/** What changed between two imported snapshots of the same friend. */
+export interface FriendDelta {
+  added: number
+  removed: number
+  at: number
+}
+
 /** A followed collector: their last imported snapshot, kept locally. */
 export interface Friend {
   /** Their stable profile id (generated once on their device). */
@@ -230,6 +259,10 @@ export interface Friend {
   /** Where the snapshot was fetched from — enables one-tap refresh. */
   sourceUrl?: string
   cards: SharedCard[]
+  /** Cards they're hunting (travels with their share). */
+  wants?: SharedWant[]
+  /** Row-level diff produced by the latest refresh. */
+  lastDelta?: FriendDelta
 }
 
 export type TradeStatus = 'proposed' | 'accepted' | 'declined' | 'completed' | 'canceled'
@@ -265,6 +298,7 @@ export interface ProfilePayload {
   scope: ShareScope
   at: number
   cards: SharedCard[]
+  wants?: SharedWant[]
 }
 
 export interface TradePayload {
