@@ -1,15 +1,18 @@
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
-import { CORNER_REGION, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
+import { isAbort } from './fetchJson'
+import { CORNER_REGION, CORNER_RETRY_REGIONS, parseCornerInfo, sameYgoCode, type CornerRead } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
 import { nameBands, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
-import { matchPokemon } from './pokemon'
+import { matchPokemon, pokemonByCollector } from './pokemon'
+import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
+import { catalogByCollector, isCatalogGame } from './tcgcsv'
 import type { Card, Game } from './types'
-import { detectFoil, hammingDistance } from './vision'
-import { similarity } from './util'
+import { detectFoil, hammingDistance, refineCardCrop } from './vision'
+import { normalizeName, similarity } from './util'
 import { ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed'
@@ -26,6 +29,9 @@ export type ScanMode = 'card' | 'sealed'
 interface CacheEntry {
   hash: string
   mode: ScanMode
+  /** The game filter the attempt ran under — a miss under 'auto' must not
+   * suppress a retry after the user picks the right game. */
+  hint?: Game
   card: Card | null
   /** Foil sheen read off the physical copy — kept so cached hits price right. */
   foil?: boolean
@@ -34,21 +40,25 @@ interface CacheEntry {
 
 const cache: CacheEntry[] = []
 const CACHE_LIMIT = 60
-const MISS_TTL_MS = 15_000
+/** A full miss now burns a multi-pass OCR sweep — don't re-burn the same
+ * unchanged frame twice a minute; a tap rescans instantly regardless. */
+const MISS_TTL_MS = 30_000
 const HASH_TOLERANCE = 10
 
-function cacheLookup(hash: string, mode: ScanMode): CacheEntry | null {
+function cacheLookup(hash: string, mode: ScanMode, hint?: Game): CacheEntry | null {
   const now = Date.now()
   for (const entry of cache) {
     if (entry.mode === mode && hammingDistance(entry.hash, hash) <= HASH_TOLERANCE) {
+      // A miss only counts against the same filter it was produced under.
+      if (entry.card === null && entry.hint !== hint) continue
       return entry.card === null && now - entry.at > MISS_TTL_MS ? null : entry
     }
   }
   return null
 }
 
-function cacheStore(hash: string, mode: ScanMode, card: Card | null, foil?: boolean): void {
-  cache.unshift({ hash, mode, card, foil, at: Date.now() })
+function cacheStore(hash: string, mode: ScanMode, hint: Game | undefined, card: Card | null, foil?: boolean): void {
+  cache.unshift({ hash, mode, hint, card, foil, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
@@ -80,15 +90,36 @@ export interface IdentificationMeta {
 export async function identifyFrame(
   capture: FrameCapture,
   hash: string,
-  opts: { ignoreMisses?: boolean; mode?: ScanMode } = {},
+  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal } = {},
 ): Promise<IdentifyOutcome> {
   const mode = opts.mode ?? 'card'
   const config = settings()
   const gameHint = config.gameFilter === 'auto' ? undefined : config.gameFilter
-  const cached = cacheLookup(hash, mode)
+  beginScanTrace(mode, gameHint)
+  const startedAt = Date.now()
+  /** Every exit funnels through here so the diagnostics trace always closes. */
+  const finish = (outcome: IdentifyOutcome): IdentifyOutcome => {
+    endScanTrace(
+      outcome.ok
+        ? {
+            ok: true,
+            name: outcome.card.name,
+            game: outcome.card.game,
+            setCode: outcome.identification.setCode ?? outcome.card.setCode,
+            number: outcome.identification.number ?? outcome.card.number,
+            via: outcome.identification.via,
+            confidence: outcome.identification.confidence,
+            ms: Date.now() - startedAt,
+          }
+        : { ok: false, reason: outcome.reason, message: outcome.message, name: outcome.readName, ms: Date.now() - startedAt },
+    )
+    return outcome
+  }
+  const cached = cacheLookup(hash, mode, gameHint)
   const cacheUsable = cached && (!cached.card || !gameHint || cached.card.game === gameHint)
   if (cacheUsable && cached.card) {
-    return {
+    traceEvent('cache', { hit: true, card: cached.card.name })
+    return finish({
       ok: true,
       card: cached.card,
       identification: {
@@ -100,19 +131,28 @@ export async function identifyFrame(
         via: 'cache',
         foil: cached.foil,
       },
-    }
+    })
   }
   if (cacheUsable && !opts.ignoreMisses) {
-    return { ok: false, reason: 'cached-miss', message: 'Same frame as a recent miss' }
+    traceEvent('cache', { hit: false })
+    return finish({ ok: false, reason: 'cached-miss', message: 'Same frame as a recent miss' })
   }
 
   const outcome =
-    mode === 'sealed' ? await identifySealedFrame(capture.canvas, gameHint) : await identifyViaOcr(capture.canvas, gameHint)
-  if (outcome.ok) cacheStore(hash, mode, outcome.card, outcome.identification.foil)
+    mode === 'sealed'
+      ? await identifySealedFrame(capture.canvas, gameHint)
+      : await identifyViaOcr(capture.canvas, gameHint, opts.signal)
+  if (outcome.ok) {
+    // Cache only well-evidenced hits: a collector-line-only identification
+    // (confidence 0.7) must be re-derived per attempt, not re-served at
+    // cache confidence.
+    if (outcome.identification.confidence >= 0.75)
+      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
+  }
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
-  // re-burn OCR + lookups every retry. A manual shutter tap bypasses this.
-  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, null)
-  return outcome
+  // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
+  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, gameHint, null)
+  return finish(outcome)
 }
 
 /** Pack/box front → set name → the set's sealed product. All on-device OCR. */
@@ -154,17 +194,67 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
   }
 }
 
-const OCR_MATCH_THRESHOLD = 0.62
+const OCR_MATCH_THRESHOLD = 0.66
+/** Short reads need a higher bar: one edit on 4 letters already scores 0.75,
+ * which is how "loli" became Loki and "son" became Sona. Genuine short reads
+ * (champion leads like "JINX") score ≈1 and clear it comfortably. */
+const OCR_MATCH_THRESHOLD_SHORT = 0.82
+const SHORT_READ_LEN = 8
+/** Reads still carrying junk tokens get a middle bar — their inflated edit
+ * distance otherwise squeaks wrong cards past the base threshold. */
+const OCR_MATCH_THRESHOLD_NOISY = 0.72
+
+function matchThresholdFor(read: string): number {
+  const normalized = read.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  if (normalized.length < SHORT_READ_LEN) return OCR_MATCH_THRESHOLD_SHORT
+  const tokens = read.split(/\s+/)
+  const junk = tokens.filter((t) => (t.match(/[A-Za-z]/g) ?? []).length < 3 && !/^(?:ex|gx|v|x)$/i.test(t)).length
+  return junk / tokens.length > 0.3 ? OCR_MATCH_THRESHOLD_NOISY : OCR_MATCH_THRESHOLD
+}
 /** Per-game budget for a name lookup: one slow card API mustn't stall the frame. */
 const OCR_MATCH_TIMEOUT_MS = 6_000
 /** A single hinted game has no four-way fan-out — its API gets longer (the keyless Pokémon API needs it). */
 const OCR_MATCH_TIMEOUT_HINTED_MS = 9_000
-/** Candidates tried per band — the name is usually the first line or the first joined pair. */
-const OCR_NAMES_PER_BAND = 4
+/** Candidates tried per band. Candidates arrive plausibility-ranked, but a
+ * fused plate row (name + faction + type) can still push the clean name a few
+ * slots down — the budget must reach it. */
+const OCR_NAMES_PER_BAND = 6
 /** Auto-mode collector-line crop: the bottom strip every game but YGO prints it in. */
 const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
 
-async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefined): Promise<IdentifyOutcome> {
+async function identifyViaOcr(
+  frame: HTMLCanvasElement,
+  gameHint: Game | undefined,
+  signal?: AbortSignal,
+): Promise<IdentifyOutcome> {
+  /** Checked between passes: a stopped scanner must not keep escalating
+   * OCR passes and lookups in the background. */
+  const bail = () => {
+    if (signal?.aborted) throw new DOMException('Scan attempt aborted', 'AbortError')
+  }
+  // The reticle crop is a fixed window; the card in it is regularly smaller,
+  // off-center or slightly rolled. Tighten to the detected card and deskew
+  // before any OCR — every band below assumes card-relative geometry.
+  const refined = refineCardCrop(frame)
+  const canvas = refined.canvas
+  traceEvent('crop', {
+    applied: refined.applied,
+    angle: refined.angle,
+    ...(refined.region ? { x: refined.region.x, y: refined.region.y, w: refined.region.w, h: refined.region.h } : {}),
+    ...(refined.cardRegion ? { card: refined.cardRegion } : {}),
+  })
+  // The tiny collector-line crops need card-relative precision even when the
+  // frame wasn't worth cropping — map them through the detected card region.
+  const mapRect = (rect: OcrRect): OcrRect => {
+    const card = refined.cardRegion
+    if (!card) return rect
+    return {
+      x: card.x + rect.x * card.w,
+      y: card.y + rect.y * card.h,
+      w: rect.w * card.w,
+      h: rect.h * card.h,
+    }
+  }
   // No hint: only sweep games with a cheap by-name API. Catalog-backed games
   // (Riftbound & co.) are reachable by picking them in the scan game filter.
   const games = gameHint ? [gameHint] : LIGHT_MATCH_GAMES
@@ -173,11 +263,17 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   const tried = new Set<string>()
   let firstRead: string | undefined
   let cornerText: Promise<string> | null = null
+  // Attempt-wide budget against DYING APIs: fast lookups are nearly free and
+  // deep candidate exploration is the accuracy win, but lookups riding their
+  // multi-second timeouts must not stretch one attempt into minutes — only
+  // those count against the budget, plus a hard wall-clock deadline.
+  let slowLookupsLeft = 4
+  const lookupDeadline = Date.now() + 20_000
+  const SLOW_LOOKUP_MS = 1_500
 
-  /** Dedupe candidates against earlier passes; remember the first plausible read. */
+  /** Candidates not yet consumed by a lookup; remember the first plausible read. */
   const freshOf = (names: string[]): string[] => {
     const fresh = names.filter((name) => !tried.has(name.toLowerCase()))
-    for (const name of fresh) tried.add(name.toLowerCase())
     firstRead ??= fresh[0]
     return fresh
   }
@@ -191,18 +287,40 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     // wants it. With a game hint the crop is that game's exact region; in
     // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
     // whose mid-card code refineFromCorner re-reads.
-    cornerText ??= readRegionText(canvas, gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP).catch(() => '')
+    cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
+      if (slowLookupsLeft <= 0 || Date.now() > lookupDeadline) break
+      // Consumed here, not at freshOf: candidates past this pass's window
+      // stay eligible for the next pass instead of being silently dropped.
+      tried.add(name.toLowerCase())
+      const lookupStarted = Date.now()
       const best = await bestMatchAcrossGames(name, games, {
         pokemonKey: config.pokemonKey,
         timeoutMs,
       }).catch(() => null)
-      if (!best || best.score < OCR_MATCH_THRESHOLD) continue
+      const lookupMs = Date.now() - lookupStarted
+      if (lookupMs > SLOW_LOOKUP_MS) slowLookupsLeft--
+      traceEvent('lookup', {
+        read: name,
+        games: games.join(','),
+        matched: best?.card.name ?? null,
+        game: best?.card.game,
+        score: best ? Number(best.score.toFixed(3)) : null,
+        ms: lookupMs,
+      })
+      if (!best || best.score < matchThresholdFor(name)) continue
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
-      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, config.pokemonKey).catch(() => null)
+      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(() => null)
       let card = refined?.card ?? best.card
       const foil = detectFoil(canvas)
+      traceEvent('refine', {
+        setCode: refined?.read.setCode ?? null,
+        number: refined?.read.number ?? null,
+        total: refined?.read.total ?? null,
+        edition: refined ? refined.card.setCode : null,
+        foil,
+      })
       // Sheen on a printing that never came foil: the copy in hand must be
       // a different printing — re-pick the newest foil-capable one.
       if (foil && !refined && card.game === 'mtg' && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')) {
@@ -230,6 +348,7 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
   // first (Riftbound & co. print names mid-card, not at the top), so a hit
   // in the first band skips the rest of the work entirely.
   for (const band of nameBands(gameHint)) {
+    bail()
     let names: string[]
     try {
       names = await readCardNames(canvas, band)
@@ -241,14 +360,72 @@ async function identifyViaOcr(canvas: HTMLCanvasElement, gameHint: Game | undefi
     if (hit) return hit
   }
 
+  // The contrast-stretched pass misreads stylized type over busy art (full
+  // arts, foils). Before the heavier sweeps, re-read the game's primary band
+  // binarized at higher resolution — in both polarities, since ornate glyph
+  // faces routinely defeat the mean-luma polarity heuristic. A different
+  // failure surface, so it regularly cracks what the first pass mangled.
+  for (const variant of ['binary', 'binary-flip'] as const) {
+    bail()
+    try {
+      const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })))
+      if (hit) return hit
+    } catch (err) {
+      if (isAbort(err)) throw err
+      /* fall through to the full sweep */
+    }
+  }
+
   // The bands assume a standard frame, but promos, full-art specials and
   // custom cards put names in unexpected places. Before giving up, sweep the
   // whole card once with automatic layout detection and mine every line.
+  bail()
   try {
     const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
     if (hit) return hit
-  } catch {
+  } catch (err) {
+    if (isAbort(err)) throw err
     /* the band sweep's verdict below stands */
+  }
+
+  // Name reading is out of road (ornate faces, foil sheen over the title).
+  // The collector line alone still pins the card when BOTH halves of the
+  // printed fraction survived — "215/203" plus the game is unambiguous.
+  if (gameHint) {
+    bail()
+    try {
+      // cornerText (when queued) already covered the exact hinted region;
+      // if no candidate ever queued it, let the normal-region read run.
+      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect)
+      // As the SOLE evidence, the fraction must have been printed with its
+      // slash actually read — a reconstructed digit run ("ILLUS 17208" →
+      // 17/208) resolving to some real card is exactly how a confident
+      // wrong identification would slip out. Reconstructed fractions still
+      // serve the refine path, where the name match corroborates them.
+      if (read.number && read.total && !read.fused) {
+        traceEvent('corner-id', { number: read.number, total: read.total })
+        let card: Card | null = null
+        if (gameHint === 'pokemon') card = await pokemonByCollector(read.number, read.total, config.pokemonKey)
+        else if (isCatalogGame(gameHint)) card = await catalogByCollector(gameHint, read.number, read.total)
+        if (card) {
+          return {
+            ok: true,
+            card,
+            identification: {
+              game: card.game,
+              name: card.name,
+              setCode: read.setCode ?? card.setCode,
+              number: read.number,
+              confidence: 0.7,
+              via: 'ocr',
+              foil: detectFoil(canvas) ? true : undefined,
+            },
+          }
+        }
+      }
+    } catch {
+      /* the miss verdict below stands */
+    }
   }
 
   return {
@@ -275,19 +452,44 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
  * crop WAS that region (`cornerIsExact`). Fails soft: any trouble keeps the
  * name-based match.
  */
+/**
+ * Read the collector line with escalating effort: the speculative strip
+ * first, the game's own region, then narrow per-game slivers at full
+ * magnification, binarized — the line is tiny type that drowns beside rules
+ * text at strip scale.
+ */
+async function readCornerInfo(
+  game: Game,
+  canvas: HTMLCanvasElement,
+  cornerText: Promise<string> | null,
+  cornerIsExact: boolean,
+  mapRect: (rect: OcrRect) => OcrRect,
+): Promise<CornerRead> {
+  let read = parseCornerInfo(game, cornerText ? await cornerText : '')
+  if (!read.setCode && !read.number && !cornerIsExact) {
+    read = parseCornerInfo(game, await readRegionText(canvas, mapRect(CORNER_REGION[game])))
+  }
+  if (!read.setCode && !read.number) {
+    const retries = CORNER_RETRY_REGIONS[game] ?? [CORNER_REGION[game]]
+    for (const rect of retries) {
+      read = parseCornerInfo(game, await readRegionText(canvas, mapRect(rect), { variant: 'binary' }))
+      if (read.setCode || read.number) break
+    }
+  }
+  return read
+}
+
 async function refineFromCorner(
   card: Card,
   canvas: HTMLCanvasElement,
   cornerText: Promise<string> | null,
   cornerIsExact: boolean,
+  mapRect: (rect: OcrRect) => OcrRect,
   pokemonKey?: string,
 ): Promise<{ card: Card; read: CornerRead } | null> {
-  let read = parseCornerInfo(card.game, cornerText ? await cornerText : '')
-  if (!read.setCode && !read.number) {
-    if (cornerIsExact) return null
-    read = parseCornerInfo(card.game, await readRegionText(canvas, CORNER_REGION[card.game]))
-    if (!read.setCode && !read.number) return null
-  }
+  // This read is what tells "Tauros" from "Tauros ex" — it earns the work.
+  const read = await readCornerInfo(card.game, canvas, cornerText, cornerIsExact, mapRect)
+  if (!read.setCode && !read.number) return null
   let exact: Card | null = null
   if (card.game === 'yugioh') {
     exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null
@@ -300,6 +502,19 @@ async function refineFromCorner(
   } else {
     exact = await matchGame(card.game, card.name, read.setCode, read.number, { pokemonKey })
   }
-  if (!exact || similarity(exact.name, card.name) < 0.7) return null
+  if (!exact || !relatedNames(exact.name, card.name)) return null
   return { card: exact, read }
+}
+
+/**
+ * May a corner-pinned card replace the name-matched one? Guards against a
+ * misread collector line swapping in an unrelated card — while still letting
+ * the number upgrade across suffix variants ("Tauros" → "Tauros ex": the
+ * printed 183/226 is exactly how the right variant is told apart).
+ */
+function relatedNames(a: string, b: string): boolean {
+  if (similarity(a, b) >= 0.7) return true
+  const na = normalizeName(a)
+  const nb = normalizeName(b)
+  return na.length >= 4 && nb.length >= 4 && (na.startsWith(nb) || nb.startsWith(na))
 }

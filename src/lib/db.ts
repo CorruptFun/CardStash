@@ -445,14 +445,21 @@ export async function applyCardUpdate(card: Card): Promise<void> {
 const SCAN_TRAY_LIMIT = 30
 
 export async function recordScan(card: Card): Promise<void> {
-  await db.scans.add({ id: uid(), cardId: card.id, at: Date.now(), card })
-  const count = await db.scans.count()
-  if (count > SCAN_TRAY_LIMIT) {
-    const stale = await db.scans
-      .orderBy('at')
-      .limit(count - SCAN_TRAY_LIMIT)
-      .toArray()
-    await db.scans.bulkDelete(stale.map((scan) => scan.id))
+  // Re-scanning the card already at the head of the tray refreshes that row
+  // instead of stacking a duplicate tile.
+  const latest = await db.scans.orderBy('at').last()
+  if (latest?.cardId === card.id) {
+    await db.scans.update(latest.id, { at: Date.now(), card })
+  } else {
+    await db.scans.add({ id: uid(), cardId: card.id, at: Date.now(), card })
+    const count = await db.scans.count()
+    if (count > SCAN_TRAY_LIMIT) {
+      const stale = await db.scans
+        .orderBy('at')
+        .limit(count - SCAN_TRAY_LIMIT)
+        .toArray()
+      await db.scans.bulkDelete(stale.map((scan) => scan.id))
+    }
   }
   await recordPricePoint(card)
 }

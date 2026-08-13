@@ -27,11 +27,35 @@ export const CORNER_REGION: Record<Game, CornerRect> = {
   gundam: { x: 0, y: 0.85, w: 1, h: 0.15 },
 }
 
+/**
+ * Where to look HARDER when the wide strip fails: the collector line is tiny
+ * type that drowns next to rules text at strip scale, but a narrow sliver
+ * OCR'd at full upscale resolves it. Ordered by likelihood; read binarized.
+ * (Pokémon: modern cards print it bottom-left, vintage bottom-right.)
+ */
+export const CORNER_RETRY_REGIONS: Partial<Record<Game, CornerRect[]>> = {
+  pokemon: [
+    { x: 0, y: 0.925, w: 0.52, h: 0.075 },
+    { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },
+  ],
+  mtg: [{ x: 0, y: 0.9, w: 0.5, h: 0.1 }],
+  riftbound: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+  lorcana: [{ x: 0, y: 0.92, w: 0.55, h: 0.08 }],
+  onepiece: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+  starwars: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+}
+
 export interface CornerRead {
   setCode?: string
   number?: string
   /** Printed set size from "123/198" — disambiguates Pokémon sets. */
   total?: string
+  /**
+   * The fraction was RECONSTRUCTED from a bare digit run (OCR ate the
+   * slash). Fine for refining a name-corroborated match; too weak to be the
+   * sole evidence of an identification.
+   */
+  fused?: boolean
 }
 
 const LANGS = new Set(['EN', 'DE', 'FR', 'IT', 'ES', 'PT', 'JA', 'JP', 'KO', 'RU', 'ZH', 'CN', 'CS', 'CT'])
@@ -56,11 +80,17 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     // Modern: "0269 M" then "MH3 • EN"; older: "269/350 U" then "M21 • EN".
     let number: string | undefined
     for (const line of upper.split('\n')) {
-      const frac = line.match(/\b0*(\d{1,4})\s*\/\s*\d{1,4}\b/)
-      if (frac) {
+      // The denominator is the SET size — a creature's "4/4" power/toughness
+      // box also matches a bare fraction shape, but no set has 44 cards's
+      // worth of ambiguity: real set sizes start well above P/T values.
+      const frac = line.match(/\b0*(\d{1,4})\s*\/\s*0*(\d{2,4})\b/)
+      if (frac && Number(frac[2]) >= 45) {
         number = frac[1]
         break
       }
+      // A line holding a REJECTED fraction is the P/T box or token rules
+      // text — its digits must not feed the solo-number fallback either.
+      if (/\d\s*\/\s*\d/.test(line)) continue
       const solo = line.match(/(?:^|[^\dA-Z/])0*(\d{1,4})(?:[A-Z]\b|\b)/)
       if (solo && !YEAR.test(solo[1])) {
         number = solo[1]
@@ -73,18 +103,20 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   }
 
   // Fraction-style games: Pokémon 123/198, Lorcana 23/204 · EN · 1, SWU 056/262.
-  const frac = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  const slashed = upper.match(/\b0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/)
+  const frac = slashed ?? fusedFraction(upper)
+  const fused = !slashed && frac ? true : undefined
   if (game === 'lorcana') {
     if (!frac) return {}
     const set = upper.match(/\b(?:EN|FR|DE|IT)\b[^A-Z0-9\n]{0,4}(Q?\d{1,2})\b/)
-    return { number: frac[1], total: frac[2], setCode: set?.[1] }
+    return { number: frac[1], total: frac[2], setCode: set?.[1], fused }
   }
   if (game === 'pokemon') {
     if (frac) {
       // SV era also prints the set code: "SVI EN 123/198".
       const line = upper.split('\n').find((l) => l.includes(`${frac[1]}/${frac[2]}`) || /\d\s*\/\s*\d/.test(l)) ?? ''
       const token = line.match(/\b([A-Z]{2,4}\d?)\b/g)?.find((t) => !LANGS.has(t) && !/^\d+$/.test(t))
-      return { number: frac[1], total: frac[2], setCode: token }
+      return { number: frac[1], total: frac[2], setCode: token, fused }
     }
     // Promos: SWSH250, SM210, XY67…
     const promo = upper.match(/\b(SWSH|SVP|SM|XY|BW)\s?0*(\d{1,3})\b/)
@@ -92,7 +124,33 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     return {}
   }
   // Riftbound / Star Wars: Unlimited and friends — the number alone helps.
-  return frac ? { number: frac[1], total: frac[2] } : {}
+  return frac ? { number: frac[1], total: frac[2], fused } : {}
+}
+
+/**
+ * The collector fraction's slash is the smallest glyph on the card and OCR
+ * regularly eats it: "156/149" reads as "156149". Recover a plausible
+ * number/total split from a bare 5-6 digit run — totals are set sizes
+ * (double or triple digits) and secret-rare numbers overshoot the total
+ * only modestly, which prunes bogus splits.
+ */
+function fusedFraction(upper: string): RegExpMatchArray | null {
+  const run = upper.match(/(?:^|[^\d/])(\d{5,6})(?:[^\d/]|$)/)
+  if (!run) return null
+  const digits = run[1]
+  const splits = digits.length === 6 ? [3] : [2, 3]
+  for (const at of splits) {
+    const number = Number(digits.slice(0, at).replace(/^0+(?=\d)/, ''))
+    const total = Number(digits.slice(at).replace(/^0+(?=\d)/, ''))
+    const plausible =
+      total >= 30 && total <= 400 && number >= 1 && number <= total + 150 && !YEAR.test(digits.slice(0, 4))
+    if (plausible) {
+      // Shape-compatible with the RegExpMatchArray the fraction regex yields
+      // (which also strips leading zeros from both groups).
+      return [digits, String(number), String(total)] as unknown as RegExpMatchArray
+    }
+  }
+  return null
 }
 
 /** Compare Yu-Gi-Oh print codes across languages: LOB-EN001 ≡ LOB-001. */

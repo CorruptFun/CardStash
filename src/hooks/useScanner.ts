@@ -13,6 +13,17 @@ const STILL_DELAY_SENSING_MS = 360
 const STILL_DELAY_BLIND_MS = 950
 const RETRY_MIN_GAP_MS = 1600
 const RETRY_MAX_GAP_MS = 60_000
+/** Focus gate: capture only near the recent sharpness peak (autofocus hunts
+ * right after motion stops), with a floor for flat scenes and a hard cap so
+ * the gate can never stall the scanner. */
+const FOCUS_RATIO = 0.62
+const FOCUS_FLOOR = 6
+const FOCUS_WAIT_MAX_MS = 1200
+/** Sharpness-peak half-life in ms — time-based, so 120Hz displays decay the
+ * same as 60Hz ones. */
+const FOCUS_PEAK_HALFLIFE_MS = 750
+/** Frame-analysis cadence; display refresh above this is wasted heat. */
+const SENSE_MIN_INTERVAL_MS = 48
 
 interface ApiFailurePolicy {
   waitMs: number
@@ -137,6 +148,9 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   const stillSinceRef = useRef<number | null>(null)
   const lastAttemptRef = useRef(0)
   const failureRef = useRef<FailureState>(freshFailureState())
+  /** Focus tracking: rolling sharpness peak + how long the gate has blocked. */
+  const focusRef = useRef({ max: 0, blockedSince: 0 })
+  const lastSenseRef = useRef(0)
   const prevGrayRef = useRef<Uint8ClampedArray | null>(null)
   const regionStreakRef = useRef(0)
   const senseCtxRef = useRef<CanvasRenderingContext2D | null>(null)
@@ -173,6 +187,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     prevGrayRef.current = null
     regionStreakRef.current = 0
     stillSinceRef.current = null
+    focusRef.current = { max: 0, blockedSince: 0 }
     stopOcr()
     patch({ torchAvailable: false, torchOn: false })
   }, [patch])
@@ -211,6 +226,14 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       rafRef.current = requestAnimationFrame(senseLoop)
       return
     }
+    // Sensing at ~20fps reads the scene just as well as at display refresh —
+    // running the Sobel pass at 120Hz would only heat the phone.
+    const sinceLast = performance.now() - lastSenseRef.current
+    if (sinceLast < SENSE_MIN_INTERVAL_MS) {
+      rafRef.current = requestAnimationFrame(senseLoop)
+      return
+    }
+    lastSenseRef.current = performance.now()
     const vw = video.videoWidth
     const vh = video.videoHeight
     const sw = SENSE_WIDTH
@@ -233,6 +256,11 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       return
     }
     prevGrayRef.current = analysis.gray
+    // Decaying peak: after a scene change the old peak fades within ~a
+    // second, so the gate below always compares against CURRENT conditions.
+    // Time-based, so the sensing cadence doesn't change the decay rate.
+    const decay = Math.pow(0.5, sinceLast / FOCUS_PEAK_HALFLIFE_MS)
+    focusRef.current.max = Math.max(analysis.sharpness, focusRef.current.max * decay)
     regionStreakRef.current = analysis.region
       ? Math.min(6, regionStreakRef.current + 1)
       : Math.max(0, regionStreakRef.current - 1)
@@ -253,12 +281,23 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
         const failure = failureRef.current
         const minGap = Math.max(RETRY_MIN_GAP_MS, failure.waitMs)
         if (heldLongEnough && failure.autoRetry && now - lastAttemptRef.current > minGap && prev.status !== 'found') {
-          attempt()
+          // Focus gate: phones hunt focus right after motion stops, and a
+          // frame grabbed mid-hunt is smeared before OCR ever sees it. Wait
+          // for sharpness near the rolling peak — briefly: a hard cap keeps
+          // low-texture scenes from stalling the scanner.
+          const focus = focusRef.current
+          const focused = analysis.sharpness >= Math.max(FOCUS_FLOOR, focus.max * FOCUS_RATIO)
+          if (!focused && !focus.blockedSince) focus.blockedSince = now
+          if (focused || now - focus.blockedSince > FOCUS_WAIT_MAX_MS) {
+            focus.blockedSince = 0
+            attempt()
+          }
         } else if (prev.status === 'searching' && sensing) {
           updates.status = 'locking'
         }
       } else {
         stillSinceRef.current = null
+        focusRef.current.blockedSince = 0
         if (prev.status !== 'searching' && analysis.motion > MOTION_STILL * 2.5) {
           updates.status = 'searching'
           updates.hit = prev.status === 'found' && sensing ? prev.hit : null
@@ -285,7 +324,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       const capture = captureFrame(video, region)
       const hash = frameHash(capture.canvas)
       const startedAt = performance.now()
-      await job.run(() => identifyFrame(capture, hash, { ignoreMisses: manual, mode }), {
+      await job.run((signal) => identifyFrame(capture, hash, { ignoreMisses: manual, mode, signal }), {
         outcome: (outcome) => {
           track('scan_attempt', {
             engine: outcome.ok ? outcome.identification.via : outcome.reason === 'cached-miss' ? 'cache' : 'ocr',
@@ -388,6 +427,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
   const rescan = useCallback(() => {
     lastAttemptRef.current = 0
     stillSinceRef.current = null
+    focusRef.current.blockedSince = 0
     failureRef.current = freshFailureState()
     patch({ hit: null, miss: null, status: 'searching', detail: null })
   }, [patch])
@@ -396,6 +436,7 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     if (jobRef.current?.running || !sessionRef.current) return
     lastAttemptRef.current = 0
     stillSinceRef.current = null
+    focusRef.current.blockedSince = 0
     failureRef.current = freshFailureState()
     attempt(true)
   }, [attempt])

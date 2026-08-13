@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8" />
+<!-- The app serves from the origin root, and ocr.ts resolves its worker via
+     document.baseURI — mirror that here so /ocr middleware serves it. -->
+<base href="/" />
+<title>Cardstock scan harness</title>
+<body>
+  <!--
+    Harness page, served by the Vite dev server so /src TypeScript modules load
+    with the app's real toolchain. run-matrix.mjs drives window.__harness from
+    playwright; the card APIs are answered by stub-apis.mjs via route
+    interception. Everything between the canvas and the outcome is the REAL
+    scan pipeline: identifyFrame → Tesseract OCR → match layer → corner refine.
+  -->
+  <script type="module">
+    import { identifyFrame, clearScanCache } from '/src/lib/identify'
+    import { frameHash } from '/src/lib/vision'
+    import { useSettings } from '/src/lib/settings'
+    import { warmOcr, stopOcr } from '/src/lib/ocr'
+    import { scanTraces, clearScanTraces } from '/src/lib/scandebug'
+    import { compose, DEGRADATIONS } from '/tests/harness/augment.mjs'
+
+    const images = new Map()
+    async function loadImage(url) {
+      if (images.has(url)) return images.get(url)
+      const img = new Image()
+      img.decoding = 'async'
+      const done = new Promise((resolve, reject) => {
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error(`image failed: ${url}`))
+      })
+      img.src = url
+      const loaded = await done
+      images.set(url, loaded)
+      return loaded
+    }
+
+    window.__harness = {
+      degradations: Object.keys(DEGRADATIONS),
+
+      warm() {
+        warmOcr()
+        return true
+      },
+
+      /**
+       * cell: { imageUrl, degradation, hint ('auto' | game), overrides? }
+       * Returns { outcome, ms, trace } — trace is the pipeline's own
+       * diagnostics record for the attempt.
+       */
+      async runCell(cell) {
+        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        const img = await loadImage(cell.imageUrl)
+        const spec = { ...(DEGRADATIONS[cell.degradation] ?? {}), ...(cell.overrides ?? {}) }
+        const canvas = compose(img, spec)
+        clearScanCache()
+        clearScanTraces()
+        const started = performance.now()
+        let outcome
+        try {
+          outcome = await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card' })
+        } catch (err) {
+          outcome = { ok: false, reason: 'exception', message: String(err?.message ?? err) }
+        }
+        const ms = Math.round(performance.now() - started)
+        const trace = scanTraces()[0] ?? null
+        return {
+          ms,
+          trace,
+          outcome: outcome.ok
+            ? {
+                ok: true,
+                name: outcome.card.name,
+                game: outcome.card.game,
+                setCode: outcome.card.setCode ?? null,
+                number: outcome.card.number ?? null,
+                readName: outcome.identification.name,
+                via: outcome.identification.via,
+                confidence: outcome.identification.confidence,
+                foil: outcome.identification.foil ?? null,
+                editionSet: outcome.identification.setCode ?? null,
+                editionNumber: outcome.identification.number ?? null,
+              }
+            : { ok: false, reason: outcome.reason, message: outcome.message, readName: outcome.readName ?? null },
+        }
+      },
+
+      async shutdown() {
+        await stopOcr()
+        return true
+      },
+    }
+    document.title = 'harness-ready'
+  </script>
+</body>
