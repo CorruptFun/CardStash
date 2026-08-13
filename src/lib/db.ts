@@ -19,9 +19,17 @@ import type {
   ScanRecord,
   TradeRecord,
   TradeStatus,
+  WantRow,
 } from './types'
 import { CONDITIONS } from './games'
-import { friendFromProfile, sanitizeFriendRecord, sanitizeTradeRecord, sharedCardToCard } from './social'
+import {
+  cardToWantRow,
+  friendFromProfile,
+  sanitizeFriendRecord,
+  sanitizeTradeRecord,
+  sanitizeWantRecord,
+  sharedCardToCard,
+} from './social'
 import { uid, ymd } from './util'
 
 class CardstockDB extends Dexie {
@@ -34,6 +42,7 @@ class CardstockDB extends Dexie {
   cache!: Table<KvCacheRow, string>
   friends!: Table<Friend, string>
   trades!: Table<TradeRecord, string>
+  wants!: Table<WantRow, string>
 
   constructor() {
     super('cardstock')
@@ -63,6 +72,8 @@ class CardstockDB extends Dexie {
       friends: 'id, addedAt',
       trades: 'id, friendId, status, createdAt',
     })
+    // v6: want list (card-level, keyed by game+normalized name).
+    this.version(6).stores({ wants: 'key, game, addedAt' })
   }
 }
 
@@ -265,6 +276,20 @@ export async function upsertFriendFromProfile(
 export async function removeFriend(id: string): Promise<void> {
   // Trades keep their own copy of the name/cards, so they survive the friend.
   await db.friends.delete(id)
+}
+
+/** Add/remove a card from the want list. Returns the new state. */
+export async function toggleWant(card: Card): Promise<boolean> {
+  const row = cardToWantRow(card)
+  return db.transaction('rw', db.wants, async () => {
+    const existing = await db.wants.get(row.key)
+    if (existing) {
+      await db.wants.delete(row.key)
+      return false
+    }
+    await db.wants.add(row)
+    return true
+  })
 }
 
 export async function saveTrade(trade: TradeRecord): Promise<void> {
@@ -515,6 +540,7 @@ export interface Backup {
   history: PricePoint[]
   friends: Friend[]
   trades: TradeRecord[]
+  wants: WantRow[]
 }
 
 export async function exportBackup(): Promise<Backup> {
@@ -528,6 +554,7 @@ export async function exportBackup(): Promise<Backup> {
     history: await db.history.toArray(),
     friends: await db.friends.toArray(),
     trades: await db.trades.toArray(),
+    wants: await db.wants.toArray(),
   }
 }
 
@@ -648,6 +675,12 @@ export function sanitizeBackup(raw: unknown): Backup {
     if (trade) trades.push(trade)
   }
 
+  const wants: WantRow[] = []
+  for (const entry of asArray(raw.wants)) {
+    const want = sanitizeWantRecord(entry)
+    if (want) wants.push(want)
+  }
+
   return {
     app: 'cardstock',
     version: 1,
@@ -658,25 +691,31 @@ export function sanitizeBackup(raw: unknown): Backup {
     history,
     friends,
     trades,
+    wants,
   }
 }
 
 export async function importBackup(raw: unknown): Promise<void> {
   const backup = sanitizeBackup(raw)
-  await db.transaction('rw', [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades], async () => {
-    await db.collection.bulkPut(backup.collection)
-    await db.decks.bulkPut(backup.decks)
-    await db.deckCards.bulkPut(backup.deckCards)
-    await db.history.bulkPut(backup.history)
-    await db.friends.bulkPut(backup.friends)
-    await db.trades.bulkPut(backup.trades)
-  })
+  await db.transaction(
+    'rw',
+    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants],
+    async () => {
+      await db.collection.bulkPut(backup.collection)
+      await db.decks.bulkPut(backup.decks)
+      await db.deckCards.bulkPut(backup.deckCards)
+      await db.history.bulkPut(backup.history)
+      await db.friends.bulkPut(backup.friends)
+      await db.trades.bulkPut(backup.trades)
+      await db.wants.bulkPut(backup.wants)
+    },
+  )
 }
 
 export async function clearAllData(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades],
+    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades, db.wants],
     async () => {
       await Promise.all([
         db.collection.clear(),
@@ -687,6 +726,7 @@ export async function clearAllData(): Promise<void> {
         db.catalogs.clear(),
         db.friends.clear(),
         db.trades.clear(),
+        db.wants.clear(),
       ])
     },
   )

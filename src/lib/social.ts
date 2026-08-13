@@ -12,12 +12,14 @@ import type {
   ReplyPayload,
   ShareScope,
   SharedCard,
+  SharedWant,
   SocialPayload,
   TradePayload,
   TradeRecord,
   TradeStatus,
+  WantRow,
 } from './types'
-import { ebaySoldLink, tcgplayerSearchLink, uid } from './util'
+import { ebaySoldLink, normalizeName, tcgplayerSearchLink, uid } from './util'
 
 /**
  * Friends & trades without a server. There is no backend and no account: a
@@ -97,7 +99,7 @@ export function shareableItems(items: CollectionItem[], scope: ShareScope): Coll
   return scope === 'all' ? rows : rows.filter((item) => (item.forTrade ?? 0) > 0)
 }
 
-export function buildProfilePayload(items: CollectionItem[], me: MyProfile): ProfilePayload {
+export function buildProfilePayload(items: CollectionItem[], me: MyProfile, wants: WantRow[] = []): ProfilePayload {
   const rows = shareableItems(items, me.scope)
   // Binder-only shares expose just the copies actually up for trade.
   const cards = rows.map((item) =>
@@ -111,10 +113,54 @@ export function buildProfilePayload(items: CollectionItem[], me: MyProfile): Pro
     scope: me.scope,
     at: Date.now(),
     cards,
+    wants: wants.length ? wants.map(wantToShared) : undefined,
   }
 }
 
+/* --- wants & matchmaking -------------------------------------------------- */
+
+/** Card-level want identity: any printing of the name matches. */
+export function wantKeyFor(game: Game, name: string): string {
+  return `${game}|${normalizeName(name)}`
+}
+
+export function wantKeySet(rows: { game: Game; name: string }[]): Set<string> {
+  return new Set(rows.map((row) => wantKeyFor(row.game, row.name)))
+}
+
+export function cardToWantRow(card: Card): WantRow {
+  return {
+    key: wantKeyFor(card.game, card.name),
+    cardId: card.id,
+    game: card.game,
+    name: card.name,
+    setCode: card.setCode,
+    image: card.imageSmall ?? card.imageLarge,
+    price: card.prices.best ?? card.prices.bestFoil ?? undefined,
+    addedAt: Date.now(),
+  }
+}
+
+function wantToShared(want: WantRow): SharedWant {
+  return { cardId: want.cardId, game: want.game, name: want.name, image: want.image, price: want.price }
+}
+
+/** Row identity for snapshot diffing (printing+finish+condition). */
+function snapshotKey(row: SharedCard): string {
+  return `${row.cardId}|${row.finish}|${row.condition}|${row.setCode ?? ''}|${row.number ?? ''}`
+}
+
 export function friendFromProfile(payload: ProfilePayload, existing?: Friend, sourceUrl?: string): Friend {
+  let lastDelta = existing?.lastDelta
+  if (existing) {
+    const before = new Set(existing.cards.map(snapshotKey))
+    const after = new Set(payload.cards.map(snapshotKey))
+    let added = 0
+    for (const key of after) if (!before.has(key)) added++
+    let removed = 0
+    for (const key of before) if (!after.has(key)) removed++
+    if (added || removed) lastDelta = { added, removed, at: Date.now() }
+  }
   return {
     id: payload.id,
     name: payload.name,
@@ -125,6 +171,8 @@ export function friendFromProfile(payload: ProfilePayload, existing?: Friend, so
     exportedAt: payload.at,
     sourceUrl: sourceUrl ?? existing?.sourceUrl,
     cards: payload.cards,
+    wants: payload.wants,
+    lastDelta,
   }
 }
 
@@ -305,6 +353,50 @@ function sanitizeSharedCards(raw: unknown, cap: number): SharedCard[] {
   return rows
 }
 
+const WANT_CAP = 2_000
+
+function sanitizeSharedWant(raw: unknown): SharedWant | null {
+  if (!isRecord(raw)) return null
+  const cardId = asStr(raw.cardId, 160)
+  const name = asStr(raw.name, 200)
+  if (!cardId || !name) return null
+  const colon = cardId.indexOf(':')
+  const game = colon > 0 ? (cardId.slice(0, colon) as Game) : null
+  if (!game || !GAMES.includes(game)) return null
+  const price = Number(raw.price)
+  return {
+    cardId,
+    game,
+    name,
+    image: httpsImage(asStr(raw.image, 500)),
+    price: Number.isFinite(price) && price > 0 && price < 1_000_000 ? Math.round(price * 100) / 100 : undefined,
+  }
+}
+
+function sanitizeSharedWants(raw: unknown): SharedWant[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const rows: SharedWant[] = []
+  for (const entry of raw) {
+    if (rows.length >= WANT_CAP) break
+    const row = sanitizeSharedWant(entry)
+    if (row) rows.push(row)
+  }
+  return rows.length ? rows : undefined
+}
+
+/** Backup round-trip: validate a stored want-list row. */
+export function sanitizeWantRecord(raw: unknown): WantRow | null {
+  const shared = sanitizeSharedWant(raw)
+  if (!shared) return null
+  const record = raw as Record<string, unknown>
+  return {
+    ...shared,
+    key: wantKeyFor(shared.game, shared.name),
+    setCode: asStr(record.setCode, 80),
+    addedAt: asTime(record.addedAt),
+  }
+}
+
 function sanitizeParty(raw: unknown): { id: string; name: string } | null {
   if (!isRecord(raw)) return null
   const id = asStr(raw.id, 64)
@@ -328,6 +420,7 @@ export function sanitizePayload(raw: unknown): SocialPayload {
       scope: raw.scope === 'all' ? 'all' : 'trade',
       at: asTime(raw.at),
       cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
+      wants: sanitizeSharedWants(raw.wants),
     }
   }
   if (kind === 'trade') {
@@ -363,6 +456,9 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
   const name = asStr(raw.name, 60)
   if (!id || !name) return null
   const sourceUrl = asStr(raw.sourceUrl, 600)
+  const delta = isRecord(raw.lastDelta) ? raw.lastDelta : null
+  const added = delta ? clampInt(delta.added, 0, 99_999) : undefined
+  const removed = delta ? clampInt(delta.removed, 0, 99_999) : undefined
   return {
     id,
     name,
@@ -373,6 +469,8 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
     exportedAt: asTime(raw.exportedAt),
     sourceUrl: sourceUrl && /^https?:\/\//i.test(sourceUrl) ? sourceUrl : undefined,
     cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
+    wants: sanitizeSharedWants(raw.wants),
+    lastDelta: delta && (added || removed) ? { added: added ?? 0, removed: removed ?? 0, at: asTime(delta.at) } : undefined,
   }
 }
 
