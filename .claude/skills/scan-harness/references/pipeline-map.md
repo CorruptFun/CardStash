@@ -105,35 +105,75 @@ explicit stop parks the live stream ~25s on iOS Home-Screen apps
 `getUserMedia` there is a permission dialog the user doesn't see — don't
 "simplify" them back to stop/reacquire.
 
-## Sideways cards (orientation, `looksSideways` + `uprightTurn`)
+## Sideways cards (orientation, `looksSideways` + `uprightOrientations`)
 
 People photograph cards lying flat on a desk, so the card arrives QUARTER
 TURNED — and every band and collector region below is written in upright
 card coordinates, so a turned card misses all of them. Measured before any
 handling: 5/46 on the `sideways`/`sideways-ccw` battery (and 0/23 one way)
-versus ~70% upright.
+versus ~70% upright. First cut (collector-line probe only): 12/46. Now:
+**26/46, zero wrong-cards**, standard battery unchanged cell for cell.
 
 The frame is turned upright before any card geometry applies. Two gates:
-- **When to look** (`looksSideways`, vision.ts): the detector under-reads a
-  sideways card badly, so the threshold is set from measurement, not
-  geometry — upright cards detect at p50 0.72 / p90 0.73, sideways at 0.97,
-  gate at **0.85**. On the standard battery this fires on 2/246 cells and
-  turns none of them.
-- **Which way is up** (`uprightTurn`, identify.ts): unknowable from shape,
-  so the COLLECTOR LINE arbitrates — `looksLikeCollectorLine` (fraction /
-  set-dash code / passcode) on the bottom strip of each candidate turn.
-  Script-agnostic on purpose: a Japanese card offers no other Latin
-  evidence, and the choice happens before any name is read. As-captured is
-  probed FIRST (a mis-detected upright card must not be turned), and
-  ambiguity resolves to no turn — never a coin flip.
+
+- **When to look** (`looksSideways`, vision.ts) — two measured arms, because
+  the outline alone lies in both directions (riftbound/champion-split-1
+  detects 0.95 upright and 0.71 sideways):
+  - `lineRatio` (`refineCardCrop`): the row edge profile's spikiness over the
+    column profile's, off the SAME profiles the region comes from. Text
+    lines pack edge pixels into narrow bands across the axis they run
+    perpendicular to. Measured over all 253 cells: upright min 1.16 / p50
+    2.16, sideways max 1.95 / p50 0.95 — **< 0.85** (inside the empty
+    [0.67, 1.16]) is sideways on layout alone.
+  - detected aspect **> 0.85** (upright p50 0.72, sideways 0.97) still fires,
+    but only while `lineRatio < 2.4` — the landscape-detecting upright frames
+    sit at 3.01/4.42, every sideways frame ≤ 1.95.
+  - Together: 46/46 sideways cells, **0/246 standard cells** (the aspect-only
+    gate fired on 2). Upright scans pay nothing for any of this.
+- **Which way is up** (`uprightOrientations`, identify.ts): unknowable from
+  shape. The COLLECTOR LINE arbitrates when it can — `looksLikeCollectorLine`
+  (fraction / set-dash code / passcode) on the bottom strip of each candidate
+  turn, script-agnostic on purpose since a Japanese card offers no other
+  Latin evidence and the choice happens before any name is read. As-captured
+  is probed FIRST, so a mis-detected upright card is never turned.
+  When neither strip parses — 30/46 cells, that line being the tiniest type
+  on a card that is physically smaller in a sideways frame — the pass no
+  longer gives up and reads the frame as captured (a guaranteed miss: every
+  band is a quarter turn off). **Both turns are read through in full**,
+  ordered by `latinWordCount` of the probe strip: the right way up shows
+  rules/flavour text (measured 5–20 words), the same strip 180° out shows
+  0–4, because Tesseract has no upside-down mode. Ordering is latency only —
+  correctness never depends on it, since the loser is read next. The frame AS
+  CAPTURED stays last in the list with the whole-card PSM-3 sweep alone
+  (`sweepOnly`): that sweep reads quarter-turned type by itself (its layout
+  analysis rotates vertical text lines — but one way round only, which is why
+  `sideways-ccw` used to trail `sideways`), and it is what identified these
+  frames before. Its collector regions are skipped: a quarter turn off, they
+  would only spend magnified passes on the card's side edge.
 
 **Guard:** a turned frame demands `TURNED_MATCH_THRESHOLD` (0.95) on NAME
-matches. Turning is an inferred orientation over fewer pixels, and Pokémon
-print the evolution line under the name — that line is itself a real card
-name ("Iono's Tadbulb" on an Iono's Bellibolt ex), so a half-read band
-matches a genuine wrong card with conviction. Correct turned hits measured
-1.00 (exact name) or 0.70 (collector-line evidence, judged separately);
-both wrong cards sat at 0.79. Result: 12/46, zero wrong-cards.
+matches, **applied to the whole printed name** rather than to `nameScore`.
+Turning is an inferred orientation over fewer pixels, and Pokémon print the
+evolution line under the name — that line is itself a real card name ("Iono's
+Tadbulb" on an Iono's Bellibolt ex, 0.79) — while `nameScore` forgives a
+missing epithet on purpose, which parks EVERY bare champion lead at exactly
+0.95 (1 − its 0.05 penalty). That loophole is not hypothetical: a turned
+"Ahri - Inquisitive" read as "Ahri" came back as "Ahri - Alluring" at 0.95.
+Requiring the full name is strictly narrowing (similarity ≤ nameScore
+always). Correct turned hits measure 1.00 (exact name), 0.96, or 0.70
+(collector-line evidence, judged separately).
+
+**Cost:** an unreadable sideways frame now pays two name ladders plus two
+corner sweeps, bounded by the same shared budgets (2 watchdog kills / 18s of
+OCR, 20s of lookups) — passes land in 1–7s, misses grind to ~20s. Nothing
+upright pays it: the gate fires on 0/246 standard cells.
+
+**Known limits, measured:** correct reads rejected by the turned bar —
+"LightningBolt" (the space lost) at 0.929, "Two Years At the Sabaody
+Archipelago" (the leading "In" lost) at 0.923; both would need an evidence
+pairing, not a lower bar. Pokémon full-arts (umbreon-vmax-alt, pikachu-modern)
+fail sideways because they fail upright too (0/9 and 4/9). Both ja fixtures
+still correctly REFUSE.
 
 ## Language-independent identification (the corner-only path)
 

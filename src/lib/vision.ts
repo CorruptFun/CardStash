@@ -131,6 +131,28 @@ export interface CropRefinement {
   /** Roll angle that was removed, in degrees (0 when none). */
   angle: number
   applied: boolean
+  /**
+   * How much the frame's edge layout looks like UPRIGHT card text — the
+   * spikiness of the row edge profile over that of the column profile (see
+   * `profileSpikiness`). Text lines pack their edge pixels into narrow bands
+   * across the axis they run perpendicular to, so an upright card reads > 1
+   * and a quarter-turned one < 1. 1 means "no evidence" (detection failed).
+   */
+  lineRatio: number
+}
+
+/**
+ * Per-unit-length total variation of an edge-count profile: how much of the
+ * frame's edge mass is packed into narrow spikes rather than spread evenly.
+ * Length-normalized so the row and column profiles of a non-square frame stay
+ * comparable to each other.
+ */
+function profileSpikiness(profile: Float64Array): number {
+  let sum = 0
+  let variation = 0
+  for (let i = 0; i < profile.length; i++) sum += profile[i]
+  for (let i = 1; i < profile.length; i++) variation += Math.abs(profile[i] - profile[i - 1])
+  return sum > 0 ? (variation / sum) * profile.length : 0
 }
 
 /**
@@ -142,7 +164,7 @@ export interface CropRefinement {
  * roll. Fails soft: anything implausible returns the input untouched.
  */
 export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
-  const none: CropRefinement = { canvas: source, region: null, cardRegion: null, angle: 0, applied: false }
+  const none: CropRefinement = { canvas: source, region: null, cardRegion: null, angle: 0, applied: false, lineRatio: 1 }
   try {
     const sw = REFINE_WIDTH
     const sh = Math.max(24, Math.round((source.height / source.width) * REFINE_WIDTH))
@@ -219,6 +241,13 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
     }
     const deskew = Math.abs(angle) >= DESKEW_MIN_DEG && Math.abs(angle) <= DESKEW_MAX_DEG ? angle : 0
 
+    // Text-layout orientation, read off the same profiles the region came
+    // from: which axis the frame's edge mass is banded along. It answers a
+    // question the detected shape can't — a card whose edges the detector
+    // read badly still lays its type out in lines.
+    const colSpikes = profileSpikiness(colEdges)
+    const lineRatio = colSpikes > 0 ? profileSpikiness(rowEdges) / colSpikes : 1
+
     let region = findCardRegion(colEdges, rowEdges, sw, sh)
     if (region) {
       // Margin, then snap toward card shape by GROWING the short side — a
@@ -256,7 +285,7 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
     // precision consumers to map through.
     const cropRegion = region && region.w * region.h <= 0.66 ? region : null
 
-    if (!cropRegion && !deskew) return { ...none, cardRegion: region }
+    if (!cropRegion && !deskew) return { ...none, cardRegion: region, lineRatio }
 
     const sx = (cropRegion?.x ?? 0) * source.width
     const sy = (cropRegion?.y ?? 0) * source.height
@@ -279,7 +308,7 @@ export function refineCardCrop(source: HTMLCanvasElement): CropRefinement {
     // After a crop the card IS the canvas; otherwise the (deskewed) canvas
     // still carries the detection for mapping — small angles keep it valid.
     const cardRegion = cropRegion ? null : region
-    return { canvas: out, region: cropRegion, cardRegion, angle: deskew, applied: true }
+    return { canvas: out, region: cropRegion, cardRegion, angle: deskew, applied: true, lineRatio }
   } catch {
     return none
   }
@@ -410,12 +439,18 @@ export function hammingDistance(a: string, b: string): number {
  * turn the FRAME upright before any of that geometry is applied.
  */
 export function looksSideways(refinement: CropRefinement, frame: HTMLCanvasElement): boolean {
+  const ratio = refinement.lineRatio
+  // Type laid out along the wrong axis is sideways whatever the outline says —
+  // this is the arm that catches a card the detector shaped wrongly.
+  if (ratio > 0 && ratio < SIDEWAYS_LINE_RATIO) return true
   const region = refinement.cardRegion ?? refinement.region
   // With no detection to go on, the frame's own shape is the only clue.
-  if (!region) return frame.width > frame.height * SIDEWAYS_ASPECT
-  const w = region.w * frame.width
-  const h = region.h * frame.height
-  return h > 0 && w / h > SIDEWAYS_ASPECT
+  const w = region ? region.w * frame.width : frame.width
+  const h = region ? region.h * frame.height : frame.height
+  // A landscape detection is only trusted as "sideways" while the layout
+  // doesn't clearly disagree: an upright card the detector read as landscape
+  // still bands its edges along rows, and it must not be turned.
+  return h > 0 && w / h > SIDEWAYS_ASPECT && ratio < UPRIGHT_LINE_RATIO
 }
 
 /**
@@ -424,10 +459,27 @@ export function looksSideways(refinement: CropRefinement, frame: HTMLCanvasEleme
  * the measured split is what the gate is set from, not the geometric ideal:
  * over the matrix, upright cards detect at p50 0.72 / p90 0.73, sideways ones
  * at 0.97. 0.85 sits in the empty middle. Being wrong here is cheap by
- * construction — `uprightTurn` probes the as-captured orientation first and
- * refuses to turn when nothing reads like a collector line either way.
+ * construction — `uprightOrientations` probes the as-captured orientation
+ * first, and the frame as captured stays a candidate reading orientation.
  */
 const SIDEWAYS_ASPECT = 0.85
+/**
+ * `lineRatio` gates, measured over the whole matrix (253 cells, all 23
+ * fixtures × the standard battery + both sideways turns):
+ *
+ * - upright cells:  min 1.16, p10 1.61, p50 2.16 — never below 1.
+ * - sideways cells: max 1.95, p50 0.95 — and the two whose OUTLINE also
+ *   misreads (riftbound/champion-split-1, which detects at 0.71 sideways and
+ *   0.95 upright — backwards both ways) sit at 0.66/0.67.
+ *
+ * So: below 0.85 — inside the empty [0.67, 1.16] — the layout alone settles
+ * it. Above the aspect gate, the layout only has to not contradict: the only
+ * upright frames that detect landscape are champion-split-1's, at 3.01/4.42,
+ * while every sideways frame is ≤ 1.95, and 2.4 sits in that gap. Together
+ * they fire on 46/46 sideways cells and 0/207 upright ones.
+ */
+const SIDEWAYS_LINE_RATIO = 0.85
+const UPRIGHT_LINE_RATIO = 2.4
 
 /** Rotate a frame by whole quarter turns (1 = 90° clockwise). */
 export function rotateQuarter(source: HTMLCanvasElement, turns: number): HTMLCanvasElement {

@@ -13,7 +13,16 @@ import {
   type CornerRead,
 } from './corner'
 import { LIGHT_MATCH_GAMES } from './games'
-import { nameBands, ocrTimeouts, readCardNames, readCardNamesAnywhere, readRegionText, readSealedLines, type OcrRect } from './ocr'
+import {
+  latinWordCount,
+  nameBands,
+  ocrTimeouts,
+  readCardNames,
+  readCardNamesAnywhere,
+  readRegionText,
+  readSealedLines,
+  type OcrRect,
+} from './ocr'
 import { matchPokemon, pokemonByCollector } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import { mtgBySetNumber, mtgMatchTraits, mtgPrintings } from './scryfall'
@@ -250,6 +259,13 @@ const CORNER_STRIP: OcrRect = { x: 0, y: 0.85, w: 1, h: 0.15 }
  * conviction. Measured on the sideways battery, correct turned hits score
  * 1.00 (exact name) or 0.70 (collector-line evidence, judged separately),
  * while both wrong cards sat at 0.79 — this bar is set in that empty gap.
+ *
+ * It is applied to the WHOLE printed name, not to `nameScore`: that function
+ * forgives a missing epithet on purpose (the card prints "JINX" over "Loose
+ * Cannon"), which puts every bare champion lead at exactly 0.95 — 1 − its
+ * 0.05 penalty — and a lead cannot tell one sibling from another. Reading a
+ * quarter-turned "Ahri - Inquisitive" as "Ahri" duly matched "Ahri -
+ * Alluring" at 0.95. Off a turned frame the epithet has to be read too.
  */
 const TURNED_MATCH_THRESHOLD = 0.95
 
@@ -273,40 +289,77 @@ function mapThrough(refined: CropRefinement): (rect: OcrRect) => OcrRect {
 }
 
 /**
- * Turn a sideways frame upright. Both quarter turns are probed at the strip
- * where the collector line is printed; the turn whose strip actually reads
- * like one wins. That test is script-agnostic on purpose — a Japanese card
- * offers no other Latin evidence, and the choice must be made before a name
- * has been read or a game is even known.
- *
- * Ambiguity resolves to null (stay as captured) rather than to a coin flip:
- * a wrongly-turned frame sends every later pass hunting in the wrong place.
+ * One candidate way up for a captured frame: the crop to read, whether
+ * getting there took a quarter turn (which raises the name-match bar), and
+ * whether only the orientation-agnostic sweep applies to it.
  */
-async function uprightTurn(
+interface Orientation {
+  refined: CropRefinement
+  turned: boolean
+  /**
+   * Every name band is written in upright card coordinates, so a frame we
+   * believe is sideways earns only the whole-card PSM-3 sweep — which reads
+   * quarter-turned type on its own (Tesseract's layout analysis rotates
+   * vertical text lines) and is the pass that identifies these frames today.
+   */
+  sweepOnly?: boolean
+}
+
+/**
+ * The ways up worth reading a sideways-looking frame, best first.
+ *
+ * Both quarter turns are probed at the strip where the collector line is
+ * printed; a turn whose strip actually reads like one wins outright. That
+ * test is script-agnostic on purpose — a Japanese card offers no other Latin
+ * evidence, and the choice must be made before a name has been read or a game
+ * is even known.
+ *
+ * When neither strip parses — the common case, since that line is the tiniest
+ * type on the card and a sideways card is physically smaller in frame — the
+ * old behaviour was to give up and read the frame as captured, which every
+ * band below then missed by a quarter turn. Both turns stay candidates
+ * instead, ordered by whether their strip carried readable words at all: the
+ * right way up shows rules or flavour text, the wrong way up (180° out) shows
+ * the same pixels upside down, which Tesseract cannot read. The frame AS
+ * CAPTURED stays last in the list, so a card that was never sideways still
+ * gets the read it would have had.
+ */
+async function uprightOrientations(
   frame: HTMLCanvasElement,
   asIs: CropRefinement,
   gameHint: Game | undefined,
-): Promise<CropRefinement | null> {
+): Promise<Orientation[]> {
   const strip = gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP
+  const probe = (refined: CropRefinement) =>
+    readRegionText(refined.canvas, mapThrough(refined)(strip), { variant: 'binary' }).catch(() => '')
   // A card already the right way up (a mis-detection) would read its own
   // collector line — so an as-captured hit means: don't turn anything. Probed
   // on the REFINED canvas, since that is the geometry the strip is written in.
-  const asCaptured = await readRegionText(asIs.canvas, mapThrough(asIs)(strip), { variant: 'binary' }).catch(() => '')
+  const asCaptured = await probe(asIs)
   if (looksLikeCollectorLine(asCaptured)) {
     traceEvent('upright', { turns: 0, reason: 'as-captured' })
-    return null
+    return [{ refined: asIs, turned: false }]
   }
+  const candidates: { turns: number; refined: CropRefinement; words: number }[] = []
   for (const turns of [1, 3]) {
-    const rotated = rotateQuarter(frame, turns)
-    const candidate = refineCardCrop(rotated)
-    const text = await readRegionText(candidate.canvas, mapThrough(candidate)(strip), { variant: 'binary' }).catch(() => '')
+    const refined = refineCardCrop(rotateQuarter(frame, turns))
+    const text = await probe(refined)
     if (looksLikeCollectorLine(text)) {
       traceEvent('upright', { turns, raw: text.slice(0, 60) })
-      return candidate
+      return [{ refined, turned: true }]
     }
+    candidates.push({ turns, refined, words: latinWordCount(text) })
   }
-  traceEvent('upright', { turns: null, reason: 'no collector line either way' })
-  return null
+  candidates.sort((a, b) => b.words - a.words || a.turns - b.turns)
+  traceEvent('upright', {
+    turns: null,
+    reason: 'both turns',
+    order: candidates.map((c) => `${c.turns}:${c.words}w`).join(' '),
+  })
+  return [
+    ...candidates.map((candidate) => ({ refined: candidate.refined, turned: true })),
+    { refined: asIs, turned: false, sweepOnly: true },
+  ]
 }
 
 async function identifyViaOcr(
@@ -327,31 +380,37 @@ async function identifyViaOcr(
   // flat-tile noise guard — measured as a net loss on the matrix. Dark
   // frames are instead handled inside detection and at the camera.)
   const darkFrame = frameLuma(frame) < DARK_FRAME_LUMA
-  let refined = refineCardCrop(frame)
+  const asIs = refineCardCrop(frame)
   // A card lying SIDEWAYS on a desk is a normal way to photograph one, and
   // every band and collector region below is written in upright card
   // coordinates — so turn the FRAME upright first, before any of that
   // geometry applies. Which quarter turn is up can't be known from shape
-  // alone, so both are tried and the collector line arbitrates: the right way
-  // up puts it in the bottom strip, the wrong way puts the card's top there.
-  let turned = false
-  if (looksSideways(refined, frame)) {
-    const upright = await uprightTurn(frame, refined, gameHint)
-    if (upright) {
-      refined = upright
-      turned = true
-    }
+  // alone; the collector line arbitrates when it reads, and when it doesn't
+  // both turns are simply read through, likeliest first.
+  const orientations: Orientation[] = looksSideways(asIs, frame)
+    ? await uprightOrientations(frame, asIs, gameHint)
+    : [{ refined: asIs, turned: false }]
+  /** One orientation, with the per-orientation state the passes below share. */
+  interface Reading extends Orientation {
+    canvas: HTMLCanvasElement
+    /** The tiny collector-line crops need card-relative precision even when
+     * the frame wasn't worth cropping — mapped through the detected region. */
+    mapRect: (rect: OcrRect) => OcrRect
+    /** Speculative collector-line read, queued once the first lookup goes out. */
+    cornerText: Promise<string> | null
   }
-  const canvas = refined.canvas
-  traceEvent('crop', {
-    applied: refined.applied,
-    angle: refined.angle,
-    ...(refined.region ? { x: refined.region.x, y: refined.region.y, w: refined.region.w, h: refined.region.h } : {}),
-    ...(refined.cardRegion ? { card: refined.cardRegion } : {}),
+  const readings: Reading[] = orientations.map((orientation) => {
+    const { refined } = orientation
+    traceEvent('crop', {
+      applied: refined.applied,
+      angle: refined.angle,
+      ...(orientation.turned ? { turned: true } : {}),
+      ...(orientation.sweepOnly ? { sweepOnly: true } : {}),
+      ...(refined.region ? { x: refined.region.x, y: refined.region.y, w: refined.region.w, h: refined.region.h } : {}),
+      ...(refined.cardRegion ? { card: refined.cardRegion } : {}),
+    })
+    return { ...orientation, canvas: refined.canvas, mapRect: mapThrough(refined), cornerText: null }
   })
-  // The tiny collector-line crops need card-relative precision even when the
-  // frame wasn't worth cropping — map them through the detected card region.
-  const mapRect = mapThrough(refined)
   const config = settings()
   // No hint: only sweep enabled games with a cheap by-name API. Catalog-backed
   // games (Riftbound & co.) are reachable by picking them in the scan game
@@ -362,7 +421,6 @@ async function identifyViaOcr(
   const timeoutMs = games.length === 1 ? OCR_MATCH_TIMEOUT_HINTED_MS : OCR_MATCH_TIMEOUT_MS
   const tried = new Set<string>()
   let firstRead: string | undefined
-  let cornerText: Promise<string> | null = null
   // Attempt-wide budget against DYING APIs: fast lookups are nearly free and
   // deep candidate exploration is the accuracy win, but lookups riding their
   // multi-second timeouts must not stretch one attempt into minutes — only
@@ -386,15 +444,16 @@ async function identifyViaOcr(
   }
 
   /** Look the candidates up; a confident hit is refined to the exact edition. */
-  const tryCandidates = async (fresh: string[]): Promise<IdentifyOutcome | null> => {
+  const tryCandidates = async (fresh: string[], reading: Reading): Promise<IdentifyOutcome | null> => {
     if (!fresh.length) return null
+    const { canvas, mapRect } = reading
     // Queue the collector-line OCR now: it runs on the secondary OCR worker
     // (or on the primary, idle while the name candidates are out on the
     // network), so the line is usually read "for free" by the time a match
     // wants it. With a game hint the crop is that game's exact region; in
     // auto mode the shared bottom strip covers every game but Yu-Gi-Oh,
     // whose mid-card code refineFromCorner re-reads.
-    cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
+    reading.cornerText ??= readRegionText(canvas, mapRect(gameHint ? CORNER_REGION[gameHint] : CORNER_STRIP)).catch(() => '')
     for (const name of fresh.slice(0, OCR_NAMES_PER_BAND)) {
       if (slowLookupsLeft <= 0 || Date.now() > lookupDeadline) break
       // Consumed here, not at freshOf: candidates past this pass's window
@@ -415,11 +474,20 @@ async function identifyViaOcr(
         score: best ? Number(best.score.toFixed(3)) : null,
         ms: lookupMs,
       })
-      const bar = turned ? Math.max(matchThresholdFor(name), TURNED_MATCH_THRESHOLD) : matchThresholdFor(name)
+      const bar = reading.turned ? Math.max(matchThresholdFor(name), TURNED_MATCH_THRESHOLD) : matchThresholdFor(name)
       if (!best || best.score < bar) continue
+      // Turned frames additionally lose the epithet forgiveness baked into
+      // the score — see TURNED_MATCH_THRESHOLD. Strictly narrowing: the full
+      // name's similarity is never above the score this already cleared.
+      if (reading.turned && similarity(name, best.card.name) < TURNED_MATCH_THRESHOLD) {
+        traceEvent('turned-reject', { read: name, card: best.card.name, score: Number(best.score.toFixed(3)) })
+        continue
+      }
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
-      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(() => null)
+      const refined = await refineFromCorner(best.card, canvas, reading.cornerText, !!gameHint, mapRect, config.pokemonKey).catch(
+        () => null,
+      )
       let card = refined?.card ?? best.card
       const foil = detectFoil(canvas)
       traceEvent('refine', {
@@ -452,58 +520,68 @@ async function identifyViaOcr(
     return null
   }
 
-  // Bands are OCR'd one at a time, the game's most likely name position
-  // first (Riftbound & co. print names mid-card, not at the top), so a hit
-  // in the first band skips the rest of the work entirely.
-  for (const band of nameBands(gameHint)) {
-    bail()
-    if (outOfOcrRoad()) break
-    let names: string[]
-    try {
-      names = await readCardNames(canvas, band)
-    } catch {
-      if (tried.size || firstRead) break
-      return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
-    }
-    const hit = await tryCandidates(freshOf(names))
-    if (hit) return hit
-  }
+  /**
+   * Every name pass over one orientation. A non-ok return is the hard OCR
+   * engine failure — nothing else here answers with a verdict.
+   */
+  const namePasses = async (reading: Reading): Promise<IdentifyOutcome | null> => {
+    const { canvas } = reading
+    // Bands are OCR'd one at a time, the game's most likely name position
+    // first (Riftbound & co. print names mid-card, not at the top), so a hit
+    // in the first band skips the rest of the work entirely.
+    if (!reading.sweepOnly) {
+      for (const band of nameBands(gameHint)) {
+        bail()
+        if (outOfOcrRoad()) break
+        let names: string[]
+        try {
+          names = await readCardNames(canvas, band)
+        } catch {
+          if (tried.size || firstRead) break
+          return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
+        }
+        const hit = await tryCandidates(freshOf(names), reading)
+        if (hit) return hit
+      }
 
-  // The contrast-stretched pass misreads stylized type over busy art (full
-  // arts, foils). Before the heavier sweeps, re-read the game's primary band
-  // binarized at higher resolution — in both polarities, since ornate glyph
-  // faces routinely defeat the mean-luma polarity heuristic. A different
-  // failure surface, so it regularly cracks what the first pass mangled.
-  // On a genuinely dark frame that has produced NO plausible text at all,
-  // one binarized retry is the last realistic chance — the flip and the
-  // whole-card sweep never rescue pure noise, they just grind for seconds
-  // while the user watches "Identifying…". Fail fast toward the actionable
-  // fix (light) instead.
-  const bandVariants = darkFrame && !firstRead ? (['binary'] as const) : (['binary', 'binary-flip'] as const)
-  for (const variant of bandVariants) {
-    bail()
-    if (outOfOcrRoad()) break
-    try {
-      const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })))
-      if (hit) return hit
-    } catch (err) {
-      if (isAbort(err)) throw err
-      /* fall through to the full sweep */
+      // The contrast-stretched pass misreads stylized type over busy art (full
+      // arts, foils). Before the heavier sweeps, re-read the game's primary band
+      // binarized at higher resolution — in both polarities, since ornate glyph
+      // faces routinely defeat the mean-luma polarity heuristic. A different
+      // failure surface, so it regularly cracks what the first pass mangled.
+      // On a genuinely dark frame that has produced NO plausible text at all,
+      // one binarized retry is the last realistic chance — the flip and the
+      // whole-card sweep never rescue pure noise, they just grind for seconds
+      // while the user watches "Identifying…". Fail fast toward the actionable
+      // fix (light) instead.
+      const bandVariants = darkFrame && !firstRead ? (['binary'] as const) : (['binary', 'binary-flip'] as const)
+      for (const variant of bandVariants) {
+        bail()
+        if (outOfOcrRoad()) break
+        try {
+          const hit = await tryCandidates(freshOf(await readCardNames(canvas, nameBands(gameHint)[0], { variant })), reading)
+          if (hit) return hit
+        } catch (err) {
+          if (isAbort(err)) throw err
+          /* fall through to the full sweep */
+        }
+      }
     }
-  }
 
-  // The bands assume a standard frame, but promos, full-art specials and
-  // custom cards put names in unexpected places. Before giving up, sweep the
-  // whole card once with automatic layout detection and mine every line.
-  if (!(darkFrame && !firstRead) && !outOfOcrRoad()) {
-    bail()
-    try {
-      const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)))
-      if (hit) return hit
-    } catch (err) {
-      if (isAbort(err)) throw err
-      /* the band sweep's verdict below stands */
+    // The bands assume a standard frame, but promos, full-art specials and
+    // custom cards put names in unexpected places. Before giving up, sweep the
+    // whole card once with automatic layout detection and mine every line.
+    if (!(darkFrame && !firstRead) && !outOfOcrRoad()) {
+      bail()
+      try {
+        const hit = await tryCandidates(freshOf(await readCardNamesAnywhere(canvas)), reading)
+        if (hit) return hit
+      } catch (err) {
+        if (isAbort(err)) throw err
+        /* the band sweep's verdict below stands */
+      }
     }
+    return null
   }
 
   // Name reading is out of road (ornate faces, foil sheen over the title —
@@ -512,7 +590,8 @@ async function identifyViaOcr(
   // every print worldwide: a fraction + printed set size (Pokémon, catalog
   // games), an exact set code + collector number (MTG), or the 8-digit
   // passcode (Yu-Gi-Oh).
-  if (gameHint) {
+  const cornerIdentify = async (reading: Reading, gameHint: Game): Promise<IdentifyOutcome | null> => {
+    const { canvas, mapRect, cornerText } = reading
     bail()
     try {
       // cornerText (when queued) already covered the exact hinted region;
@@ -586,6 +665,27 @@ async function identifyViaOcr(
       }
     } catch {
       /* the miss verdict below stands */
+    }
+    return null
+  }
+
+  // One orientation is the normal case and reads exactly as it always did.
+  // When the frame looked sideways and the collector line couldn't settle
+  // which way up it is, the alternatives are read in turn — names across all
+  // of them first, because a band read on the right way up beats a magnified
+  // corner sweep on the wrong one, and the corner path is the expensive one.
+  for (const reading of readings) {
+    const hit = await namePasses(reading)
+    if (hit) return hit
+  }
+  if (gameHint) {
+    for (const reading of readings) {
+      // The as-captured fallback is only in the list because the whole-card
+      // sweep reads turned type; its collector regions are a quarter turn off
+      // and would only spend magnified passes on the card's side edge.
+      if (reading.sweepOnly) continue
+      const hit = await cornerIdentify(reading, gameHint)
+      if (hit) return hit
     }
   }
 

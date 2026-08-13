@@ -380,6 +380,20 @@ function wordish(token: string): boolean {
 }
 
 /**
+ * How many tokens in an OCR read look like real words. Used as orientation
+ * evidence: a card photographed the right way up prints readable type
+ * everywhere (rules and flavour text at minimum), while the SAME crop 180°
+ * out reads as garbage — Tesseract has no upside-down mode. Deliberately
+ * counts words rather than scoring them: the question is only "is there
+ * language here", not which language or which card.
+ */
+export function latinWordCount(text: string): number {
+  return text
+    .split(/[^A-Za-z'’-]+/)
+    .filter((token) => (token.match(/[A-Za-z]/g) ?? []).length >= 3 && wordish(token)).length
+}
+
+/**
  * How much a candidate looks like a card name — used to rank candidates so
  * the lookup budget goes to the likeliest reads first, not to whatever
  * plate/art garbage OCR'd above the name.
