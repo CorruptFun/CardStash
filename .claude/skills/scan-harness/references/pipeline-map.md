@@ -28,7 +28,18 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
 4. **Binary retries** — primary band at 960px, Otsu-binarized, BOTH
    polarities (`binary`, `binary-flip`) — ornate faces defeat the mean-luma
    polarity heuristic; this pass cracks stylized type the stretch pass
-   mangles.
+   mangles. Then BOTH chroma projections (`chroma-min` = min(R,G,B),
+   `chroma-max` = max(R,G,B)), which throw the colour away instead of
+   averaging it in: card text is very nearly neutral even on a foil while a
+   sheen or a coloured plate is not, so the extreme channels separate what
+   Rec.601 luma fuses. min for light text on colour, max for dark text on
+   colour — complementary, same reason both binarization polarities are.
+   Measured +16 cells on the standard battery and +4 on the foil battery,
+   with zero new wrong cards, and the run got FASTER (a hit here skips the
+   whole-card PSM-3 sweep). Not gated on `detectFoil`: that detector is tuned
+   conservatively for PRICING ("false means unknown") and does not fire on
+   sheen at all — and the win is much wider than foil anyway, because card
+   art is saturated in general.
 5. **Anywhere sweep** — whole card at 700px, PSM 3 (promos/full-arts put
    names anywhere).
 6. **Corner-first ID** (last resort, hinted only) — escalating collector

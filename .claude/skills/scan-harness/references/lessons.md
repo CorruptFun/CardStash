@@ -124,6 +124,44 @@ result seems absurd, check this list before writing code.
     1 cuts both ways — a NARROWING also needs its evidence, or it just moves
     the losses somewhere less visible.
 
+## Foil (the round that started with "most collected cards are shiny")
+
+23. **Luma is the wrong projection for text on colour, and foil is just the
+    extreme case.** Every prep pass converted RGB to grey with Rec.601
+    weights, which is right for ink on card stock and wrong the moment the
+    background is SATURATED: a cyan sheen and mid-grey ink land on the same
+    grey, so the contrast is gone before any stretch or Otsu threshold runs
+    — nothing downstream can recover it. Card text is very nearly neutral
+    (black or white) even on a foil, so throwing the colour away instead of
+    averaging it in separates them: `chroma-max` = max(R,G,B) sends any
+    saturated colour bright and leaves neutral dark ink dark; `chroma-min` =
+    min(R,G,B) does the reverse for light ink. Complementary, exactly like
+    the two binarization polarities. Expected a foil fix, got a general one:
+    **+16 cells on the STANDARD battery** (71%→77%; Riftbound 83%→94%, YGO
+    81%→94%, MTG 90%→96%) with zero new wrong cards, because card ART is
+    saturated in general — coloured name plates, full-arts, YGO's frames.
+    It also ran FASTER: a hit at this rung skips the whole-card PSM-3 sweep.
+    Highest-yield single change since the v0.7.0 overhaul, and it sat in
+    plain sight behind a one-line colour conversion nobody had questioned.
+24. **Don't gate a fix on a detector built for another job.** The obvious
+    trigger was `detectFoil`, which already exists — but it is tuned
+    conservatively for PRICING ("false means unknown, not non-foil"), wants
+    5+ hue families spread over the card, and fires on a rainbow ALT-ART
+    scan while missing an actual sheen completely. Gated that way the new
+    passes never ran on the cells that needed them and the measurement came
+    back byte-identical to baseline, which reads exactly like "the idea
+    doesn't work". Prove the mechanism with the gate forced OPEN first, then
+    engineer the trigger — here the answer was that no trigger was needed.
+25. **Calibrate a synthetic degradation against a real photo, or it will
+    justify fixes for a failure that doesn't happen.** The first foil model
+    was a full-card, full-saturation rainbow: it looked dramatic and was
+    nothing like the reference phone photo, where the sheen is a narrow
+    pearlescent band leaving most of the card readable. Render the
+    degradation to a PNG and LOOK at it beside a real photo before measuring
+    anything with it (lesson 1, applied to the test rig instead of the
+    fixtures). Note the fixtures can never supply foil themselves: TCGplayer
+    and TCGdex ship flat SCANS, which kill the diffraction a phone sees live.
+
 ## Process truths
 
 11. **Verify findings against the working tree, not HEAD.** In the review

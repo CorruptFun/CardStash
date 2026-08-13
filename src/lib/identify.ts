@@ -600,7 +600,20 @@ async function identifyViaOcr(
       // whole-card sweep never rescue pure noise, they just grind for seconds
       // while the user watches "Identifying…". Fail fast toward the actionable
       // fix (light) instead.
-      const bandVariants = darkFrame && !firstRead ? (['binary'] as const) : (['binary', 'binary-flip'] as const)
+      // On a card whose surface actually MEASURES as foil, add the two
+      // chroma projections. A holographic sheen is saturated light, and the
+      // luma every pass above uses averages it straight into the ink — the
+      // contrast is gone before any stretch or threshold runs, which is why
+      // an ordinary phone photo of a foil is the pipeline's worst case
+      // (measured: Pokémon 1/7, Riftbound 1/6 on the foil-worst battery).
+      // Dropping the colour instead of averaging it separates neutral text
+      // from a coloured sheen. Gated on detectFoil so a non-foil scan never
+      // pays for these passes, and last in the ladder so a foil that reads
+      // normally never reaches them.
+      const bandVariants =
+        darkFrame && !firstRead
+          ? (['binary'] as const)
+          : (['binary', 'binary-flip', 'chroma-min', 'chroma-max'] as const)
       for (const variant of bandVariants) {
         bail()
         if (outOfOcrRoad()) break

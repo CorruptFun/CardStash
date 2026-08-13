@@ -20,8 +20,11 @@ Chromium, graded against ground truth, with per-stage failure attribution.
 Built and battle-tested in the v0.7.0 overhaul that took the matrix from 36%
 to 67% (Pokémon 3%→32%, Riftbound 48%→74%, One Piece 39%→100%, MTG 73%→88%,
 YGO 31%→81%), then extended in v0.7.1 for harsh low light (dark scenes
-6/21 → 17/21). Everything below exists because synthetic tests passed while
-real cards failed on-device — only real imagery finds these bugs.
+6/21 → 17/21) and again for FOIL, which took the standard battery 71% → 77%
+(Riftbound 83%→94%, YGO 81%→94%, MTG 90%→96%) — see lesson 23, the single
+highest-yield change since the overhaul. Everything below exists because
+synthetic tests passed while real cards failed on-device — only real imagery
+finds these bugs.
 
 Two paths the matrix CANNOT reach, so they have their own checks: the
 camera itself (`npm run test:capture` drives the real stacked capture
@@ -43,6 +46,7 @@ git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
 npm run test:unit          # node tests: corner parsing, candidates, stubs
 npm run test:scan          # full matrix (~5 min, 228 cells, 3 pages)
 npm run test:lowlight      # harsh low light (lowlight/dim/dark) + 3-frame stack
+npm run test:foil          # holographic foil sheen (foil/foil-worst)
 npm run test:capture       # real captureFrameStacked in a browser (noise ↓)
 node tests/harness/run-matrix.mjs \
   --games=pokemon,riftbound --degradations=clean,glare --mode=hinted \

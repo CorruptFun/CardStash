@@ -10,6 +10,13 @@
 export const FRAME_W = 756
 export const FRAME_H = 1056
 
+/**
+ * How much of a foil's reflected light is white rather than spectrum.
+ * Calibrated by eye against a real phone photo of a foil Riftbound card,
+ * where the sheen reads as a whitish green-cyan wash, not a rainbow.
+ */
+const SHEEN_WHITE = 0.55
+
 /** Seeded PRNG so noise/glare land identically run to run. */
 function mulberry32(seed) {
   let a = seed >>> 0
@@ -93,9 +100,10 @@ export function trimToCard(img) {
 export function compose(img, spec = {}) {
   const {
     fill = 0.92, dx = 0, dy = 0, rotate = 0, tilt = 0,
-    downscale = 1, blurPx = 0, glare = 0, brightness = 1, noise = 0,
+    downscale = 1, blurPx = 0, glare = 0, brightness = 1, noise = 0, foil = 0,
   } = spec
-  const seed = spec.seed ?? Math.round(fill * 97 + rotate * 13 + tilt * 57 + glare * 31 + brightness * 71 + noise * 7 + 1)
+  const seed =
+    spec.seed ?? Math.round(fill * 97 + rotate * 13 + tilt * 57 + glare * 31 + brightness * 71 + noise * 7 + foil * 41 + 1)
   const rand = mulberry32(seed)
 
   const src = trimToCard(img)
@@ -138,6 +146,57 @@ export function compose(img, spec = {}) {
       ctx.drawImage(card, 0, i * stripH, cardW, stripH, x, y, w, stripH * yScale + 0.75)
     }
     card = warped
+  }
+
+  // Holographic foil. Distinct from `glare` in the way that matters: glare is
+  // WHITE specular light thrown by the room, while a foil layer diffracts
+  // light into SATURATED hue-varying bands that belong to the card and move
+  // with it. That saturation is the whole problem — Rec.601 luma maps a cyan
+  // sheen and mid-grey ink onto the same grey, so the text dissolves into the
+  // sheen no matter how the contrast is stretched afterwards. Applied to the
+  // card buffer, in card coordinates, because the pattern is fixed to the
+  // card and must not spill onto the table (which would also hand the region
+  // detector edges that aren't there).
+  if (foil > 0) {
+    const cctx = card.getContext('2d', { willReadFrequently: true })
+    const image = cctx.getImageData(0, 0, card.width, card.height)
+    const d = image.data
+    const angle = 0.5 + rand() * 0.6
+    const ux = Math.cos(angle)
+    const uy = Math.sin(angle)
+    const diag = Math.hypot(card.width, card.height)
+    // Band spacing and where the diffraction cone is brightest — i.e. how the
+    // card happens to be tilted to the light.
+    const period = diag * (0.30 + rand() * 0.16)
+    const centre = diag * (0.28 + rand() * 0.42)
+    // Narrow on purpose. A real foil shows its diffraction as a BAND across
+    // part of the card at any one angle — most of the card reads close to
+    // normal, which is why a human can still read a foil in hand. An envelope
+    // wide enough to wash the whole card is a prettier picture and a false
+    // test: it would justify "fixes" for a failure that does not happen.
+    const spread = diag * 0.17
+    for (let y = 0, i = 0; y < card.height; y++) {
+      for (let x = 0; x < card.width; x++, i += 4) {
+        const t = x * ux + y * uy
+        const env = Math.exp(-((t - centre) ** 2) / (2 * spread * spread))
+        const k = foil * env
+        if (k < 0.004) continue
+        // Three phase-shifted sinusoids = one hue cycle, screen-blended as
+        // added light rather than replacing what is underneath. Pulled toward
+        // white by SHEEN_WHITE: the light coming off a real foil is
+        // pearlescent — a tinted highlight — not a saturated spectrum, and
+        // the tint is what a luma conversion loses.
+        const phase = (t / period) * Math.PI * 2
+        const mix = 1 - SHEEN_WHITE
+        const sr = SHEEN_WHITE + mix * (0.5 + 0.5 * Math.sin(phase))
+        const sg = SHEEN_WHITE + mix * (0.5 + 0.5 * Math.sin(phase + 2.0944))
+        const sb = SHEEN_WHITE + mix * (0.5 + 0.5 * Math.sin(phase + 4.1888))
+        d[i] = 255 - (255 - d[i]) * (1 - k * sr)
+        d[i + 1] = 255 - (255 - d[i + 1]) * (1 - k * sg)
+        d[i + 2] = 255 - (255 - d[i + 2]) * (1 - k * sb)
+      }
+    }
+    cctx.putImageData(image, 0, 0)
   }
 
   const frame = makeCanvas(FRAME_W, FRAME_H)
@@ -231,4 +290,12 @@ export const DEGRADATIONS = {
   sideways: { rotate: 90, fill: 0.62 },
   'sideways-ccw': { rotate: -90, fill: 0.62 },
   worst: { fill: 0.62, dx: 0.05, rotate: 3, downscale: 0.65, blurPx: 0.8, glare: 0.55, brightness: 0.55, noise: 5 },
+  // Foil/holo — the finish most collected cards actually have, and the one
+  // the fixtures cannot show on their own (TCGplayer and TCGdex ship flat
+  // SCANS, which kill the diffraction a phone sees live). Opt-in like
+  // dim/dark so the standard battery's per-game gates stay comparable.
+  // 'foil' is a well-lit foil held to the light; 'foil-worst' is the ordinary
+  // phone photo of one — sheen plus a soft, slightly glared hand-held frame.
+  foil: { fill: 0.92, foil: 0.62 },
+  'foil-worst': { fill: 0.8, foil: 0.78, downscale: 0.7, blurPx: 0.9, glare: 0.4 },
 }

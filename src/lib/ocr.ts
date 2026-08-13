@@ -201,7 +201,28 @@ export interface OcrRect {
   h: number
 }
 
-export type PrepVariant = 'normal' | 'binary' | 'binary-flip'
+/**
+ * How a region is projected to grey before the contrast stretch.
+ *
+ * 'normal'/'binary'/'binary-flip' all use Rec.601 luma, which is right for
+ * ink on card stock and WRONG on a foil: a holographic layer reflects
+ * saturated light, and luma maps a cyan sheen and mid-grey ink onto the same
+ * grey — the text dissolves into the sheen and no amount of stretching after
+ * the fact brings it back, because the contrast is already gone.
+ *
+ * The chroma variants throw the colour away instead of averaging it in.
+ * Card text is very nearly neutral (black or white) even on a foil, while
+ * the sheen is not, so the extreme channels separate them:
+ *   'chroma-max' — max(R,G,B): any saturated colour goes BRIGHT, neutral
+ *      dark ink stays dark. For dark text over a foil (Riftbound's gold
+ *      plate, Pokémon's black type).
+ *   'chroma-min' — min(R,G,B): any saturated colour goes DARK, neutral
+ *      light ink stays bright. For light text over a foil (Riftbound's
+ *      coloured name plates, white type on full-arts).
+ * They are complementary, which is why both are tried — the same reason
+ * both binarization polarities are.
+ */
+export type PrepVariant = 'normal' | 'binary' | 'binary-flip' | 'chroma-min' | 'chroma-max'
 
 /**
  * Crop a region (fractions of the source), rescale toward `targetWidth`
@@ -255,8 +276,13 @@ function normalizeContrast(image: ImageData, variant: PrepVariant = 'normal'): v
   const luma = new Uint8ClampedArray(pixels)
   const globalHist = new Uint32Array(256)
   let lumaSum = 0
+  const chroma = variant === 'chroma-min' ? -1 : variant === 'chroma-max' ? 1 : 0
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const y = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
+    const y = chroma
+      ? chroma > 0
+        ? Math.max(data[i], data[i + 1], data[i + 2])
+        : Math.min(data[i], data[i + 1], data[i + 2])
+      : (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8
     luma[p] = y
     lumaSum += y
     globalHist[y]++

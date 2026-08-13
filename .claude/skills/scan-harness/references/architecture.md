@@ -91,6 +91,21 @@ top-name games print, streak 2 crosses mid-plate), `lowlight`
 (brightness 0.42 + seeded noise), `worst` (compound). All deterministic
 (mulberry32 seeded from the spec) for cell-by-cell comparability.
 
+Opt-in **foil** (`--degradations=foil,foil-worst`, or `npm run test:foil`):
+`foil` is a well-lit foil held to the light, `foil-worst` the ordinary
+hand-held photo of one (sheen + soft focus + a little glare). Applied to the
+CARD buffer in card coordinates, so the pattern rides the card and never
+spills onto the table (which would hand the region detector edges that aren't
+there). Distinct from `glare` in the way that matters: glare is white room
+light, a foil diffracts SATURATED hue-varying bands, and the saturation is
+what defeats a luma conversion. The sheen is pulled 55% toward white
+(`SHEEN_WHITE`) and its envelope is narrow (0.17 of the diagonal), calibrated
+by eye against a real phone photo of a foil Riftbound card — a full-card
+full-saturation rainbow looked nothing like the real thing and would have
+justified "fixes" for a failure that does not happen. The fixtures cannot
+supply this themselves: TCGplayer and TCGdex both ship flat SCANS, which kill
+the diffraction a phone sees live.
+
 Opt-in harsh low light (NOT in the standard battery, so per-game regression
 gates stay comparable across reports): `dim` (brightness 0.26, noise 10) and
 `dark` (brightness 0.15, noise 15 + slow-shutter softness). Select with
