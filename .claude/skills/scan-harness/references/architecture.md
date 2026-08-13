@@ -38,6 +38,28 @@ gh-pages: machine-generated, never merged, never edited. Pull with
 Security note (accepted for a personal repo): push-triggered runs execute the
 pushed branch's own fetcher with a `contents: write` token.
 
+## 2b. Real photos — the path the synthetic degradations cannot replace
+
+Every fixture image is a flat SCAN (TCGplayer product shots, TCGdex card
+images). Scans are why the harness can model soft focus, glare and low light
+but **cannot** show holographic diffraction, and why the `foil` battery is a
+model rather than evidence. Real phone photos are the way past that, and they
+need a different pipeline from everything above:
+
+- They ALREADY contain the camera degradation — they ARE the captured frame.
+  A photo cell must bypass `compose()` and hand the image straight to
+  `identifyFrame`, with ground truth (game, name, set, number) from its own
+  manifest. Running a photo through the degradation battery would be
+  double-degrading and meaningless.
+- They cannot be machine-regenerated, so they must NOT live on
+  `harness-fixtures` — CI force-pushes that branch and would destroy them.
+  Commit them under `tests/harness/photos/` with their own manifest, or
+  mirror the branch pattern with a hand-curated, never-force-pushed one.
+- They are the only honest source for foil, foil TEXT (YGO Ultra/Secret
+  Rares), sleeve glare, and playmat backgrounds. The repo owner has offered
+  to supply them — ask for specific failures rather than nice photographs,
+  because the failure lives in the ordinary hand-held shot.
+
 ## 3. Stubs — `tests/harness/stub-apis.mjs` (node side)
 
 Per-service query semantics reimplemented over the captured data, served via

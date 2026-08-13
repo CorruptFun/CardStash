@@ -102,6 +102,54 @@ keep `baseline.json` from before your change to gate against.
    verify the stub answered what the real API would, and LOOK at the actual
    pixels (render the crop to a PNG and view it) before writing code.
 
+## The foil suite (`npm run test:foil`)
+
+Foil is not a corner case: most cards anyone collects have shine on them,
+and it is the pipeline's worst input. It gets its own opt-in battery because
+**the fixtures structurally cannot show it** — TCGplayer and TCGdex both
+ship flat SCANS, which kill the diffraction a phone sees live. So this
+battery is a MODEL, and its worth depends entirely on the model staying
+honest (lesson 25).
+
+Two cells per fixture, opt-in like dim/dark so the standard battery's
+per-game gates stay comparable:
+
+| cell | spec | what it is |
+| --- | --- | --- |
+| `foil` | `foil: 0.62` | a well-lit foil held to the light |
+| `foil-worst` | `foil: 0.78`, downscale 0.7, blur 0.9, glare 0.4 | the ordinary hand-held phone photo of one |
+
+Standing numbers on the current fixture snapshot (main @ 42687f9):
+**33/46 overall — `foil` 21/23, `foil-worst` 12/23.** The gap between those
+two columns IS the problem; a lit foil mostly reads, a real-world one mostly
+doesn't. Worst cell: Pokémon `foil-worst` at 1/7.
+
+What the model DOES cover: a saturated, hue-varying pearlescent band riding
+the card in card coordinates, 55% white (`SHEEN_WHITE`), narrow envelope
+(0.17 of the diagonal), calibrated by eye against a real phone photo.
+
+**What it does NOT cover, and this is the live gap: FOIL TEXT.** The sheen
+is applied to the whole card, so it models a foil BACKGROUND under neutral
+ink — which is exactly the assumption the `chroma-min`/`chroma-max` fix
+rests on. Real cards invert it: Yu-Gi-Oh Ultra Rares print the card NAME in
+metallic gold, Secret Rares in silver/rainbow holo, on a comparatively
+neutral beige name bar. Worked numerically, gold-on-beige actually favours
+`chroma-min` (contrast 150 vs luma's 46), so that case may already be
+handled — but no fixture is an Ultra Rare, so it is untested. The case
+expected to genuinely fail is SILVER/mirror foil: near-neutral (R≈G≈B), so
+every intensity projection collapses, and its real signal is specular
+variance rather than hue. Modelling it needs a `foil-text` degradation that
+metallizes the name band's GLYPHS, not the card.
+
+**Real photos are the way past the model.** They already contain the camera
+degradation, so they must bypass `compose()` — a photo cell feeds the image
+straight to `identifyFrame` with ground truth from a manifest. They also
+cannot live on `harness-fixtures` (CI force-pushes it); commit them under
+`tests/harness/photos/` with their own manifest, or mirror the branch
+pattern with a hand-curated one. The repo owner has offered to supply
+photos of foil cards — ask early, because a couple of real Ultra Rares
+anchor this whole area better than any amount of synthetic tuning.
+
 ## Fixture lifecycle
 
 - `tests/harness/fetch-fixtures.mjs` needs open internet (TCGdex, TCGplayer

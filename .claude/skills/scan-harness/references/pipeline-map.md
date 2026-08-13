@@ -63,6 +63,8 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
 | `OCR_MATCH_THRESHOLD` | 0.66 | 0.62 admitted "EMPOWERED"→"Empowered // Gold" (0.643) |
 | `OCR_MATCH_THRESHOLD_SHORT` (<8 norm chars) | 0.82 | one edit on 4 letters scores 0.75 ("loli"→Loki, "son"→Sona); 0.8 still admitted "Ambess"→wrong Ambessa (0.807); genuine champion leads score ≈0.95 |
 | `OCR_MATCH_THRESHOLD_NOISY` (>30% junk tokens) | 0.72 | junk inflates edit distance; "Eo : Charizard HP"→Mega Charizard squeaked 0.632 past base |
+| Band prep variants | `normal`, `binary`, `binary-flip`, `chroma-min`, `chroma-max` | the first three project RGB→grey with Rec.601 luma; the chroma pair use min/max(R,G,B) instead. Luma FUSES saturated sheen with neutral ink — contrast is gone before any stretch or Otsu runs. Not gated on `detectFoil` (see below) |
+| `CAPTURE_MAX_EDGE` (camera.ts) | 1600 | at 1100 a card crop reaches OCR ~790px wide and the printed fraction sits at the edge of legibility; the stream is requested at 1440p so this downscales rather than upsamples |
 | `slowLookupsLeft` / deadline | 4 slow (>1.5s) / 20s | fast lookups are nearly free — deep exploration is the win; only a dying API's timeout-riders must not stretch an attempt into minutes |
 | `MISS_TTL_MS` | 30s | a full miss burns ~9 recognitions; same unchanged frame must not re-burn twice a minute (tap bypasses) |
 | cache write gate | confidence ≥ 0.75 | corner-only IDs (0.7) re-derive per attempt — never re-served at cache confidence 1 |
@@ -114,7 +116,28 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    directional — it only rules a game OUT, only on the shape it cannot print,
    and a strip that read nothing rules out nothing. Measured over the matrix:
    fires on 41/81 Pokémon cells, **0/36 Yu-Gi-Oh** ones.
-8. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
+8. **A lead-only read may not answer for a catalog game whose lead has
+   siblings** (`isLeadOnlyMatch` + `catalogLeadVariants`). `nameScore`
+   forgives a missing epithet by design, which parks EVERY bare champion
+   lead at exactly 0.95 and clears every bar — and 48 of Riftbound's 98
+   champion leads carry more than one epithet, with the epithet sharing the
+   same hard-to-read plate as the name. Measured: "Ambessa" off a clipped
+   plate answered "Ambessa - The Wolf" for a "Respected and Feared" card.
+   Refusing routes the frame to the collector line, which CAN separate them.
+   Narrow on both sides: the read must have cleared the bar on
+   lead-forgiveness alone, and alternate printings of one card ("(Alternate
+   Art)") collapse so they are not counted as a second answer — a champion
+   with a single card still identifies off the bare lead.
+9. **A cleanly-read collector line outranks a name match it contradicts**
+   (catalog games; `refineFromCorner` → `viaCollector`). Two printed numbers
+   agreeing with a catalog row beat one fuzzy name read. Guarded like every
+   other sole-evidence use: printed slash actually read (`!fused`), both
+   halves agreeing, and the resolved card genuinely unrelated to the name
+   match (`relatedNames` false) — a related name means the same card family,
+   where the normal refine picks the printing. Measured: an artist credit
+   ("Kudos Productions") matched "Production Surge" at 0.688 on a card whose
+   line read 120/166, which is exactly the right card.
+10. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
    `trimTrailingJunk` could shed everything but a two-letter head ("gr ee" →
    "gr"); the matrix spent 119 lookups on such fragments and not one ever
    identified a card, while each was a chance to hit a real name exactly in a
@@ -248,6 +271,30 @@ Japanese set-code badge and MTG's collector digits are NOT reliably
 readable — both ja fixtures correctly REFUSE rather than guess. They are
 kept as guard fixtures: if a future loosening turns either into a
 `wrong-card` stage, that loosening is wrong.
+
+## Foil, and the limit the chroma pair does NOT cover
+
+The chroma projections assume **neutral text on a coloured/foil background**.
+That covers a foil card's surface, coloured name plates and full-art
+backgrounds, and it is why they paid off far beyond foil (+16 standard cells).
+
+Real cards also do the INVERSE, and nothing here handles it yet: Yu-Gi-Oh
+Ultra Rares print the card NAME in metallic gold foil and Secret Rares in
+silver/rainbow holo, on a comparatively neutral beige name bar — coloured
+text on neutral background. Arithmetic on the gold case (gold ~212,175,55 on
+beige ~235,225,205) says `chroma-min` gives contrast 150 against luma's 46,
+so gold may already be covered; no fixture is an Ultra Rare, so it is
+UNTESTED, not proven. Silver/mirror foil is the case expected to genuinely
+fail: near-neutral (R≈G≈B) means every intensity projection collapses, and
+the real signal is specular variance rather than hue.
+
+Leads, in order, for whoever picks this up: (a) add `chroma-sat` = (max−min),
+the saturation channel, which separates in BOTH directions and may subsume
+the pair; (b) for silver, a local-variance or gradient-magnitude projection
+rather than an intensity one; (c) check whether YGO's mid-card set code and
+8-digit passcode path already rescue these (hinted mode only). None of it is
+measurable without a `foil-text` degradation that metallizes the name band's
+GLYPHS — the current `foil` cells sheen the whole card.
 
 ## Sealed set matching (lib/sealedmatch.ts)
 
