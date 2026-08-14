@@ -234,6 +234,16 @@ async function pokemon() {
   }
   // The photographed / filmed Pokémon cards (tests/harness/photos/manifest.json).
   await universe('krookodile', (c) => /krookodile\s*ex$/i.test(String(c.name)))
+  await universe('krokorok')
+  await universe('turtonator')
+  // A 3x3 binder page and six loose cards, both shot with the cards
+  // quarter-turned in the frame.
+  for (const name of [
+    'quaxly', 'phantump', 'orbeetle', 'ambipom', 'sinistcha', 'darkrai', 'poltchageist', 'fezandipiti',
+    'gloom', 'golbat', 'tarountula', 'spidops',
+  ]) {
+    await universe(name)
+  }
   await universe('blastoise', (c) => /blastoise[\s-]*ex$/i.test(String(c.name)))
   await universe('charizard', (c) => String(c.localId) === '11' && /xy12|evolutions/i.test(String(c?.set?.id ?? '')))
   await universe('machamp', (c) => /^machamp$/i.test(String(c.name)))
@@ -670,6 +680,25 @@ async function yugioh() {
     // filmed, not photographed: a secret rare whose silver name text is
     // legible in SOME frames of the clip and washed out in others
     'Azure-Eyes Silver Dragon',
+    // held-vs-flat clip pair, and a prismatic secret rare photographed both ways
+    'Dragunity Legionnaire',
+    'Exodia the Forbidden One',
+    // the sideways binder pages: cards sit quarter-turned in the frame
+    'Aluber the Jester of Despia',
+    'Garura, Wings of Resonant Life',
+    'Mind Control',
+    'Red-Eyes Dark Dragoon',
+    'Goblin Biker Dugg Charger',
+    'Blue-Eyes Abyss Dragon',
+    'Masked HERO Dark Law',
+    'Cherubini, Ebon Angel of the Burning Abyss',
+    'Stardust Synchron',
+    'Dark Honest',
+    'Galaxy-Eyes Afterglow Dragon',
+    'Floowandereeze & Toccan',
+    'Dogmatika Ecclesia, the Virtuous',
+    'Emblema Oath',
+    'Centur-Ion Emeth VI',
     // the nine-slot binder page
     'Imsety, Glory of Horus',
     'Qebehsenuef, Protection of Horus',
