@@ -629,6 +629,12 @@ const CLIPPED_BORDER_MIN = 1.5
  * short of the point where a rectangle is mostly imaginary.
  */
 const OVERHANG_MAX = 0.4
+/**
+ * How much better the turned frame must score before the cards are judged
+ * sideways. Total border score, so a handful of hallucinated boxes cannot win
+ * it on count alone.
+ */
+
 /** Overlap above which two detections are the same card. */
 const NMS_IOU = 0.3
 /** A box this much swallowed by an already-taken one is a panel inside a card. */
@@ -662,6 +668,38 @@ const GRID_FILL_SCORE_MIN = 0.95
  * clusters a real scene is full of — a table edge, a sleeve, the side of a
  * box. Summing lets three good sides carry a fourth that isn't there, which
  * is the same failure the projection profiles have.
+ */
+/**
+ * Find every card in a frame.
+ *
+ * KNOWN GAP, measured twice, both fixes rejected: a card lying QUARTER-TURNED
+ * is not found. The sweep proposes only portrait rectangles (ASPECT_MIN..MAX,
+ * from the printed 63:88) and a turned card's bounding box is landscape at
+ * ~1.40, so the right rectangle is never proposed — on a real 3x3 page, 5
+ * boxes and not one on a single card, one of them swallowing six.
+ *
+ * Two obvious fixes were built and measured, and neither survived:
+ *
+ * 1. Decide the page's orientation up front, then rotate the frame. Nothing
+ *    available decides it. Total border score is not a discriminator — on a
+ *    known-UPRIGHT page the turned frame scored HIGHER (14.09 vs 11.61),
+ *    because a card grid has strong structure both ways — and it misfired on
+ *    upright single cards. `lineRatio`, which is measured and reliable for ONE
+ *    card, dilutes on a page where the binder's own rows outvote the card
+ *    text: 0.45 on a genuinely sideways page, but 1.23 and 1.47 on two others
+ *    just as turned.
+ * 2. Propose BOTH aspect bands and let the existing arbitration sort it out.
+ *    It cannot: containment suppression ("a card is never inside another
+ *    card") and the size cluster both assume ONE card shape. Landscape boxes
+ *    spanning two adjacent cards are larger, so they are taken first and
+ *    swallow the correct ones — the known-good page fell 8/8 to 4/8 while the
+ *    sideways page did not improve at all.
+ *
+ * What the evidence says is needed: a structural orientation decision made
+ * ONCE per page — the correct way up puts the boxes on a regular lattice and
+ * the wrong one scatters them, and `completeGrid` already infers that lattice
+ * — rather than a per-rectangle shape guess. Until then this stays
+ * portrait-only, which is the best-measured state.
  */
 export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): CardDetection[] {
   try {

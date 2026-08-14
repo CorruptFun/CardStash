@@ -448,3 +448,91 @@ result seems absurd, check this list before writing code.
     be done from the view, and the effect that does it must depend on
     `scanner.status`: `start()` and `resumeScanning()` restart the rAF loop
     without the mode changing, and nothing else re-parks it.
+
+## What real video said (the clips round)
+
+47. **The live path produces WRONG CARDS, and no still-image battery can show
+    it.** The standard matrix reports zero wrong cards across 282 cells. Two
+    ordinary handheld clips produced **10 in 40 identifications**: frames of a
+    Krookodile ex that read "Krookodile" match a real, different, far cheaper
+    card EXACTLY at score 1.0 (lesson 29's class, with `parsePokemonVariant`
+    silent because the rules box never read), and Azure-Eyes Silver Dragon
+    answered "Agave Dragon" off a partial "DRAGON". `compose()` structurally
+    cannot produce the input that causes this — a frame where a MOVING
+    highlight leaves the name half-legible in one specific way. Rule: a battery
+    of stills cannot bound the wrong-card rate of a live scanner, and the
+    wrong-card rate is the number that matters most.
+48. **Consecutive frames disagree, so which frame the scanner grabs decides
+    whether the user gets their card.** In one burst of the Krookodile clip,
+    frames 0 and 1 read "Krookodile ex" and identify correctly and frame 2 —
+    33ms later — reads "Krookodile" and answers the wrong card. The scanner
+    commits to a single frame with no corroboration. The obvious lever is
+    frame SELECTION, and the obvious guard is agreement across two attempts
+    before committing, which matters most in collect mode where a hit is filed
+    with no confirmation.
+49. **Stacking is for noise, not for glare — measured, against the
+    hypothesis.** The natural extension of `captureFrameStacked` (dark scenes,
+    3 frames, measured 4/21 → 17/21 there) is to run it always. On real
+    clips it is WORSE than picking the best frame in the same burst: 3/10
+    against 4/10 bursts that contained a readable frame. The mechanism says
+    why — averaging divides INDEPENDENT noise by root N, and a specular
+    highlight moving across the card is not independent noise, so averaging
+    smears it across the glyphs instead of cancelling it. Keep stacking gated
+    on darkness.
+50. **A clip needs both shapes of sample, or it answers only half the
+    question.** `ingest-clip.mjs` stores bursts of consecutive frames spread
+    across the clip: across bursts answers "does any frame identify" (frame
+    selection), within a burst answers "does averaging beat the best of them"
+    (stacking). Frames 5 seconds apart cannot answer the second; three frames
+    33ms apart cannot answer the first.
+51. **Tooling reality: nothing in the sandbox decodes an iPhone clip.**
+    Playwright's ffmpeg is built `--disable-everything` (no QuickTime demuxer)
+    and its Chromium reports `canPlayType` empty for H.264 — a `<video>` never
+    loads. `npm i --no-save ffmpeg-static` works (registry traffic bypasses the
+    proxy, lesson 14). So frames are extracted once at ingest and committed;
+    the clip itself is not stored, since the harness could not read it anyway.
+52. **The multi-card detector cannot see a quarter-turned card, at all.** Four
+    of the real binder pages were shot with the binder rotated relative to the
+    cards, which is an ordinary way to photograph one. `detectCardRegions`
+    sweeps aspects `ASPECT_MIN..ASPECT_MAX` = 0.587..0.859, derived from
+    `CARD_ASPECT = 63/88` — portrait only. A sideways card's bounding box is
+    landscape, w/h ≈ 1.40, outside the band, so the rectangle is never
+    proposed. Measured on the 3x3 page: 5 boxes found, **none of them on a
+    single card** — one box swallowed six cards, another covered two. This is
+    lesson 39 again in a different axis (a search-space limit wearing a
+    scoring-problem's clothes), and the fix is the reciprocal band, not a
+    threshold. Note the single-card path already handles turned cards
+    (`looksSideways` / `uprightOrientations`), so each CROP would identify
+    once the boxes are right — the gap is entirely in the detector.
+53. **Ingest resolution is a silent ceiling, and it applied to the first page
+    for a whole round.** `ingest.mjs` capped every photograph at
+    CAPTURE_MAX_EDGE (1600), which is right for one card and wrong for a page:
+    the first binder page's cards reached the pipeline ~370px wide, under the
+    ~790px where a printed collector line stops being legible, so its 6/8 was
+    partly a property of the ingest tool. Pages now ingest at PAGE_MAX_EDGE
+    (3200). Rule: when a tool normalises an input, check that its constant
+    matches the consumer that will actually read it.
+54. **Two obvious fixes for the sideways page, both measured, both rejected —
+    and the measurement is the deliverable.** The gap in lesson 52 has two
+    natural fixes and neither survives contact:
+    - *Decide the orientation, then rotate the frame.* Nothing available
+      decides it. Total border score is not a discriminator: on a KNOWN-UPRIGHT
+      page the turned frame scored HIGHER (14.09 vs 11.61), because a grid of
+      cards has strong structure whichever way you look at it — and a
+      score-margin rule misfired `turns=1` on upright SINGLE cards, which would
+      have broken ordinary uploads. `lineRatio` is measured and reliable for
+      one card (46/46 sideways, 0/246 upright) and does NOT generalise to a
+      page: 0.45 on a genuinely sideways page, but 1.23 and 1.47 on two others
+      just as turned, because the binder's own rows outvote the card text.
+    - *Propose both aspect bands and let the existing arbitration sort it out.*
+      It cannot. Containment suppression (lesson 35) and the size cluster both
+      assume ONE card shape; landscape boxes spanning two adjacent cards are
+      larger, get taken first, and swallow the correct ones. The known-good
+      page fell **8/8 → 4/8** while the sideways page did not improve at all,
+      and detection cost doubled.
+    Rule, again: a detector's arbitration rules encode assumptions as strong as
+    its scoring, and widening what it proposes can violate them. The lead that
+    remains is a structural decision made ONCE per page — the right way up puts
+    boxes on a regular lattice and the wrong way scatters them, and
+    `completeGrid` already infers that lattice — rather than a per-rectangle
+    shape guess. Ship nothing until it beats 8/8 on the upright page.

@@ -773,14 +773,24 @@ async function identifyViaOcr(
       if (!card && gameHint === 'yugioh') {
         // The passcode identifies the card in every language; the sparse id
         // space means a misread digit resolves to nothing, not a wrong card.
-        const passcode = parsePasscode(
-          await readRegionText(canvas, mapRect(YGO_PASSCODE_REGION), {
-            variant: 'binary',
-            upscale: 5,
-            maxWidth: 1600,
-            sparse: true,
-          }).catch(() => ''),
-        )
+        // Prefer a passcode any earlier pass already read. The dedicated
+        // region is a 7%-tall strip and it MISSES on real photographs where
+        // the wider bottom band, read moments earlier in the same attempt,
+        // has the digits perfectly — measured on a secret rare whose strip
+        // returned "" while the band beside it returned "72444406 1st
+        // Edition". The evidence was in hand and thrown away because only one
+        // rectangle was allowed to supply it. Same guard either way: eight
+        // digits against a sparse id space.
+        const passcode =
+          read.passcode ??
+          parsePasscode(
+            await readRegionText(canvas, mapRect(YGO_PASSCODE_REGION), {
+              variant: 'binary',
+              upscale: 5,
+              maxWidth: 1600,
+              sparse: true,
+            }).catch(() => ''),
+          )
         if (passcode) {
           traceEvent('corner-id', { passcode })
           card = await ygoById(passcode)
@@ -946,7 +956,7 @@ async function readCornerInfo(
       return Number(r.number) <= Number(r.total) ? 4 : 3
     }
     const main = rank(b) > rank(a) ? b : a
-    return { ...main, setCode: a.setCode ?? b.setCode }
+    return { ...main, setCode: a.setCode ?? b.setCode, passcode: a.passcode ?? b.passcode }
   }
   // Sole-evidence reads get extra magnification (the set-code badge on a
   // Japanese card is a few pixels of type that 3× upscale smears) and sparse

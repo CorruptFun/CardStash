@@ -19,7 +19,7 @@
     import { warmOcr, stopOcr } from '/src/lib/ocr'
     import { scanTraces, clearScanTraces } from '/src/lib/scandebug'
     import { compose, DEGRADATIONS } from '/tests/harness/augment.mjs'
-    import { detectCardRegions } from '/src/lib/vision'
+    import { detectCardRegions, refineCardCrop } from '/src/lib/vision'
     import { scanPage, PAGE_MAX_EDGE } from '/src/lib/multiscan'
 
     const images = new Map()
@@ -178,7 +178,72 @@
           ctx.fillStyle = '#000'
           ctx.fillText(`${i + 1}:${r.score.toFixed(2)}`, x + 3, y - 4)
         })
-        return { image: canvas.toDataURL('image/jpeg', 0.85), found, ms }
+        return {
+          image: canvas.toDataURL('image/jpeg', 0.85), found, ms,
+          // lineRatio is reported because it is the measured single-card
+          // orientation signal, and seeing it beside a page's result is what
+          // showed it does NOT generalise to one (0.45 on a sideways page,
+          // 1.23 and 1.47 on two others).
+          lineRatio: Number((refineCardCrop(canvas).lineRatio ?? 0).toFixed(2)),
+        }
+      },
+
+      /**
+       * One capture built from REAL video frames.
+       *
+       * `imageUrls` is either a single frame — "would the scanner have
+       * identified the card if it had grabbed this instant?" — or a burst of
+       * consecutive ones, which are AVERAGED the way `captureFrameStacked`
+       * averages three frames 70ms apart on the phone. Averaging real
+       * consecutive frames is the honest version of that: the noise is
+       * genuinely independent per frame and the specular pattern genuinely
+       * moves, neither of which a seed-varied synthetic compose can claim.
+       *
+       * Frames are already at capture resolution from ingest-clip.mjs, so
+       * nothing is resized here and nothing is composed — a video frame IS the
+       * degraded input, as a photograph is.
+       */
+      async runFrames(cell) {
+        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        const imgs = await Promise.all(cell.imageUrls.map(loadImage))
+        const canvas = document.createElement('canvas')
+        canvas.width = imgs[0].naturalWidth
+        canvas.height = imgs[0].naturalHeight
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(imgs[0], 0, 0)
+        if (imgs.length > 1) {
+          const base = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const sum = new Float32Array(base.data.length)
+          for (let i = 0; i < base.data.length; i++) sum[i] = base.data[i]
+          for (let n = 1; n < imgs.length; n++) {
+            const f = document.createElement('canvas')
+            f.width = canvas.width
+            f.height = canvas.height
+            const fx = f.getContext('2d', { willReadFrequently: true })
+            fx.drawImage(imgs[n], 0, 0, canvas.width, canvas.height)
+            const d = fx.getImageData(0, 0, canvas.width, canvas.height).data
+            for (let i = 0; i < d.length; i++) sum[i] += d[i]
+          }
+          for (let i = 0; i < base.data.length; i++) base.data[i] = sum[i] / imgs.length
+          ctx.putImageData(base, 0, 0)
+        }
+        clearScanCache()
+        clearScanTraces()
+        const started = performance.now()
+        let outcome
+        try {
+          outcome = await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card' })
+        } catch (err) {
+          outcome = { ok: false, reason: 'exception', message: String(err?.message ?? err) }
+        }
+        return {
+          ms: Math.round(performance.now() - started),
+          trace: scanTraces()[0] ?? null,
+          outcome: outcome.ok
+            ? { ok: true, name: outcome.card.name, game: outcome.card.game, via: outcome.identification.via,
+                confidence: outcome.identification.confidence, readName: outcome.identification.name }
+            : { ok: false, reason: outcome.reason, message: outcome.message, readName: outcome.readName ?? null },
+        }
       },
 
       /**

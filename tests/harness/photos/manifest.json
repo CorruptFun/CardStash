@@ -28,6 +28,24 @@
       "source": "b538b217-IMG_9844.jpeg"
     },
     {
+      "key": "pkm-turtonator-flat",
+      "file": "pkm-turtonator-flat.jpg",
+      "game": "pokemon",
+      "name": "Turtonator",
+      "label": "photo-pkm",
+      "note": "same card as pkm-turtonator-hand, flat on a dark desk — the held/flat control pair",
+      "source": "dc1d6209-IMG_0434.jpeg"
+    },
+    {
+      "key": "pkm-turtonator-hand",
+      "file": "pkm-turtonator-hand.jpg",
+      "game": "pokemon",
+      "name": "Turtonator",
+      "label": "photo-pkm",
+      "note": "plain non-foil control, held in hand, warm indoor light",
+      "source": "44c43b00-IMG_0435.jpeg"
+    },
+    {
       "key": "ygo-blue-eyes-alt-gold",
       "file": "ygo-blue-eyes-alt-gold.jpg",
       "game": "yugioh",
@@ -64,6 +82,24 @@
       "source": "235afb8a-IMG_9352.jpeg"
     },
     {
+      "key": "ygo-exodia-prismatic-flat",
+      "file": "ygo-exodia-prismatic-flat.jpg",
+      "game": "yugioh",
+      "name": "Exodia the Forbidden One",
+      "label": "photo-ygo-foil",
+      "note": "same card as ygo-exodia-prismatic-hand, flat on a dark desk — the held/flat control pair",
+      "source": "c15c2202-IMG_0420.jpeg"
+    },
+    {
+      "key": "ygo-exodia-prismatic-hand",
+      "file": "ygo-exodia-prismatic-hand.jpg",
+      "game": "yugioh",
+      "name": "Exodia the Forbidden One",
+      "label": "photo-ygo-foil",
+      "note": "quarter-century prismatic secret rare, gold foil name, held in hand, cluttered shelf behind",
+      "source": "624346fa-IMG_0421.jpeg"
+    },
+    {
       "key": "ygo-ip-masquerena-secret",
       "file": "ygo-ip-masquerena-secret.jpg",
       "game": "yugioh",
@@ -74,6 +110,82 @@
     }
   ],
   "binders": [
+    {
+      "key": "pkm-binder-3x3-sideways",
+      "file": "pkm-binder-3x3-sideways.jpg",
+      "game": "pokemon",
+      "cards": [
+        "Quaxly",
+        "Phantump",
+        "Orbeetle",
+        "Colress's Tenacity",
+        "Ambipom",
+        "Sinistcha",
+        "Darkrai",
+        "Poltchageist",
+        "Fezandipiti"
+      ],
+      "note": "9-slot Pokemon page, cards sit QUARTER-TURNED in the frame, sleeved, overhead light",
+      "source": "83d01945-IMG_0448.jpeg"
+    },
+    {
+      "key": "pkm-loose-6",
+      "file": "pkm-loose-6.jpg",
+      "game": "pokemon",
+      "cards": [
+        "Team Rocket's Golbat",
+        "Gloom",
+        "Team Rocket's Proton",
+        "Team Rocket's Tarountula",
+        "Team Rocket's Spidops",
+        "Poltchageist"
+      ],
+      "note": "six LOOSE cards laid out on a dark desk, not a binder — irregular spacing, no sleeve grid, cards quarter-turned",
+      "source": "1d4d0c51-IMG_0442.jpeg"
+    },
+    {
+      "key": "ygo-binder-4-aluber",
+      "file": "ygo-binder-4-aluber.jpg",
+      "game": "yugioh",
+      "cards": [
+        "Aluber the Jester of Despia",
+        "Garura, Wings of Resonant Life",
+        "Mind Control",
+        "Red-Eyes Dark Dragoon"
+      ],
+      "note": "4 sleeved secret rares in a binder, cards quarter-turned, heavy foil glare",
+      "source": "06a14dfc-IMG_0441.jpeg"
+    },
+    {
+      "key": "ygo-binder-4-goblin",
+      "file": "ygo-binder-4-goblin.jpg",
+      "game": "yugioh",
+      "cards": [
+        "Goblin Biker Dugg Charger",
+        "Blue-Eyes Abyss Dragon",
+        "Masked HERO Dark Law",
+        "Cherubini, Ebon Angel of the Burning Abyss"
+      ],
+      "note": "4 sleeved cards, quarter-turned, angled binder on a lap",
+      "source": "2abf3e3d-IMG_0437.jpeg"
+    },
+    {
+      "key": "ygo-binder-8-spread",
+      "file": "ygo-binder-8-spread.jpg",
+      "game": "yugioh",
+      "cards": [
+        "Stardust Synchron",
+        "Dark Honest",
+        "Dark Honest",
+        "Galaxy-Eyes Afterglow Dragon",
+        "Floowandereeze & Toccan",
+        "Dogmatika Ecclesia, the Virtuous",
+        "Emblema Oath",
+        "Centur-Ion Emeth VI"
+      ],
+      "note": "an open binder SPREAD: two 2x2 pages either side of the rings, 8 cards, duplicate Dark Honest",
+      "source": "4dca2c6f-IMG_0439.jpeg"
+    },
     {
       "key": "ygo-binder-horus",
       "file": "ygo-binder-horus.jpg",
@@ -90,6 +202,632 @@
       ],
       "note": "9-slot binder page, 8 identifiable cards + 1 face-down/blank gold card in the top-right slot; sleeved, angled, ceiling-light glare across the top row",
       "source": "77954042-IMG_1265.jpeg"
+    }
+  ],
+  "clips": [
+    {
+      "key": "ygo-azure-eyes-clip",
+      "game": "yugioh",
+      "name": "Azure-Eyes Silver Dragon",
+      "label": "clip-ygo-secret",
+      "dir": "clips/ygo-azure-eyes-clip",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.51,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.543,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.576,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.847,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.881,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.914,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 3.185,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 3.218,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 3.252,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 4.523,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 4.556,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 4.589,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 5.86,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 5.894,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 5.927,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "secret rare, silver foil name on a silver frame, sleeved, handheld under a ceiling light — the name is legible in some frames and washed out in others",
+      "source": "9f469bc0-IMG_0452.mov"
+    },
+    {
+      "key": "pkm-krookodile-clip",
+      "game": "pokemon",
+      "name": "Krookodile ex",
+      "label": "clip-pkm-ir",
+      "dir": "clips/pkm-krookodile-clip",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.384,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.417,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.451,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.392,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.425,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.459,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.4,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.433,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.467,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.408,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.441,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.475,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.416,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.449,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.483,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "illustration rare, holo glare sweeping the card, sleeved, handheld over a dark room",
+      "source": "4201cecd-IMG_0451.mov"
+    },
+    {
+      "key": "ygo-dragunity-clip-hand",
+      "game": "yugioh",
+      "name": "Dragunity Legionnaire",
+      "label": "clip-ygo",
+      "dir": "clips/ygo-dragunity-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.376,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.409,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.443,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.363,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.396,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.43,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.35,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.383,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.417,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.337,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.37,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.404,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.324,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.357,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.391,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "HELD IN HAND — pair with ygo-dragunity-clip-flat, same card, only the holding changed",
+      "source": "IMG_0453.mov"
+    },
+    {
+      "key": "ygo-dragunity-clip-flat",
+      "game": "yugioh",
+      "name": "Dragunity Legionnaire",
+      "label": "clip-ygo",
+      "dir": "clips/ygo-dragunity-clip-flat",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.28,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.313,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.347,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.015,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.048,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.082,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.75,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.783,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.817,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.485,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.518,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.552,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.22,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.253,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.287,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "FLAT on a dark desk — the control half of the held/flat pair",
+      "source": "IMG_0454.mov"
+    },
+    {
+      "key": "pkm-krokorok-clip-flat",
+      "game": "pokemon",
+      "name": "Krokorok",
+      "label": "clip-pkm",
+      "dir": "clips/pkm-krokorok-clip-flat",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.398,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.431,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.464,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.441,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.475,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.508,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.485,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.518,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.552,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.529,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.562,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.595,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.572,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.606,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.639,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "reverse holo FLAT on a dark desk — control half of the pair",
+      "source": "IMG_0455.mov"
+    },
+    {
+      "key": "pkm-krokorok-clip-hand",
+      "game": "pokemon",
+      "name": "Krokorok",
+      "label": "clip-pkm",
+      "dir": "clips/pkm-krokorok-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.386,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.42,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.453,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.401,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.434,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.467,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.415,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.448,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.482,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.429,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.463,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.496,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.444,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.477,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.51,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "reverse holo HELD IN HAND, glare sweeping the foil panel",
+      "source": "IMG_0456.mov"
     }
   ]
 }
