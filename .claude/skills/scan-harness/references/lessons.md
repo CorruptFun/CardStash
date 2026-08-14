@@ -491,3 +491,24 @@ result seems absurd, check this list before writing code.
     loads. `npm i --no-save ffmpeg-static` works (registry traffic bypasses the
     proxy, lesson 14). So frames are extracted once at ingest and committed;
     the clip itself is not stored, since the harness could not read it anyway.
+52. **The multi-card detector cannot see a quarter-turned card, at all.** Four
+    of the real binder pages were shot with the binder rotated relative to the
+    cards, which is an ordinary way to photograph one. `detectCardRegions`
+    sweeps aspects `ASPECT_MIN..ASPECT_MAX` = 0.587..0.859, derived from
+    `CARD_ASPECT = 63/88` — portrait only. A sideways card's bounding box is
+    landscape, w/h ≈ 1.40, outside the band, so the rectangle is never
+    proposed. Measured on the 3x3 page: 5 boxes found, **none of them on a
+    single card** — one box swallowed six cards, another covered two. This is
+    lesson 39 again in a different axis (a search-space limit wearing a
+    scoring-problem's clothes), and the fix is the reciprocal band, not a
+    threshold. Note the single-card path already handles turned cards
+    (`looksSideways` / `uprightOrientations`), so each CROP would identify
+    once the boxes are right — the gap is entirely in the detector.
+53. **Ingest resolution is a silent ceiling, and it applied to the first page
+    for a whole round.** `ingest.mjs` capped every photograph at
+    CAPTURE_MAX_EDGE (1600), which is right for one card and wrong for a page:
+    the first binder page's cards reached the pipeline ~370px wide, under the
+    ~790px where a printed collector line stops being legible, so its 6/8 was
+    partly a property of the ingest tool. Pages now ingest at PAGE_MAX_EDGE
+    (3200). Rule: when a tool normalises an input, check that its constant
+    matches the consumer that will actually read it.
