@@ -35,6 +35,21 @@ create policy "own vault" on public.vaults
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+-- Table privileges, stated explicitly -- do NOT rely on Supabase's implicit
+-- defaults. Projects created before ~2026 inherited `grant all on tables to
+-- anon, authenticated, service_role` from ALTER DEFAULT PRIVILEGES, so a bare
+-- `create table` just worked. Newer projects do not: a fresh table lands with
+-- REFERENCES/TRIGGER/TRUNCATE and no DML at all. The failure is invisible in
+-- review and total at runtime -- PostgREST answers every request, including
+-- the signed-in ones, with `42501 permission denied for table vaults` BEFORE
+-- RLS is ever consulted, so the policy above looks correct and nothing works.
+--
+-- `anon` is granted nothing on purpose: an unauthenticated request has no
+-- business reaching this table, and the policy is the second lock, not the
+-- first. Least privilege here also means a dropped policy fails closed for
+-- anonymous callers instead of exposing every row.
+grant select, insert, update, delete on public.vaults to authenticated;
+
 -- revision/updated_at are server-owned: a client that lies about them would
 -- defeat the conflict check that stops one device overwriting another.
 create or replace function public.bump_vault_revision()
@@ -87,3 +102,11 @@ begin
   return result;
 end;
 $$;
+
+-- Postgres grants EXECUTE on new functions to PUBLIC, which would let an
+-- anonymous caller invoke this. It would fail at the table grant above, but
+-- relying on a second lock to cover a first one that was left open is how
+-- these things go wrong later. `security invoker` is deliberate: the function
+-- runs as the caller, so the RLS policy still applies inside it.
+revoke execute on function public.put_vault(jsonb, text, text, bigint) from public, anon;
+grant  execute on function public.put_vault(jsonb, text, text, bigint) to authenticated;

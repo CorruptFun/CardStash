@@ -7,3 +7,6 @@ tests/harness/report/
 
 # sync server state (local only)
 server/data/
+
+# Supabase CLI scratch
+supabase/.temp/
