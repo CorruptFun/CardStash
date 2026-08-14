@@ -8,6 +8,7 @@ Four layers, each covering something the others structurally cannot.
 | Scan matrix | `npm run test:scan` | headless Chromium, ~5 min | **yes** |
 | Capture | `npm run test:capture` | headless Chromium, seconds | no |
 | Built-bundle smoke | `npm run build && node tests/harness/smoke-app.mjs` | headless Chromium, seconds | no |
+| Install banner | `npm run test:install` | headless Chromium, seconds | no |
 
 ## The rule
 
@@ -186,6 +187,7 @@ npm run test:unit
 npm run test:photos         # real photographs — where wrong cards show up
 npm run build && node tests/harness/smoke-app.mjs
 npm run test:capture        # only if camera.ts or the scan screen changed
+npm run test:install        # only if the install banner or its triggers changed
 ```
 
 If the change touches `detectCardRegions` or anything multi-card, also run

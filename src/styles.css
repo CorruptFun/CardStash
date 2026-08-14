@@ -1482,6 +1482,71 @@ button {
 .scan__ioshint svg {
   vertical-align: -1px;
 }
+/* Install nudge — floats just above the tab bar on every screen but the
+ * camera, so it never covers the scan chip or the viewfinder. */
+.installtip {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--nav-h) + var(--sab) + 10px);
+  z-index: 39;
+  width: min(94vw, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: 12px 14px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--signal-rule);
+  background: var(--ink-100);
+  box-shadow: 0 10px 30px #0a0908b0;
+}
+.installtip__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.installtip__title {
+  font-size: 13.5px;
+  color: var(--paper);
+}
+.installtip p {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--paper-2);
+}
+.installtip b {
+  color: var(--paper);
+  font-weight: 600;
+}
+.installtip__note {
+  color: var(--paper-2);
+  opacity: 0.78;
+}
+.installtip svg {
+  vertical-align: -2px;
+}
+.installtip__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.installtip__go,
+.installtip__dismiss {
+  padding: 6px 12px;
+  border-radius: var(--r-2);
+  font-family: var(--font-num);
+  font-size: 12.5px;
+  border: 1px solid var(--rule-strong);
+}
+.installtip__go {
+  background: var(--signal-fill);
+  border-color: var(--signal-rule);
+  color: var(--paper);
+}
+.installtip__dismiss {
+  background: transparent;
+  color: var(--paper-2);
+}
 .cardsheet {
   display: flex;
   flex-direction: column;

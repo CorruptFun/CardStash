@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Icon, type IconName } from './components/Icon'
+import { InstallPrompt } from './components/InstallPrompt'
 import { Toasts } from './components/Toasts'
 import { trackScreen } from './lib/analytics'
 import { warmOwnedCatalogs } from './lib/tcgcsv'
@@ -107,6 +108,7 @@ export function App() {
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
+      {route.name !== 'scan' && route.name !== 'ingest' && <InstallPrompt />}
       <nav className="nav safe-bottom" aria-label="Main">
         {TABS.map((tab) => {
           const active = tab.match.includes(route.name)

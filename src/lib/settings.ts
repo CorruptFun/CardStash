@@ -30,6 +30,13 @@ export interface Settings {
    * no app flag can suppress it.
    */
   iosCameraHintShown: boolean
+  /**
+   * The "install this to keep your collection" banner has been dismissed.
+   * Separate from actually installing: a user who dismisses it is never
+   * asked again, but `IS_STANDALONE` suppresses the banner regardless, so
+   * installing by any other route also ends it.
+   */
+  installHintDismissed: boolean
   /** Powers the AI deck builder only — scanning is fully on-device. */
   geminiKey: string
   geminiModel: string
@@ -67,6 +74,7 @@ export const useSettings = create<Settings>()(
       haptics: true,
       cameraApproved: false,
       iosCameraHintShown: false,
+      installHintDismissed: false,
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
       pokemonKey: '',

@@ -13,7 +13,7 @@ export async function cameraPermissionState(): Promise<CameraPermission> {
 }
 
 /** iOS/iPadOS — iPads masquerade as Macs, so touch points break the tie. */
-const IS_IOS =
+export const IS_IOS =
   typeof navigator !== 'undefined' &&
   (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))

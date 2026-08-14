@@ -208,3 +208,52 @@ they preserve local-first:
 Whichever is chosen: scanning keeps working offline, and analytics stay
 content-free. Subscription state is not a reason to start sending card data
 anywhere.
+
+---
+
+### 14. One device holds everything, and nothing yet moves it
+
+**Decision.** A user's collection lives in exactly one place: IndexedDB on the
+device that scanned it. There is no cloud copy, no account, and no sync unless
+the user stands up `server/` themselves. The only way data leaves a device is
+Settings → Export, by hand.
+
+**Why it is written down.** This is the load-bearing consequence of decision 1
+(no backend), and it is the one users feel. It has two costs that are easy to
+discover the hard way:
+
+- **Loss.** A lost, wiped or reset device takes the collection with it. On iOS
+  the bar is even lower: WebKit deletes script-writable storage for
+  *uninstalled* sites after ~7 days of no visits, so inactivity alone can do
+  it. `InstallPrompt.tsx` (v0.12.0) addresses that half — see
+  `pwa-build-deploy.md` — but installing cannot protect a device that is gone.
+- **One device.** Scanning is a phone job; organising a large collection is a
+  desktop job. Today those are two unrelated collections, because nothing
+  carries rows between them. The app is a fine desktop *app* already — it is a
+  responsive PWA — but it is not the *same* collection.
+
+**Options, ordered by how well they preserve local-first.** None is chosen yet.
+
+1. **Export/import by hand** — what exists. Zero infrastructure, zero accounts,
+   and it works offline. Costs the user a deliberate act they must remember.
+2. **User-owned cloud storage** (Google Drive `appDataFolder`, Dropbox,
+   OneDrive). The browser talks to the provider directly; the app hosts and
+   stores nothing, and the data sits in the user's own account rather than
+   ours. Solves backup *and* multi-device in one move without contradicting
+   decision 1. Costs: an OAuth client id, provider review for the scope, and a
+   conflict rule for two devices edited offline. Best fit on current evidence.
+3. **The existing self-hosted `server/`** — already built and already syncs,
+   but only for users willing to run a server.
+4. **A first-party backend** — contradicts decision 1.
+
+**On shipping to the App Store.** Worth being precise about what a native
+wrapper does and does not buy, because it is easy to assume it settles all of
+this at once. It solves **storage durability** (a native app's storage is not
+subject to WebKit's eviction sweep), **discoverability**, and — via StoreKit
+receipts — it is the first credible answer to the entitlement-authority problem in
+decision 13. It does **not** solve backup, device loss, or desktop parity;
+those still need option 2 or 3 above. And it adds a constraint: App Review
+guideline 3.1.1 requires in-app purchase for digital features, so a paid tier
+sold in the app cannot route around it. If the PWA keeps serving desktop while
+iOS goes native, the two need to share a collection — which makes cross-device
+sync a prerequisite of that plan, not an alternative to it.

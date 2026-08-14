@@ -181,6 +181,7 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `haptics` (`true`) | Vibration feedback. |
 | `cameraApproved` (`false`) | The camera was approved here before → skip the start gate. Cleared if the browser later denies. |
 | `iosCameraHintShown` (`false`) | The one-time iOS permission explainer has been dismissed. |
+| `installHintDismissed` (`false`) | The "install to keep your collection" banner was dismissed. Independent of actually installing — `IS_STANDALONE` suppresses the banner on its own. |
 | `geminiKey` / `geminiModel` (`'gemini-flash-latest'`) | AI deck builder only. **Scanning never uses Gemini.** |
 | `pokemonKey` (`''`) | Optional pokemontcg.io key (higher rate limits). |
 | `diagShare` (`false`) / `diagEndpoint` / `diagToken` | Opt-in telemetry upload. Uploads require *both* the toggle and a token. |
