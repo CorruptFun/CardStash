@@ -5205,6 +5205,18 @@ button {
   flex-direction: column;
   gap: var(--s3);
 }
+/* Drive backup reuses .syncstate for its status line — same "a background job
+   is looking after you" affordance, so it should read identically. */
+.drivepanel {
+  gap: var(--s3);
+}
+.drivepanel__row {
+  display: flex;
+  gap: var(--s2);
+}
+.drivepanel__row .btn {
+  flex: 1;
+}
 .syncpanel__row {
   display: flex;
   gap: var(--s2);

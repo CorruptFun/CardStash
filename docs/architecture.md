@@ -72,6 +72,7 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `deckstats.ts` | 253 | Boards, per-game deck rules and warnings, curve/colour/type stats, owned-vs-missing, decklist text. |
 | `social.ts` | 618 | Profile/trade/reply payload build, encode/decode, and **every sanitizer for untrusted input**. |
 | `sync.ts` | 267 | The optional live-sync client and poll loop. |
+| `drive.ts` | 340 | Opt-in backup to the user's **own** Google Drive (`appDataFolder`). Dormant without `VITE_GOOGLE_CLIENT_ID`; loads the third-party Google script on first use, never at boot. |
 | `gemini.ts` | 211 | The AI deck builder — the app's only Gemini use. |
 | `analytics.ts` | 746 | Local diagnostics store, redaction, install/session identity, opt-in telemetry upload. |
 | `importexport.ts` / `csv.ts` | 241 / 62 | Collection CSV import/export and a CSV parser. |
@@ -191,6 +192,7 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | `tcgcsv.com` | Catalog games + sealed products for every game | read |
 | card image CDNs | `<img>` loads only | read |
 | `generativelanguage.googleapis.com` | AI deck builder, only with a user-supplied key | write prompt |
+| `accounts.google.com` / `www.googleapis.com` | Only with Drive backup on, and only after the user connects | read/write, to the user's own Drive |
 | the user's own binder URL (e.g. a Gist raw link) | Friend refresh | read |
 | the user's sync server | Only when `syncOn` and an address is set | read/write |
 | the diagnostics endpoint | Only when sharing is on **and** a token is set | write |

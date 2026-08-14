@@ -29,6 +29,8 @@ export const EVENT_TYPES = [
   'card_added',
   'variant_selected',
   'import_completed',
+  'backup_run',
+  'backup_restore',
   'search',
   'deck_created',
   'ai_builder_run',

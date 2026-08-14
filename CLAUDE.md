@@ -74,7 +74,12 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
   the Dexie writes for friends/trades live in `db.ts`), optional live sync
-  (`sync.ts` — publish/poll against `server/sync-server.mjs`).
+  (`sync.ts` — publish/poll against `server/sync-server.mjs`), opt-in backup to
+  the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
+  dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
+  injected on first use, NEVER at boot, so a user who never turns it on never
+  contacts Google. The free tier must never gain a dependency on a backend of
+  ours — that stays true when hosted sync arrives).
   Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
   the group index merges the "Pokemon Japan" TCGplayer category so Japanese
   packs match by their printed set code ("sv4K").

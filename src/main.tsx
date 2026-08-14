@@ -4,6 +4,7 @@ import { App } from './App'
 import { installErrorHooks, installSessionTracking, installTelemetryFlusher } from './lib/analytics'
 import { db, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
+import { runAutoBackup } from './lib/drive'
 import { settings } from './lib/settings'
 import { startSyncLoop } from './lib/sync'
 import { APP_VERSION } from './lib/version'
@@ -83,6 +84,13 @@ async function boot(): Promise<void> {
   pruneHistory().catch(() => {})
   installTelemetryFlusher()
   startSyncLoop()
+  // The daily Drive backup, deliberately late and deliberately quiet: it
+  // no-ops unless the user turned it on, never opens a popup, and never
+  // reports failure. 12s keeps it clear of first paint and of the camera
+  // coming up, which are the two things the user is actually waiting for.
+  setTimeout(() => {
+    runAutoBackup().catch(() => {})
+  }, 12_000)
   if ('serviceWorker' in navigator && params.get('nosw') !== '1') {
     announceVersion(localStorage, APP_VERSION, (version) => uiStore.getState().toast(`Updated to v${version}`, 'success'))
     const register = () =>

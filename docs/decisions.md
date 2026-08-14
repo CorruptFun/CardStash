@@ -237,7 +237,23 @@ discover the hard way:
   carries rows between them. The app is a fine desktop *app* already — it is a
   responsive PWA — but it is not the *same* collection.
 
-**Options, ordered by how well they preserve local-first.** None is chosen yet.
+**Option 2 is chosen and half-built (2026-08-14).** `lib/drive.ts` backs the
+collection up to the user's own Google Drive `appDataFolder`, daily and
+automatically, with the last five kept. It holds the local-first line exactly:
+the browser talks to Google directly, we host and store nothing, and the free
+tier gains **no dependency on any backend of ours** — a property that must
+survive the arrival of hosted sync, because a user who never signs up for
+anything still deserves their collection protected.
+
+**It closes half of the iOS trap, and the honest accounting matters.** It removes
+the file handling and the "remember to export" discipline, so a restore path
+exists that does not depend on the user keeping track of a download. It does not
+make the migration automatic: an installed PWA is a different storage partition,
+so the user signs in to Drive again on the other side. Export → install → import
+becomes sign-in → install → sign-in → restore. Nothing in the web platform closes
+the rest; that is the App Store note below.
+
+**Options, ordered by how well they preserve local-first.**
 
 1. **Export/import by hand** — what exists. Zero infrastructure, zero accounts,
    and it works offline. Costs the user a deliberate act they must remember,

@@ -14,10 +14,23 @@ Everything the user creates lives in browser storage on their device:
 - localStorage `cardstock-settings` — preferences **including API keys and the
   sync device token**, and `cardstock-version`.
 
-There is no user account and no cloud copy. `requestPersistence()` at boot asks
-the browser not to evict the data. The user's escape hatches are the JSON
-backup, the CSV export, and Settings → Erase everything (`clearAllData()`; the
-analytics DB is cleared separately by `clearAnalytics()`).
+There is no user account. `requestPersistence()` at boot asks the browser not to
+evict the data. The user's escape hatches are the JSON backup, the CSV export,
+and Settings → Erase everything (`clearAllData()`; the analytics DB is cleared
+separately by `clearAnalytics()`).
+
+**One optional copy can exist off the device, and it is not ours.** With Drive
+backup on (`lib/drive.ts`), a JSON backup is written daily to the user's own
+Google Drive, in the `appDataFolder` — a per-app hidden folder that no other
+software, and no page on the web, can enumerate or read. We host nothing, store
+nothing, and never see the file; the browser talks to Google directly. The last
+five backups are kept and older ones deleted, because an automatic backup that
+overwrites the only good copy after a corruption is a data-loss trap of its own.
+
+Turning it off (`disconnectDrive()`) revokes the OAuth grant. It deliberately
+does **not** delete what is already in the user's Drive — that is their data, in
+their account, and silently destroying it on a toggle would be the wrong default.
+The copy says so.
 
 ## Network egress, exhaustively
 
@@ -31,6 +44,8 @@ analytics DB is cleared separately by `clearAnalytics()`).
 | `tcgcsv.com` | catalog games, sealed products | nothing but the path (static files) | as above |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | `generativelanguage.googleapis.com` | AI deck builder run | the prompt: game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"**; the user's key in a header | fully opt-in (needs a key) |
+| `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
+| `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
 | the user's sync server | while `syncOn` | binder payload, trade/reply payloads, the device token | off by default |
 | the diagnostics endpoint | while `diagShare` **and** a token are set | redacted event batches + a random device id + app version | off by default |
@@ -47,6 +62,18 @@ way — this is why the OCR engine is self-hosted rather than CDN-loaded.
 | pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
 | Diagnostics token | `settings.diagToken` | the user's configured endpoint only, as a bearer token | authorizing telemetry upload |
 | Sync device token | `settings.syncToken` (minted locally) | the user's configured sync server only | proving ownership of the profile id |
+| Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |
+| Google OAuth client id | compiled in from `VITE_GOOGLE_CLIENT_ID` | Google only | identifying the app during consent |
+
+The Drive access token is deliberately absent from the table's "stored" column:
+it lives about an hour, it is re-minted silently, and a credential that is never
+written down cannot leak from a backup, a share link or a stolen device. There is
+no identity scope either — the app asks for `drive.appdata` and nothing else, so
+it never learns the user's name, email or Google account id. "Last backed up 3h
+ago" is the whole of what it knows about them.
+
+There is **no client secret**. A browser token flow does not use one; the client
+id is public and ships in the bundle, which is expected and safe for this model.
 
 Keys are never included in analytics events (`key`, `apikey`, `token` are on the
 forbidden-key list) and never travel in a share link or backup.

@@ -34,6 +34,32 @@ scanning, upload — zero marginal cost); it structurally mismatches hosted sync
 | Receiver platform | **Supabase — a NEW project, in its own organization** | See "Why not the shared project" below. The `first-party-analytics` and `supabase-migrations` skills target this shape, and viva-maya's `0010`/`0015`/`0019` lessons transfer directly. Reusable as the round-3 sync backend. |
 | Consent geography | **US-first; timezone-derived EEA/UK carve-out** | No geolocation API, no IP lookup, no prompt. US users are auto-on with zero interaction. |
 | Naming | **CardStash** for the product; storage/wire identifiers **frozen** as `cardstock` | See round 7 — renaming the Dexie DB would orphan every existing collection. |
+| Supabase timing | **Deferred.** New paid project when we get to it; nothing else waits on it | Only 0b/0c and round 3 are blocked. Round 1 needs Google Cloud, not Supabase — and must not depend on our backend at all (below). |
+
+### Order of work (decided 2026-08-14)
+
+**Round 1 + 2 first**, with 0e folded in — Drive backup, the install trap, and the
+`updatedAt`/tombstone migration. Then 0a-inert + 0d + 7, then the receiver when
+the Supabase project exists, then round 6.
+
+**The cost of deferring the receiver, stated once so it is a knowing trade:** we
+stay blind. The Settings insights panel reads the local analytics DB — this
+device only. It cannot tell us whether anyone else opened the app this week.
+
+### ⚠️ Two traps when the receiver finally lands
+
+1. **Never ship `diagShare: true` against the dead endpoint.** Every install
+   would POST at Family Hub's origin every 60s forever. Nothing breaks — flush
+   swallows failures and the DB self-prunes at 5,000 — but it is pointless
+   traffic and a posture change that collects nothing. So 0a splits: the
+   `merge()` endpoint migration, new `EVENT_TYPES`, timezone helper and consent
+   UI land now and sit **inert** while `diagShare` stays false; the default flip
+   ships **with** the receiver.
+2. **Set `flushedThrough` to the current max event id at the moment of the
+   flip.** `track()` writes to IndexedDB regardless of upload settings, so
+   devices are accumulating events right now (capped at 5,000). Flipping the
+   default without this uploads events collected *before* anyone consented.
+   One line, at one moment, easy to forget.
 
 ---
 
@@ -307,10 +333,15 @@ one-tap but not automatic. Real symmetry needs the native wrapper from decision
 
 ## Round 2 — The iOS data-loss trap
 
-**Exposure today is real, and v0.13.0 made it worse.** We actively nudge
-installation, and installation is the exact moment the collection disappears: an
-installed PWA gets storage partitioned away from Safari, so it starts empty, and
-the only bridge is manual export → install → import.
+**Correction — v0.13.0 already handles the ordering.** `InstallPrompt.tsx` titles
+the iOS banner *"Back up before you install"*, makes Save backup the primary
+action, and states plainly that the Home Screen app starts empty. It does not
+nudge install ahead of backup. On Chromium the Install button is unqualified, and
+correctly so — Chromium partitions nothing, so the collection carries over.
+
+**What remains is the destination, not the ordering.** The bridge is still a
+downloaded file the user has to keep track of, on the platform least equipped to
+keep track of files.
 
 **Round 1 closes half of it.** It removes the file handling and the "remember to
 export" requirement, so a restore path exists that does not depend on user

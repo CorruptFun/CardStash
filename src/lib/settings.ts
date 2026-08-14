@@ -52,6 +52,14 @@ export interface Settings {
   profileNote: string
   /** What a profile share includes: the trade binder, or the whole collection. */
   shareScope: ShareScope
+  /**
+   * Backup to the user's own Google Drive is switched on. No token lives here:
+   * the access token is memory-only and re-minted silently (see lib/drive.ts),
+   * so this flag plus a live Google session is the whole persisted state.
+   */
+  driveBackup: boolean
+  /** Last successful Drive backup, epoch ms. 0 = never. */
+  driveAt: number
   /** Optional sync server origin; empty = link-sharing only (the default). */
   syncUrl: string
   syncOn: boolean
@@ -85,6 +93,8 @@ export const useSettings = create<Settings>()(
       profileName: '',
       profileNote: '',
       shareScope: 'trade',
+      driveBackup: false,
+      driveAt: 0,
       syncUrl: '',
       syncOn: false,
       syncToken: '',

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal, Toggle } from '../components/basics'
+import { DriveBackup } from '../components/DriveBackup'
 import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, type Insights } from '../lib/analytics'
 import { clearAllData } from '../lib/db'
@@ -231,6 +232,8 @@ export function SettingsView() {
           <em className="setfield__hint">Optional — raises the Pokémon rate limit.</em>
         </div>
       </section>
+      {/* Renders nothing — not an empty heading — when the build has no OAuth client id. */}
+      <DriveBackup />
       <section className="setsec">
         <h3>Data</h3>
         <div className="setrow">

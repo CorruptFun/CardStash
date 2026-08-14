@@ -4,6 +4,7 @@ import { db, exportBackup } from '../lib/db'
 import { downloadFile } from '../lib/csv'
 import { ymd } from '../lib/util'
 import { IS_IOS, IS_STANDALONE } from '../lib/camera'
+import { backupToDrive, isDriveConfigured } from '../lib/drive'
 import { useSettings } from '../lib/settings'
 import { guarded, useUi } from '../store/ui'
 
@@ -52,7 +53,10 @@ export function InstallPrompt() {
   const [deferred, setDeferred] = useState<InstallEvent | null>(null)
   const [installed, setInstalled] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [driveBusy, setDriveBusy] = useState(false)
   const count = useLiveQuery(() => db.collection.count(), [])
+  /** Drive turns the three-step migration into two taps and a sign-in. */
+  const drive = isDriveConfigured()
 
   useEffect(() => {
     // Chromium fires this instead of showing its own install UI, but only
@@ -84,6 +88,27 @@ export function InstallPrompt() {
     setSaved(true)
     toast('Backup saved — keep it somewhere safe', 'success')
   }, [toast])
+
+  /**
+   * The same step, done properly. A downloaded file on iOS is a file the user
+   * has to find again inside a freshly installed app, which is the weakest link
+   * in the whole migration. A Drive backup is waiting for them when they sign
+   * in on the other side of the install, so the step they must not get wrong
+   * becomes the step they cannot get wrong.
+   */
+  const saveToDrive = useCallback(async () => {
+    setDriveBusy(true)
+    try {
+      await backupToDrive(true)
+      config.set({ driveBackup: true })
+      setSaved(true)
+      toast('Backed up to your Google Drive', 'success')
+    } catch (err: any) {
+      toast(err?.message ?? 'Could not back up to Drive', 'error')
+    } finally {
+      setDriveBusy(false)
+    }
+  }, [config, toast])
 
   const install = useCallback(async () => {
     if (!deferred) return
@@ -117,10 +142,19 @@ export function InstallPrompt() {
             </p>
             <p>
               <b>The Home Screen app starts empty.</b> iOS gives it separate storage from Safari, so nothing you've
-              scanned here comes along on its own. Save a backup first, then:
+              scanned here comes along on its own. {drive ? 'Back up first, then:' : 'Save a backup first, then:'}
             </p>
             <p className="installtip__steps">
-              <ShareGlyph /> <b>Share</b> → <b>Add to Home Screen</b> → open it → <b>Collection → Import</b> your backup.
+              <ShareGlyph /> <b>Share</b> → <b>Add to Home Screen</b> → open it →{' '}
+              {drive ? (
+                <>
+                  <b>Settings → Restore from Drive</b>.
+                </>
+              ) : (
+                <>
+                  <b>Collection → Import</b> your backup.
+                </>
+              )}
             </p>
           </>
         ) : (
@@ -134,8 +168,16 @@ export function InstallPrompt() {
         </p>
       </div>
       <div className="installtip__actions">
-        <button className={IS_IOS ? 'installtip__go' : 'installtip__dismiss'} onClick={saveBackup}>
-          {saved ? 'Save again' : 'Save backup'}
+        {drive && (
+          <button className={IS_IOS ? 'installtip__go' : 'installtip__dismiss'} onClick={saveToDrive} disabled={driveBusy}>
+            {driveBusy ? 'Backing up…' : saved ? 'Back up again' : 'Back up to Drive'}
+          </button>
+        )}
+        {/* The file stays offered even with Drive available: someone who won't
+            sign in to Google must still have a way out, and that path is the
+            only one that works with no account at all. */}
+        <button className={IS_IOS && !drive ? 'installtip__go' : 'installtip__dismiss'} onClick={saveBackup}>
+          {saved && !drive ? 'Save again' : 'Save a file'}
         </button>
         {deferred && (
           <button className="installtip__go" onClick={install}>
