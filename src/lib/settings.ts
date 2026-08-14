@@ -72,15 +72,18 @@ export interface Settings {
   driveBackup: boolean
   /** Last successful Drive backup, epoch ms. 0 = never. */
   driveAt: number
-  /** Optional sync server origin; empty = link-sharing only (the default). */
-  syncUrl: string
-  syncOn: boolean
-  /** Proves this device owns its profile id on the sync server. */
-  syncToken: string
-  /** Newest inbox item already applied, as a server timestamp. */
-  syncCursor: number
-  /** Last successful sync. */
-  syncAt: number
+  /**
+   * Hosted social is on: publish my binder, poll friends, drain the trade
+   * inbox. Off (the default) means the app is exactly as social as it ever
+   * was — links and files, nothing published anywhere.
+   */
+  socialOn: boolean
+  /** My `@handle`, cached so the UI can render it without a round trip. */
+  socialHandle: string
+  /** Newest inbox row id already applied. */
+  socialCursor: number
+  /** Last successful social sync. */
+  socialAt: number
   set: (patch: Partial<Settings>) => void
   toggleGame: (game: Game) => void
 }
@@ -112,11 +115,10 @@ export const useSettings = create<Settings>()(
       shareScope: 'trade',
       driveBackup: false,
       driveAt: 0,
-      syncUrl: '',
-      syncOn: false,
-      syncToken: '',
-      syncCursor: 0,
-      syncAt: 0,
+      socialOn: false,
+      socialHandle: '',
+      socialCursor: 0,
+      socialAt: 0,
       set: (patch) => set(patch),
       toggleGame: (game) =>
         set((state) => {

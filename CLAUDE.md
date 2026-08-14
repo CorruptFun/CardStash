@@ -2,9 +2,10 @@
 
 Vite + React 19 + TypeScript PWA. Local-first: all user data in IndexedDB via
 Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
-(`src/lib/settings.ts`). The deployed app has no backend — the only server in
-the repo is `server/`, an optional self-hosted sync box the user opts into
-(see Conventions); the app must always work fully without it.
+(`src/lib/settings.ts`). The deployed app is a static bundle with **three
+opt-in cloud features** — Drive backup, the encrypted cloud vault, and hosted
+social — all dormant until switched on. Signed out, the app must always work
+fully: scanning, collection, decks and link sharing never touch a server.
 
 ## Where the full documentation is
 
@@ -15,7 +16,7 @@ chapter before a non-trivial change, and update it when behaviour changes:
 - `docs/data-model.md` — types, Dexie schema + migrations, settings, invariants
 - `docs/scanning.md` — the scan pipeline (deep tuning lives in the skill)
 - `docs/card-data.md` — games, sources, catalog caching, pricing, portfolio/deck math
-- `docs/social.md` — serverless friends/trades/wants + the optional sync server
+- `docs/social.md` — serverless friends/trades/wants + hosted social + the vault
 - `docs/ui.md` · `docs/pwa-build-deploy.md` · `docs/testing.md` · `docs/privacy.md`
 - `docs/extending.md` — checklists (add a game, a table, a setting, a release)
 - `docs/decisions.md` — why the load-bearing choices are what they are
@@ -43,9 +44,6 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
   workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
   fallback only — don't use it when Actions works.
-- `npm run sync` — self-hosted live-sync server (`server/`, zero deps, state in
-  the gitignored `server/data/`). The app never requires it, and it is being
-  retired in favour of hosted social — see below.
 - `npm run test:social` — the hosted-social RLS harness against a real Supabase
   project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
   after any migration touching `binders`, `friendships`, `trade_offers` or
@@ -78,9 +76,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
-  the Dexie writes for friends/trades live in `db.ts`), live sync
-  (`sync.ts` — publish/poll against `server/sync-server.mjs`; **being retired**,
-  see Hosted social below), opt-in backup to
+  the Dexie writes for friends/trades live in `db.ts`), hosted social
+  (`authsession.ts` + `socialcloud.ts` — see Hosted social below), opt-in backup to
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
@@ -132,11 +129,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
   pickers in `prices.ts` and history readers filter them out; don't reintroduce
   them into math or UI.
-- Social is serverless **by default**: everything works with no server, and
+- Social is serverless **by default**: everything works with no account, and
   that path must keep working — never make links/files a second-class citizen
-  or route them through a server. Live sync (`sync.ts` + `server/`) is an
-  opt-in overlay the user turns on with a server address; when `syncOn` is
-  false nothing in `sync.ts` runs. Anything the server returns is untrusted
+  or route them through a server. Hosted social (`socialcloud.ts`) is an
+  opt-in overlay; with no handle claimed, nothing in it runs and the app makes
+  no request to our server. Anything the server returns is untrusted
   and goes through the same `social.ts` sanitizers as a pasted link. Profiles,
   trade proposals and replies travel as deflate+base64url payloads in
   `#/x?d=…` links (or plain-JSON files); friends/trades are local Dexie
@@ -148,12 +145,12 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   keyed `${game}|${normalizeName(name)}` (any printing matches); matchmaking
   compares want keys, never card ids.
 
-## Hosted social (schema landed 2026-08-14, client not built)
+## Hosted social (v0.15.0)
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
-on the same Supabase project as the cloud vault. **The database is now defined
-by `supabase/migrations/` (0000–0004), not `supabase/schema.sql`** — that file
-is a pointer, and the migration history is baselined on the live project so a
+on the same Supabase project as the cloud vault. **The database is defined by
+`supabase/migrations/` (0000–0004), not `supabase/schema.sql`** — that file is
+a pointer, and the migration history is baselined on the live project so a
 `db push` cannot replay from zero. Read `docs/social.md` and decision 16 before
 touching any of it.
 
@@ -169,9 +166,19 @@ it cannot be E2E-encrypted like `vaults`. The two are separate tables, separate
 opt-ins, and `erase_social()` leaves `vaults` alone. Never widen what is
 published beyond what the user chose.
 
-Still to build: `lib/socialcloud.ts` (plan in `docs/social.md`), the UI, and
-retiring `sync.ts` + `server/`. Until the replacement exists, leave `sync.ts`
-alone — removing it first takes the live tier away with nothing in its place.
+**Two switches, not one.** `socialConfigured()` (signed in + handle) and
+`socialPublishing()` (+ `socialOn`) are different questions on purpose:
+claiming a handle publishes no cards and only makes you reachable; putting the
+binder up is the separate, privacy-bearing act. Don't collapse them.
+
+- `lib/authsession.ts` — sign-in, shared by the vault and social. `cloud.ts`
+  re-exports it so existing call sites keep one import site.
+- `lib/socialcloud.ts` — the hosted transport. Everything it receives still
+  goes through `social.ts`'s sanitizers.
+- `components/SignIn.tsx` — the one sign-in UI; `SocialPanel.tsx` — the front
+  door on the Friends screen.
+- **`server/` and `lib/sync.ts` are deleted** (the app had no users, so no
+  compatibility path was carried). Don't reintroduce a second live tier.
 
 ## Planned paid tier — binder scanning and photo upload
 

@@ -150,7 +150,12 @@ function snapshotKey(row: SharedCard): string {
   return `${row.cardId}|${row.finish}|${row.condition}|${row.setCode ?? ''}|${row.number ?? ''}`
 }
 
-export function friendFromProfile(payload: ProfilePayload, existing?: Friend, sourceUrl?: string): Friend {
+export function friendFromProfile(
+  payload: ProfilePayload,
+  existing?: Friend,
+  sourceUrl?: string,
+  remoteRev?: number,
+): Friend {
   let lastDelta = existing?.lastDelta
   if (existing) {
     const before = new Set(existing.cards.map(snapshotKey))
@@ -170,6 +175,7 @@ export function friendFromProfile(payload: ProfilePayload, existing?: Friend, so
     updatedAt: Date.now(),
     exportedAt: payload.at,
     sourceUrl: sourceUrl ?? existing?.sourceUrl,
+    remoteRev: remoteRev ?? existing?.remoteRev,
     cards: payload.cards,
     wants: payload.wants,
     lastDelta,
@@ -456,6 +462,7 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
   const name = asStr(raw.name, 60)
   if (!id || !name) return null
   const sourceUrl = asStr(raw.sourceUrl, 600)
+  const remoteRev = clampInt(raw.remoteRev, 0, Number.MAX_SAFE_INTEGER)
   const delta = isRecord(raw.lastDelta) ? raw.lastDelta : null
   const added = delta ? clampInt(delta.added, 0, 99_999) : undefined
   const removed = delta ? clampInt(delta.removed, 0, 99_999) : undefined
@@ -468,6 +475,7 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
     updatedAt: asTime(raw.updatedAt),
     exportedAt: asTime(raw.exportedAt),
     sourceUrl: sourceUrl && /^https?:\/\//i.test(sourceUrl) ? sourceUrl : undefined,
+    remoteRev,
     cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
     wants: sanitizeSharedWants(raw.wants),
     lastDelta: delta && (added || removed) ? { added: added ?? 0, removed: removed ?? 0, at: asTime(delta.at) } : undefined,

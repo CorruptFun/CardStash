@@ -41,7 +41,6 @@ areas; read the chapter it points at before changing the code.
 - [`../README.md`](../README.md) — user-facing product README.
 - [`../CLAUDE.md`](../CLAUDE.md) — the short agent brief: hard rules, layout,
   conventions. This directory is the long form of it.
-- [`../server/README.md`](../server/README.md) — running the optional sync server.
 - [`../tests/harness/README.md`](../tests/harness/README.md) — the scan
   regression harness, operationally.
 - [`../.claude/skills/scan-harness/`](../.claude/skills/scan-harness/) — the

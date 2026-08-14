@@ -23,7 +23,7 @@ import {
   wantKeyFor,
   wantKeySet,
 } from '../lib/social'
-import { sendToInbox, syncConfigured } from '../lib/sync'
+import { sendToInbox, socialConfigured } from '../lib/socialcloud'
 import type { CollectionItem, Friend, Game, SharedCard, TradeRecord } from '../lib/types'
 import { money, relativeAge, uid, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
@@ -402,7 +402,7 @@ function TradeComposer({
     if (!(await guarded(async () => (await saveTrade(trade), true), 'Save trade'))) return
     const payload = buildTradePayload(trade, me)
     // Synced friends get it in their inbox; the link stays as the fallback.
-    if (syncConfigured()) {
+    if (socialConfigured()) {
       try {
         await sendToInbox(friend.id, payload)
         setDelivered(true)

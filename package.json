@@ -1,7 +1,7 @@
 {
   "name": "cardstock",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,6 @@
     "test:lowlight": "node tests/harness/run-matrix.mjs --degradations=lowlight,dim,dark --mode=hinted --stack=3",
     "test:capture": "node tests/harness/capture-stack.mjs",
     "test:camera": "node tests/harness/camera-lifecycle.mjs",
-    "sync": "node server/sync-server.mjs",
     "test:foil": "node tests/harness/run-matrix.mjs --degradations=foil,foil-worst --mode=hinted",
     "test:foiltext": "node tests/harness/run-matrix.mjs --degradations=foil-text,foil-text-silver,foil-text-worst --mode=hinted",
     "test:photos": "node tests/harness/run-matrix.mjs --photos-only",

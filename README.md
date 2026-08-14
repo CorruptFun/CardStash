@@ -35,10 +35,13 @@ storage all work from there.
   wants travel with your binder share, so both sides see matches highlighted:
   cards of theirs you're hunting, cards of yours they're hunting, one-tap
   select in the trade composer, and +added/−removed diffs on every refresh.
-- **Live sync (optional)** — run `npm run sync` on any computer and point a
-  group at the address it prints: binders then refresh in the background and
-  trades arrive in-app instead of by link. Off by default, one tap to leave.
-  See [`server/README.md`](server/README.md).
+- **An account (optional)** — sign in with an emailed code and claim an
+  `@handle`. Friends then add you by handle instead of a link, trade offers
+  arrive in the app, friends' binders refresh themselves, and you can see which
+  collectors are offering the cards on your want list. Claiming a handle
+  publishes **no cards**; putting your binder up is a separate switch, and what
+  you share decides who can read it — a for-trade list is findable by any
+  signed-in collector, a whole collection only by friends you accept.
 
 - **Backup (optional)** — keep a daily copy of everything in **your own Google
   Drive**, in a private folder only this app can see. Your browser talks to
@@ -46,13 +49,14 @@ storage all work from there.
   on iPhone, where Safari deletes the data of sites you haven't opened in about
   a week.
 
-Everything is stored locally (IndexedDB). **No accounts and no server required**
+Everything is stored locally (IndexedDB). **No account and no server required**
 — that stays true however far the app grows: scanning, your collection, decks
 and link-based sharing all work offline with nothing signed in. API keys live
 on-device and are sent only to their own services. Social works serverlessly by
 default: a share link *is* the data (compressed into the URL), so nothing is
 published anywhere unless you send it to someone. The optional extras — Drive
-backup, live sync — are things you switch on, never things you're switched into.
+backup, the encrypted cloud vault, an account for friends and trades — are
+things you switch on, never things you're switched into.
 
 ## Documentation
 
@@ -65,8 +69,8 @@ service worker, testing, privacy, and the decisions behind all of it. Start at
 
 - `npm run dev` — dev server
 - `npm run build` — typecheck + production build
-- `npm run sync` — optional live-sync server (see `server/README.md`)
 - `npm run test:unit` / `npm run test:scan` — unit tests / scan matrix
+- `npm run test:social` — hosted-social RLS against a real Supabase project
 
 ## Development
 

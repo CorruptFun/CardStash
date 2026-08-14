@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { IS_IOS, IS_STANDALONE } from '../lib/camera'
 import { CLOUD_AVAILABLE } from '../lib/cloudconfig'
 import { useSettings } from '../lib/settings'
 import { useUi } from '../store/ui'
-
-/**
- * An iOS Home Screen app is the one place the Google button cannot be trusted:
- * the OAuth round trip has a long history of surfacing in Safari rather than
- * returning to the app, and a session that lands in Safari lands in a
- * different storage container — the exact partitioning this whole feature
- * exists to work around. So it is not offered there at all, rather than
- * offered and quietly broken. Every other platform keeps it.
- */
-const GOOGLE_IS_A_TRAP = IS_IOS && IS_STANDALONE
+import { SignIn } from './SignIn'
 
 /**
  * The Settings front door for the cloud vault.
@@ -20,26 +10,24 @@ const GOOGLE_IS_A_TRAP = IS_IOS && IS_STANDALONE
  * The happy path is three taps; the states around it are what actually decide
  * whether people keep their cards, so they are explicit rather than implied:
  *
- * - **Signed out** → sign in. Emailed code first, Google second — see the
- *   ordering note in `cloud.ts`; the code path is the one that works in an
- *   iOS Home Screen app.
+ * - **Signed out** → sign in, via the shared `SignIn` component. The same
+ *   account serves hosted social; this section is only about the vault.
  * - **Signed in, locked** → the passphrase. Copy differs on whether a vault
  *   already exists, because "set a passphrase" and "enter your passphrase"
  *   are different acts and conflating them is how people lock themselves out.
  * - **Unlocked** → sync, with the last result stated plainly.
  *
- * `cloud.ts` is imported dynamically everywhere here so the 7.5 kB chunk (and
- * nothing else) is fetched only when someone actually opens this section.
+ * `cloud.ts` is imported dynamically everywhere here so its chunk (and the
+ * crypto and merge code it pulls in) is fetched only when someone actually
+ * opens this section.
  */
 
-type Stage = 'signedout' | 'code' | 'locked' | 'ready'
+type Stage = 'signedout' | 'locked' | 'ready'
 
 export function CloudSync() {
   const config = useSettings()
   const toast = useUi((s) => s.toast)
   const [stage, setStage] = useState<Stage>('signedout')
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [existing, setExisting] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -70,29 +58,6 @@ export function CloudSync() {
     },
     [toast],
   )
-
-  const sendCode = () =>
-    run(async () => {
-      const cloud = await import('../lib/cloud')
-      await cloud.sendEmailCode(email.trim())
-      setStage('code')
-      toast('Check your email for a six-digit code', 'success')
-    })
-
-  const verify = () =>
-    run(async () => {
-      const cloud = await import('../lib/cloud')
-      const session = await cloud.verifyEmailCode(email.trim(), code.trim())
-      setWho(session.email || email.trim())
-      setCode('')
-      setStage('locked')
-    })
-
-  const google = () =>
-    run(async () => {
-      const cloud = await import('../lib/cloud')
-      cloud.startGoogleSignIn()
-    })
 
   const unlock = () =>
     run(async () => {
@@ -141,53 +106,12 @@ export function CloudSync() {
             Sign in to keep your collection on more than one device — and to get it back if you lose this one. Your
             cards are encrypted on this device first, so the server stores a blob it cannot read.
           </p>
-          <div className="setrow cloudrow">
-            <input
-              className="input"
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <button className="btn btn--ghost btn--sm" disabled={busy || !email.includes('@')} onClick={sendCode}>
-              Email me a code
-            </button>
-          </div>
-          {!GOOGLE_IS_A_TRAP && (
-            <div className="setrow">
-              <div className="setrow__text">
-                <span>Or use Google</span>
-                <em>Faster, but if you use Cardstock from your Home Screen, the emailed code is more reliable</em>
-              </div>
-              <button className="btn btn--ghost btn--sm" disabled={busy} onClick={google}>
-                Google
-              </button>
-            </div>
-          )}
-        </>
-      )}
-
-      {stage === 'code' && (
-        <>
-          <p className="setsec__note">Enter the six-digit code sent to {email}.</p>
-          <div className="setrow cloudrow">
-            <input
-              className="input"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="123456"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <button className="btn btn--ghost btn--sm" disabled={busy || code.trim().length < 6} onClick={verify}>
-              Sign in
-            </button>
-          </div>
-          <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setStage('signedout')}>
-            Use a different email
-          </button>
+          <SignIn
+            onSignedIn={(email) => {
+              setWho(email)
+              setStage('locked')
+            }}
+          />
         </>
       )}
 

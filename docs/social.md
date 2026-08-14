@@ -286,33 +286,64 @@ user who publishes nothing and has no friends is unreachable, which is the
 correct default. Capped at 20 undrained items per sender-recipient pair, so one
 spammer can fill neither an inbox nor the table.
 
-## Client plan (not yet built)
+## The client (v0.15.0)
 
-`lib/socialcloud.ts`, dynamically imported exactly like `cloud.ts`, reusing its
-session handling — one login serves the vault and social both.
+`lib/authsession.ts` owns sign-in — extracted from `cloud.ts` so one login
+serves the vault and social both, and neither module owns the other's state.
+`lib/socialcloud.ts` is the hosted-social transport.
 
-1. **Session** — reuse `cloud.ts`'s `loadSession`/`freshToken`. Do not mint a
-   second auth path.
-2. **`publishBinder()`** — `buildProfilePayload()` unchanged, then derive the
-   offers array with `wantKeyFor()` and call the `publish_binder` RPC. Keep
-   `sync.ts`'s payload-hash skip; it is a good idea that survives the rewrite.
-3. **`pullFriends()`** — select `binders` for followed user ids, compare
-   `revision`, and feed changed rows through `sanitizePayload()` →
-   `upsertFriendFromProfile()`. Unchanged from `sync.ts` apart from the
-   transport.
-4. **`drainInbox()`** — select `inbox` where `id > cursor` ordered by `id`,
-   sanitize each, `recordIncomingTrade` / `applyTradeReply`, advance the
-   cursor, then delete the drained rows.
-5. **`matchWants()`** — call `match_wants` with the local want keys; render
-   holders on the wants list.
-6. **Realtime is the obvious follow-up** and is deliberately not day one:
-   polling works, is simpler to reason about, and a subscription that silently
-   dies is worse than a poll that visibly lags.
+| Function | What it does |
+| -------- | ------------ |
+| `claimHandle` | `set_profile`, then adopts the account as this device's identity (below) |
+| `publishBinder` | `buildProfilePayload()` unchanged → `publish_binder` RPC, with a payload-hash skip so an unchanged binder is not rewritten |
+| `pullFriends` | revisions first, payloads only for what moved |
+| `drainInbox` | `id > cursor`, sanitize, record, advance, delete |
+| `matchWants` | `match_wants` over the local want keys |
+| `sendToInbox` / `requestFriend` / `answerRequest` / `eraseSocial` | thin RPC wrappers |
 
-**Settings** gains `socialOn`, `socialHandle`, `socialCursor`, `socialAt`. The
-`syncUrl`/`syncOn`/`syncToken`/`syncCursor` keys are retired — leave them in
-the `merge()` sanitizer long enough to ignore stored values rather than
-crashing on them.
+### Two switches, not one
+
+`socialConfigured()` (signed in + handle) and `socialPublishing()`
+(+ `socialOn`) are deliberately different questions:
+
+- **Claiming a handle publishes no cards.** It makes you findable and
+  reachable — friends can add you, trades can arrive. That is the whole cost
+  of joining.
+- **Publishing your binder is the separate, privacy-bearing act**, and the
+  audience banner in `SocialPanel` states which audience before you tap it.
+
+Bundling them would mean joining costs you a decision about who can see your
+collection, which is the one decision this design most wants to be deliberate.
+The poller reflects it: friends and the inbox are pulled whenever you have a
+handle, and only the outbound publish is gated on `socialOn`.
+
+### One identity
+
+`claimHandle`/`loadMyProfile` point `settings.profileId` at the Supabase user
+id. `profileId` is what link shares travel under, so this makes a link-added
+friend and a handle-added friend **the same person** rather than two rows for
+one collector — and the identity now survives clearing storage, which the
+minted `uid()` never did.
+
+### `remoteRev`
+
+`Friend.remoteRev` records the binder revision a snapshot came from, so the
+25-second poll asks "did anything move?" in a few bytes per friend instead of
+downloading every binder to find out. Absent for link-imported friends.
+
+**The server's friend list drives `pullFriends`, not the local one.** A
+friendship accepted on the *other* person's device exists only server-side
+until something fetches it, so keying off `db.friends` alone means a newly
+accepted friend never appears. An unknown id has no stored revision, reads as
+stale, and is fetched — which is exactly how they arrive.
+
+**Settings** gained `socialOn`, `socialHandle`, `socialCursor`, `socialAt`;
+`syncUrl`/`syncOn`/`syncToken`/`syncCursor` were deleted outright rather than
+deprecated, because the app had no users when this landed.
+
+**Realtime is the obvious follow-up** and is deliberately not day one: polling
+works, is simpler to reason about, and a subscription that silently dies is
+worse than a poll that visibly lags.
 
 **What does not change:** every payload still goes through `social.ts`'s
 sanitizers, the wire marker stays `cardstock-social` (roadmap round 7 — a
@@ -342,27 +373,24 @@ live project**, including —
 Throwaway users were deleted afterwards; every social table is back to zero
 rows on the live project.
 
-## Retiring the self-hosted server
+## The self-hosted server, removed (v0.15.0)
 
-`server/sync-server.mjs` and `lib/sync.ts` are superseded. What that costs,
-stated plainly rather than discovered later:
+`server/sync-server.mjs`, `lib/sync.ts`, `components/SyncPanel.tsx` and
+`npm run sync` are **deleted**, not deprecated — the app had no users when this
+landed, so carrying a compatibility path would have been carrying it for
+nobody. What it cost, stated plainly rather than discovered later:
 
 - **A LAN playgroup with no accounts loses its live path.** That was a real
   property — no sign-up, no internet, everyone on one wi-fi. Hosted social
-  needs an account and a connection. Links still work offline-ish (they are
-  just text), so the floor is unchanged, but the no-account *live* tier is
-  gone.
-- **`npm run sync`, `checkSyncServer`, the directory and `followFromServer`
-  disappear**, along with the trust-on-first-use device token. Nothing
-  migrates: a self-hosted binder is republished by signing in and publishing.
+  needs an account and a connection. Links still work with no account at all,
+  so the floor is unchanged, but the no-account *live* tier is gone.
+- **Trust-on-first-use went with it.** The device token that proved you owned
+  a profile id is replaced by a JWT, which is the entire reason identity is now
+  recoverable.
 - **The route shape ported as predicted.** `binders` (whole-document write) and
   `inbox` (append + cursor drain) became tables with policies almost
   one-for-one — the claim in the old version of this document, and roadmap
   finding 2, both held.
-
-Until `socialcloud.ts` lands, `sync.ts` still works and should be left alone;
-removing it before its replacement exists would take the live tier away with
-nothing in its place.
 
 ---
 

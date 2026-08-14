@@ -342,10 +342,11 @@ export async function removeItems(ids: string[]): Promise<void> {
 export async function upsertFriendFromProfile(
   payload: ProfilePayload,
   sourceUrl?: string,
+  remoteRev?: number,
 ): Promise<{ friend: Friend; created: boolean }> {
   return db.transaction('rw', db.friends, async () => {
     const existing = await db.friends.get(payload.id)
-    const friend = friendFromProfile(payload, existing, sourceUrl)
+    const friend = friendFromProfile(payload, existing, sourceUrl, remoteRev)
     await db.friends.put(friend)
     return { friend, created: !existing }
   })

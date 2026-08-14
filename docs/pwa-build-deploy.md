@@ -7,7 +7,6 @@
 | `npm run dev` | Vite dev server. `?demo=1` seeds demo data on first run, `?nosw=1` skips service-worker registration. |
 | `npm run build` | `tsc -b` then `vite build` → `dist/`. Emits `sw.js` with a stamped precache manifest and copies the OCR engine into `dist/ocr/`. |
 | `npm run preview` | Serve the production build locally. |
-| `npm run sync` | The optional self-hosted sync server. |
 | `npm run test:unit` | Node unit tests. |
 | `npm run test:scan` | The real-image scan regression matrix. |
 | `npm run test:lowlight` | The harsh low-light slice of the matrix. |

@@ -4605,6 +4605,11 @@ button {
 .social-row:active {
   background: var(--ink-150);
 }
+/* Friend requests use the same row, but they carry their own buttons rather
+   than navigating — so the whole-row press state would be a lie. */
+.social-row--static:active {
+  background: var(--ink-100);
+}
 .social-row__avatar {
   flex: none;
   width: 36px;
@@ -4653,6 +4658,13 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Handles are stored lowercase and are what someone retypes to find a person,
+   so the meta row's uppercasing must not reach them — `@CARL_9` is a handle
+   that does not exist. */
+.social-row__meta .handle {
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
 .social-row__linked,
 .social-row__go {
@@ -5226,13 +5238,9 @@ button {
 
 /* --- Live sync (optional self-hosted server) ------------------------------ */
 
-.syncpanel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-/* Drive backup reuses .syncstate for its status line — same "a background job
-   is looking after you" affordance, so it should read identically. */
+/* Drive backup and hosted social both reuse .syncstate for their status line —
+   same "a background job is looking after you" affordance, so they should read
+   identically. */
 .drivepanel {
   gap: var(--s3);
 }
@@ -5242,14 +5250,6 @@ button {
 }
 .drivepanel__row .btn {
   flex: 1;
-}
-.syncpanel__row {
-  display: flex;
-  gap: var(--s2);
-}
-.syncpanel__row .input {
-  flex: 1;
-  min-width: 0;
 }
 .syncstate {
   display: flex;
@@ -5283,32 +5283,106 @@ button {
   text-transform: uppercase;
   color: var(--up);
 }
-.syncdir {
+/* --- hosted social ------------------------------------------------------- */
+
+/* The "@" that prefixes a handle field. Sits outside the input so the caret
+   never lands before it and the user cannot delete it. */
+.handleat {
+  display: grid;
+  place-items: center;
+  padding: 0 2px 0 4px;
+  font-family: var(--font-num);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--paper-3);
+}
+
+/* Who can see what you publish. Deliberately loud: `scope` is the whole
+   privacy model (decision 16), and someone flipping between a swap list every
+   signed-in collector can read and a full inventory only friends can read
+   must be able to tell which they just chose. */
+.audience {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px var(--s3);
+  border-radius: var(--r-1);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.audience svg {
+  flex: none;
+  margin-top: 1px;
+}
+.audience--open {
+  background: var(--warn-fill);
+  border: 1px solid rgba(224, 165, 66, 0.35);
+  color: var(--warn);
+}
+.audience--friends {
+  background: var(--up-fill);
+  border: 1px solid rgba(76, 195, 138, 0.35);
+  color: var(--up);
+}
+.audience b {
+  font-weight: 650;
+}
+
+/* A want that somebody out there is offering. */
+.matchrow {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.syncdir__label {
-  font-family: var(--font-num);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--paper-3);
-}
-.syncdir__row {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: 8px var(--s3);
+  padding: 9px var(--s3);
   border-radius: var(--r-1);
   background: var(--ink-100);
   border: 1px solid var(--rule);
-  text-align: left;
-  min-width: 0;
 }
-.syncdir__row:active {
+.matchrow__name {
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--paper);
+}
+.matchrow__holders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.matchchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--signal-fill);
+  border: 1px solid var(--signal-rule);
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--signal);
+}
+.matchchip:active {
   background: var(--ink-150);
+}
+.matchchip em {
+  font-style: normal;
+  font-family: var(--font-num);
+  color: var(--paper-3);
+}
+
+/* Count badge on a want chip: how many collectors are offering it. */
+.wantchip__hit {
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--signal-fill);
+  color: var(--signal);
+  font-style: normal;
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  font-weight: 650;
 }
 .deliveredline {
   display: flex;

@@ -85,7 +85,7 @@ already the design rather than a white flash.
 - `Icon.tsx` — a hand-drawn 24×24 stroke icon set, one visual family, no icon
   font. Stroke width scales with size.
 - `Sheet.tsx`, `Toasts.tsx`, `DeckPicker.tsx`, `TradeSides.tsx`,
-  `ShareActions.tsx` (link / file / native share sheet), `SyncPanel.tsx`,
+  `ShareActions.tsx` (link / file / native share sheet), `SocialPanel.tsx`,
   `ScanDebug.tsx`.
 
 ## Mobile behaviours worth knowing

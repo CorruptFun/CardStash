@@ -6,7 +6,7 @@ import { db, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
 import { runAutoBackup } from './lib/drive'
 import { settings } from './lib/settings'
-import { startSyncLoop } from './lib/sync'
+import { startSocialLoop } from './lib/socialcloud'
 import { APP_VERSION } from './lib/version'
 import { uiStore } from './store/ui'
 import './fonts.css'
@@ -67,9 +67,15 @@ async function boot(): Promise<void> {
   // GoTrue hands OAuth tokens back in the URL fragment, and this app routes
   // on the fragment — so the session must be claimed and the hash cleared
   // before the router ever reads it, or sign-in lands on a garbage route.
-  await import('./lib/cloud')
-    .then((cloud) => cloud.adoptOAuthRedirect())
-    .catch(() => false)
+  //
+  // The hash test is out here rather than inside adoptOAuthRedirect so an
+  // ordinary boot never fetches the auth chunk at all — this sits in front of
+  // first paint, and a redirect is the rare case.
+  if (location.hash.includes('access_token=')) {
+    await import('./lib/authsession')
+      .then((auth) => auth.adoptOAuthRedirect())
+      .catch(() => false)
+  }
   if (params.get('demo') === '1' && !(await hasAnyData().catch(() => true))) {
     await seedDemoData().catch(() => {})
   }
@@ -89,7 +95,11 @@ async function boot(): Promise<void> {
   )
   pruneHistory().catch(() => {})
   installTelemetryFlusher()
-  startSyncLoop()
+  // Hosted social polls only once the user has claimed a handle, so a
+  // local-only user — the default — makes no request to our server at all.
+  // The loop re-checks on every tick, and only publishes if they also turned
+  // publishing on.
+  startSocialLoop()
   // The daily Drive backup, deliberately late and deliberately quiet: it
   // no-ops unless the user turned it on, never opens a popup, and never
   // reports failure. 12s keeps it clear of first paint and of the camera

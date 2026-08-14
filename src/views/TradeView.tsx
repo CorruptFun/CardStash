@@ -16,7 +16,7 @@ import {
   sideQty,
   tradeStatusLabel,
 } from '../lib/social'
-import { sendToInbox, syncConfigured } from '../lib/sync'
+import { sendToInbox, socialConfigured } from '../lib/socialcloud'
 import type { TradeRecord } from '../lib/types'
 import { dateTime, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
@@ -96,7 +96,7 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
     if (!next) return
     track('trade_update', { action: status, direction: trade.direction })
     // Synced: the answer goes straight back; otherwise they need the link.
-    if (syncConfigured() && next.friendId) {
+    if (socialConfigured() && next.friendId) {
       try {
         await sendToInbox(next.friendId, buildReplyPayload(next, myProfile(), status))
         setDelivered(true)
@@ -169,12 +169,12 @@ export function TradeView({ tradeId }: { tradeId: string | null }) {
         )}
         {open && mine && (
           <>
-            {syncConfigured() && trade.friendId ? (
+            {socialConfigured() && trade.friendId ? (
               <button className="btn btn--primary" onClick={resend}>
                 <Icon name="swap" size={16} /> Send again to {trade.friendName}
               </button>
             ) : null}
-            <button className={syncConfigured() && trade.friendId ? 'btn btn--ghost' : 'btn btn--primary'} onClick={shareOffer}>
+            <button className={socialConfigured() && trade.friendId ? 'btn btn--ghost' : 'btn btn--primary'} onClick={shareOffer}>
               <Icon name="share" size={16} /> Share the offer
             </button>
             <button className="btn btn--ghost" onClick={cancel}>

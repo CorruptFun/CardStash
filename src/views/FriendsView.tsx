@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { ShareActions, type SharePack } from '../components/ShareActions'
-import { SyncPanel } from '../components/SyncPanel'
+import { SocialPanel } from '../components/SocialPanel'
 import { track } from '../lib/analytics'
 import { readFileText } from '../lib/csv'
 import {
@@ -30,11 +30,27 @@ import {
   wantKeyFor,
   wantKeySet,
 } from '../lib/social'
+import {
+  answerRequest,
+  listRequests,
+  matchWants,
+  requestFriend,
+  socialConfigured,
+  syncSocialNow,
+  type FriendRequest,
+  type PendingRequests,
+  type WantMatch,
+} from '../lib/socialcloud'
 import type { CollectionItem, Friend, ShareScope, SocialPayload, TradeRecord } from '../lib/types'
 import { money, relativeAge, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
 const NO_ITEMS: CollectionItem[] = []
+
+/** The card name behind a want key, for the match list. */
+function nameForKey(wants: { key: string; name: string }[], key: string): string {
+  return wants.find((want) => want.key === key)?.name ?? key.split('|')[1] ?? key
+}
 
 /** Sum of flagged copies across the collection. */
 function forTradeQty(items: CollectionItem[]): number {
@@ -59,6 +75,95 @@ export function FriendsView() {
   const [pasteText, setPasteText] = useState('')
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const [handleInput, setHandleInput] = useState('')
+  const [requests, setRequests] = useState<PendingRequests>({ incoming: [], outgoing: [] })
+  const [matches, setMatches] = useState<WantMatch[]>([])
+  const hosted = socialConfigured()
+
+  /**
+   * Requests and want-matches both come from the server and both change when
+   * a sync runs, so they refresh together on `socialAt`. Failures are silent:
+   * this is a supplementary panel, and a network blip must not put an error
+   * across a screen whose primary job (links) never touches the network.
+   */
+  const refreshHosted = useCallback(() => {
+    if (!socialConfigured()) {
+      setRequests({ incoming: [], outgoing: [] })
+      setMatches([])
+      return
+    }
+    listRequests().then(setRequests, () => {})
+  }, [])
+
+  useEffect(() => {
+    refreshHosted()
+  }, [refreshHosted, config.socialAt, config.socialOn])
+
+  const wantKeys = useMemo(() => (myWants ?? []).map((want) => want.key), [myWants])
+
+  useEffect(() => {
+    if (!hosted || !wantKeys.length) {
+      setMatches([])
+      return
+    }
+    let live = true
+    matchWants(wantKeys).then(
+      (rows) => {
+        if (live) setMatches(rows)
+      },
+      () => {},
+    )
+    return () => {
+      live = false
+    }
+  }, [hosted, wantKeys, config.socialAt])
+
+  /** want key → who is offering it, for the badge on each want chip. */
+  const matchesByKey = useMemo(() => {
+    const map = new Map<string, WantMatch[]>()
+    for (const match of matches) {
+      const list = map.get(match.wantKey)
+      if (list) list.push(match)
+      else map.set(match.wantKey, [match])
+    }
+    return map
+  }, [matches])
+
+  const addByHandle = async () => {
+    const clean = handleInput.trim().replace(/^@/, '')
+    if (!clean || busy) return
+    setBusy(true)
+    try {
+      const result = await requestFriend(clean)
+      setHandleInput('')
+      if (result === 'accepted') {
+        toast(`You and @${clean} are now friends`, 'success')
+        track('friend_added', { method: 'handle', cards: 0, update: false })
+        await syncSocialNow(true).catch(() => {})
+      } else {
+        toast(`Request sent to @${clean}`, 'success')
+      }
+      refreshHosted()
+    } catch (err: any) {
+      toast(err?.message ?? 'Could not send that request', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const answer = async (request: FriendRequest, accept: boolean) => {
+    try {
+      await answerRequest(request.userId, accept)
+      toast(accept ? `You and @${request.handle} are now friends` : `Declined @${request.handle}`, accept ? 'success' : 'info')
+      if (accept) {
+        track('friend_added', { method: 'handle', cards: 0, update: false })
+        await syncSocialNow(true).catch(() => {})
+      }
+      refreshHosted()
+    } catch (err: any) {
+      toast(err?.message ?? 'Could not answer that', 'error')
+    }
+  }
 
   const tradeRows = useMemo(() => shareableItems(items, 'trade'), [items])
   const allRows = useMemo(() => shareableItems(items, 'all'), [items])
@@ -217,6 +322,11 @@ export function FriendsView() {
                 {(myWants ?? []).map((want) => (
                   <span key={want.key} className="wantchip">
                     {want.name}
+                    {matchesByKey.has(want.key) && (
+                      <em className="wantchip__hit" title="Collectors offering this">
+                        {matchesByKey.get(want.key)!.length}
+                      </em>
+                    )}
                     <button
                       className="wantchip__x"
                       aria-label={`Remove ${want.name} from wants`}
@@ -236,16 +346,16 @@ export function FriendsView() {
           </button>
           {pack && <ShareActions pack={pack} />}
           <p className="setsec__note">
-            {config.syncOn && config.syncUrl ? (
+            {config.socialOn ? (
               <>
-                Live sync is on, so this binder republishes itself and friends see changes without a new link. Links
-                still work for anyone not on your sync server.
+                You’re publishing, so this binder republishes itself and friends see changes without a new link. Links
+                still work for anyone without an account.
               </>
             ) : (
               <>
-                No accounts, no server: the link <em>is</em> the data — a snapshot of what’s listed above. People see
-                it only if you send it to them. Re-share after big changes, or keep the file at a stable link (a
-                GitHub Gist works) so friends can refresh from it.
+                No account needed: the link <em>is</em> the data — a snapshot of what’s listed above. People see it
+                only if you send it to them. Re-share after big changes, or keep the file at a stable link (a GitHub
+                Gist works) so friends can refresh from it.
               </>
             )}
           </p>
@@ -253,12 +363,75 @@ export function FriendsView() {
       </section>
 
       <section className="setsec">
-        <h3>Live sync</h3>
-        <SyncPanel />
+        <h3>My account</h3>
+        <SocialPanel />
       </section>
+
+      {requests.incoming.length > 0 && (
+        <section className="setsec">
+          <h3>
+            Friend requests <em className="sheetsec__count">{requests.incoming.length}</em>
+          </h3>
+          <div className="social-list">
+            {requests.incoming.map((request) => (
+              <div key={request.userId} className="social-row social-row--static">
+                <span className="social-row__avatar social-row__avatar--hot" aria-hidden="true">
+                  {request.displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="social-row__body">
+                  <span className="social-row__name">{request.displayName}</span>
+                  <span className="social-row__meta">
+                    <span className="handle">@{request.handle}</span> · asked {relativeAge(request.at)} ago
+                  </span>
+                </span>
+                <button className="btn btn--primary btn--sm" onClick={() => answer(request, true)}>
+                  Accept
+                </button>
+                <button className="btn btn--ghost btn--sm" onClick={() => answer(request, false)}>
+                  Decline
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="setsec__note">
+            Accepting lets them see your binder at whatever you have set above — and lets you see theirs.
+          </p>
+        </section>
+      )}
 
       <section className="setsec">
         <h3>Add a friend</h3>
+        {hosted && (
+          <>
+            <div className="addfriend">
+              <span className="handleat">@</span>
+              <input
+                className="input"
+                type="text"
+                value={handleInput}
+                onChange={(e) => setHandleInput(e.target.value.toLowerCase().replace(/[^a-z0-9_@]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void addByHandle()
+                }}
+                placeholder="theirhandle"
+                maxLength={25}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Add a friend by handle"
+              />
+              <button className="btn btn--primary" onClick={() => void addByHandle()} disabled={busy || handleInput.trim().length < 3}>
+                {busy ? 'Sending…' : 'Add'}
+              </button>
+            </div>
+            <p className="setsec__note">
+              They get a request to accept. If they already asked you, this accepts theirs.
+              {requests.outgoing.length > 0 && (
+                <> Waiting on {requests.outgoing.map((r) => `@${r.handle}`).join(', ')}.</>
+              )}
+            </p>
+          </>
+        )}
         <div className="addfriend">
           <input
             className="input"
@@ -268,10 +441,10 @@ export function FriendsView() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') importText(pasteText)
             }}
-            placeholder="Paste a binder or trade link…"
+            placeholder="…or paste a binder or trade link"
             aria-label="Paste a share link"
           />
-          <button className="btn btn--primary" onClick={() => importText(pasteText)} disabled={busy || !pasteText.trim()}>
+          <button className="btn btn--ghost" onClick={() => importText(pasteText)} disabled={busy || !pasteText.trim()}>
             {busy ? 'Reading…' : 'Add'}
           </button>
           <button className="btn btn--ghost" onClick={() => fileRef.current?.click()} disabled={busy}>
@@ -279,8 +452,8 @@ export function FriendsView() {
           </button>
         </div>
         <p className="setsec__note">
-          Takes a Cardstock share link, a saved <code>.json</code> binder file, or a hosted file’s URL (that last one
-          can be refreshed anytime).
+          Takes a CardStash share link, a saved <code>.json</code> binder file, or a hosted file’s URL (that last one
+          can be refreshed anytime). Works with no account at all.
         </p>
         <input
           ref={fileRef}
@@ -290,6 +463,39 @@ export function FriendsView() {
           onChange={(event) => event.target.files?.[0] && void importFile(event.target.files[0])}
         />
       </section>
+
+      {matches.length > 0 && (
+        <section className="setsec">
+          <h3>
+            Cards you’re hunting <em className="sheetsec__count">{matchesByKey.size}</em>
+          </h3>
+          <div className="social-list">
+            {[...matchesByKey.entries()].map(([key, holders]) => (
+              <div key={key} className="matchrow">
+                <span className="matchrow__name">{holders[0] ? nameForKey(myWants ?? [], key) : key}</span>
+                <span className="matchrow__holders">
+                  {holders.map((holder) => (
+                    <button
+                      key={holder.userId}
+                      className="matchchip"
+                      onClick={() => {
+                        setHandleInput(holder.handle)
+                        toast(`Tap Add to send @${holder.handle} a friend request`, 'info')
+                      }}
+                    >
+                      @{holder.handle}
+                      <em>×{holder.qty}</em>
+                    </button>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="setsec__note">
+            Collectors publishing a for-trade binder that includes something on your want list. Any printing counts.
+          </p>
+        </section>
+      )}
 
       {sortedTrades.length > 0 && (
         <section className="setsec">

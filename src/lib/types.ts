@@ -276,6 +276,13 @@ export interface Friend {
   exportedAt: number
   /** Where the snapshot was fetched from — enables one-tap refresh. */
   sourceUrl?: string
+  /**
+   * The hosted binder revision this snapshot came from, when it came from
+   * hosted social. Lets the poller ask "did anything move?" in a few bytes
+   * per friend instead of downloading every binder to find out. Absent for
+   * friends imported from a link or a file.
+   */
+  remoteRev?: number
   cards: SharedCard[]
   /** Cards they're hunting (travels with their share). */
   wants?: SharedWant[]
