@@ -280,3 +280,28 @@ guideline 3.1.1 requires in-app purchase for digital features, so a paid tier
 sold in the app cannot route around it. If the PWA keeps serving desktop while
 iOS goes native, the two need to share a collection — which makes cross-device
 sync a prerequisite of that plan, not an alternative to it.
+
+
+---
+
+### 15. The cloud vault is encrypted on the device, and that is not negotiable
+
+**Why.** Decision 14 established that one device holding everything is a real
+cost, and that iOS makes it acute. Fixing it means a server, which contradicts
+decision 1 — so the contradiction is paid for as narrowly as possible: the
+server stores a blob it cannot read. Sign-in (Supabase Auth) answers *who you
+are*; a passphrase that never leaves the device answers *what the bytes mean*.
+Collapsing those into one secret would hand whoever runs the project a
+readable database of everyone's collections, which is precisely the liability
+local-first existed to avoid.
+
+**Consequences.** A second device is two steps, not one — sign in, then enter
+the passphrase — and there is no reset, so the UI says so in as many words
+rather than discovering it for the user later. The key is never persisted; a
+reload asks again. `supabase/schema.sql` is not setup, it is the lock: the
+publishable key is public by design and RLS is the only thing standing between
+it and the table.
+
+**What this does not buy.** Entitlement. A Supabase login proves identity, not
+payment, so decision 13 is untouched — though the same auth would be the
+natural place to hang a real answer later.

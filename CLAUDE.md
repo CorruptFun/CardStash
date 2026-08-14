@@ -78,8 +78,13 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
-  contacts Google. The free tier must never gain a dependency on a backend of
-  ours — that stays true when hosted sync arrives).
+  contacts Google), and the encrypted cloud vault (`cloud.ts` — Supabase auth +
+  pull-merge-push, dynamically imported; `crypto.ts` — the AES-GCM envelope the
+  server cannot read; `cloudmerge.ts` — the pure device-merge; `cloudconfig.ts`
+  — project URL/publishable key). **These two overlap**: Drive is one-way
+  backup to storage the user owns, the vault is multi-device sync through a
+  project we run. Both are opt-in and both are dormant unless configured; the
+  free path must never depend on either.
   Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
   the group index merges the "Pokemon Japan" TCGplayer category so Japanese
   packs match by their printed set code ("sv4K").

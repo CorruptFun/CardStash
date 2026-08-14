@@ -204,3 +204,58 @@ This is a LAN/dev convenience server, not a hosted service:
 The route/table shape (`binders`, `inbox`) deliberately matches the eventual
 hosted backend, so moving to Postgres/Supabase with real auth is a storage swap
 rather than a client rewrite.
+
+
+---
+
+## The cloud vault (v0.14.0)
+
+Distinct from everything above. Serverless sharing and the self-hosted
+`server/` box are about handing *other people* a snapshot; the vault is about
+one person keeping their own collection across their own devices — which
+decision 14 established is otherwise impossible on iOS, where a Home Screen
+web app cannot see the Safari tab's IndexedDB.
+
+**Shape.** Supabase holds one row per user (`supabase/schema.sql`). The row is
+ciphertext: `crypto.ts` derives an AES-GCM key from a passphrase with
+PBKDF2-SHA256 at 600k iterations and encrypts the same `Backup` object the
+export button writes. Sign-in decides *which row you may touch*; the
+passphrase decides *whether it means anything*. Keeping them separate is the
+entire point — if the key could be derived from the login, whoever runs the
+project could read every collection.
+
+**Sign-in.** Emailed six-digit codes and Google, in that order of prominence.
+The code path involves no redirect, so it behaves identically in Safari and in
+a Home Screen app; Google uses a top-level navigation and never a popup,
+because `window.open` from a standalone iOS app opens Safari and lands the
+session in a different storage container than the app. GoTrue returns OAuth
+tokens in the URL *fragment* and this app routes on the fragment, so
+`adoptOAuthRedirect()` runs in `boot()` before the router — get that order
+wrong and every Google sign-in lands on a garbage route.
+
+**Sync is pull-merge-push**, never push-if-newer: the reason two devices
+disagree is that each holds cards the other lacks. `put_vault()` rejects a
+write whose base revision is stale and returns the current one, and `cloud.ts`
+answers by going round again rather than clobbering.
+
+**Merging** is pure and lives in `cloudmerge.ts` — union by primary key,
+per-row recency, and quantities are never summed (two devices each holding
+qty 3 describe the same three cards). Two things to know before touching it:
+`history` has no `id` at all, its Dexie key is the compound `[cardId+date]`;
+and positions are tracked in a `Map` because the first cut used `findIndex`
+inside the remote loop and went quadratic on large collections.
+
+**Known gap — deletions.** A union cannot distinguish "deleted here" from
+"never existed here", so removing a card on one device can be undone by
+another that has not synced yet. Tombstones are the real fix and are a schema
+change. The bias is deliberate: an unwanted card takes seconds to remove
+again, an evening of scanning does not.
+
+**What the sanitizers still do.** Decrypting proves the passphrase, not the
+shape, so a decoded vault goes through `sanitizeBackup()` exactly like a
+pasted link (decision 7).
+
+**What is not verified.** The transport was written in an environment whose
+network policy blocked the Supabase host, so sign-in, unlock and a round-trip
+have never run against a live project in CI or in a session. The pure halves
+have 19 unit tests; the transport needs a browser.

@@ -182,11 +182,20 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `cameraApproved` (`false`) | The camera was approved here before → skip the start gate. Cleared if the browser later denies. |
 | `iosCameraHintShown` (`false`) | The one-time iOS permission explainer has been dismissed. |
 | `installHintDismissed` (`false`) | The "install to keep your collection" banner was dismissed. Independent of actually installing — `IS_STANDALONE` suppresses the banner on its own. |
+| `cloudSalt` / `cloudKeyCheck` (`''`) | Vault KDF salt and key fingerprint. Neither is secret; both let a returning device derive its key and reject a wrong passphrase without a round trip. |
+| `cloudRevision` (`0`) / `cloudSyncedAt` (`0`) | Server revision last seen and last successful sync. A stale revision means merge before writing. |
+| `cloudAuto` (`true`) | Reserved for syncing after collection writes; nothing schedules it yet. |
 | `geminiKey` / `geminiModel` (`'gemini-flash-latest'`) | AI deck builder only. **Scanning never uses Gemini.** |
 | `pokemonKey` (`''`) | Optional pokemontcg.io key (higher rate limits). |
 | `diagShare` (`false`) / `diagEndpoint` / `diagToken` | Opt-in telemetry upload. Uploads require *both* the toggle and a token. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
 | `syncUrl` / `syncOn` (`false`) / `syncToken` / `syncCursor` / `syncAt` | Optional live sync. With `syncOn` false nothing in `sync.ts` runs. |
+
+**Session tokens are deliberately NOT here.** They live under their own
+`cardstock-cloud-session` localStorage key so they can never be swept into a
+settings export. The vault passphrase and derived key are never persisted at
+all — a reload asks again, which is the cost of the server being unable to
+read the vault.
 
 **Rehydration is sanitized** (`merge` in the persist config): installs predating
 `enabledGames` get the full list, stored lists drop games this build doesn't
