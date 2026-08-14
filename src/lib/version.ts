@@ -1,3 +1,3 @@
 /** One source of truth for the app version shown in Settings, the
  * new-version toast, and telemetry payloads. */
-export const APP_VERSION = '0.12.0'
+export const APP_VERSION = '0.13.0'
