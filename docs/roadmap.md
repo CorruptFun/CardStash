@@ -462,6 +462,78 @@ README also lists three games; there are nine.
 
 ---
 
+---
+
+## Where this stands (2026-08-14)
+
+**Done and verified in a browser:**
+
+| | |
+| --- | --- |
+| Round 1 — Drive backup | `lib/drive.ts` + `components/DriveBackup.tsx`, live OAuth client wired into `.env.local` and the deploy workflow. Dormant path proven: no script, no `window.google`, zero requests to Google. |
+| Round 2 — install trap | `InstallPrompt` offers Drive first on iOS; the file route stays for people who won't sign in to Google. |
+| Round 0e — merge basis | Dexie v7 `updatedAt` + tombstones, verified against a hand-built v6 DB (cost basis and quantities survived). |
+| Round 5 — bundle | `chunkSizeWarningLimit: 800`, with the reasoning in `vite.config.ts`. |
+| Round 7 — partial | README no longer claims Gemini vision scanning; nine games listed; the no-server promise scoped rather than retired. |
+
+**The one gap in round 1:** nobody has completed a Google sign-in end to end, so
+consent → token → a file actually landing in Drive is unproven. Everything up to
+it is verified. That test needs the owner's own Google account.
+
+---
+
+## Continuation prompt
+
+Paste this into a fresh session to pick the work up cleanly.
+
+> You're continuing CardStash (`~/Creative/CardStash`, Vite + React 19 + TS PWA,
+> local-first). **Read `docs/roadmap.md` first** — it is the plan of record and
+> explains the order and the reasoning. Then `CLAUDE.md`, and `docs/privacy.md`
+> plus `docs/decisions.md` (1, 13, 14) before touching anything they cover.
+>
+> Settled and not up for re-litigation: tiered hybrid storage; monetization
+> deferred with every `GATED` row false; opt-out analytics with a
+> timezone-derived EEA/UK carve-out; Supabase as the receiver in a **new project
+> in its own organization** (not the shared `deskabqqxqqibxjffwmb` — see
+> roadmap finding 6); product name CardStash with the `cardstock` storage and
+> wire identifiers **frozen**.
+>
+> Open work, in priority order:
+>
+> 1. **Confirm Drive backup end to end.** Everything is built and the OAuth
+>    client is live, but no one has completed a sign-in. Run the app, connect,
+>    and confirm a file lands in `appDataFolder` and restores.
+> 2. **The analytics receiver** (roadmap round 0). Needs the Supabase project to
+>    exist. Obey both traps in the roadmap: never ship `diagShare: true` against
+>    the dead default endpoint, and set `flushedThrough` to the current max event
+>    id at the moment of the flip so nothing collected pre-consent is uploaded.
+>    Use the `first-party-analytics` skill; `SECURITY DEFINER` ingest, never
+>    `ON CONFLICT`; bucket unknown event names; stamp receipt time server-side.
+> 3. **Round 0a-inert** — the `merge()` rewrite in `settings.ts` that repoints
+>    installs off the dead `telemetry.corrupt.solutions` default, plus the
+>    timezone consent helper and consent UI. All dormant while `diagShare` is
+>    false.
+> 4. **Round 7 naming** — finish CardStash vs Cardstock across `CLAUDE.md`,
+>    `docs/`, and UI strings. **Do not rename** the Dexie DB `cardstock`,
+>    `cardstock-settings`, `app: 'cardstock-social'`, `app: 'cardstock-sync'`, or
+>    the analytics `app: 'cardstock'` — the roadmap has the table of what each
+>    rename would break, and the first one orphans every existing collection.
+> 5. **Round 6, the scan pipeline.** Read `.claude/skills/scan-harness/` first.
+>    Pull `harness-fixtures` with `git archive` (**never** a `--work-tree`
+>    checkout), re-baseline on the current snapshot, then go after the
+>    **wrong-card rate on the live path** — 10 in 40 on real clips against 0 in
+>    282 on stills — not the identify rate. Full matrix before and after with
+>    `--baseline=`; no game may drop.
+> 6. **Round 3, hosted sync.** `updatedAt` + tombstones already exist. First sync
+>    is a **union with user-visible review**, never last-write-wins.
+>
+> Standing rules: never commit `dist/`, never hand-push `gh-pages`, never change
+> scan code without running the matrix before and after, never gate
+> `detectCardRegions`, keep analytics content-free, and always push before the
+> session ends.
+
+---
+
 ## Things to verify before relying on them
 
 - `drive.appdata`'s current scope tier and review requirement (round 1). The
