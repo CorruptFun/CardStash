@@ -21,7 +21,11 @@ if (!existsSync(join(REPO, 'dist', 'index.html'))) {
   process.exit(2)
 }
 
-const server = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--port', String(PORT), '--strictPort'], {
+// --host 127.0.0.1 is not optional: vite's default binds the loopback *name*,
+// and on a machine where `localhost` resolves to ::1 the readiness probe below
+// then fails against 127.0.0.1 and blames the dev server for never starting.
+// Same fix run-matrix.mjs and install-prompt.mjs already carry.
+const server = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
   cwd: REPO,
   stdio: ['ignore', 'pipe', 'pipe'],
 })

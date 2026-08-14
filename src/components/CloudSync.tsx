@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
+import { IS_IOS, IS_STANDALONE } from '../lib/camera'
 import { CLOUD_AVAILABLE } from '../lib/cloudconfig'
 import { useSettings } from '../lib/settings'
 import { useUi } from '../store/ui'
+
+/**
+ * An iOS Home Screen app is the one place the Google button cannot be trusted:
+ * the OAuth round trip has a long history of surfacing in Safari rather than
+ * returning to the app, and a session that lands in Safari lands in a
+ * different storage container — the exact partitioning this whole feature
+ * exists to work around. So it is not offered there at all, rather than
+ * offered and quietly broken. Every other platform keeps it.
+ */
+const GOOGLE_IS_A_TRAP = IS_IOS && IS_STANDALONE
 
 /**
  * The Settings front door for the cloud vault.
@@ -37,9 +48,11 @@ export function CloudSync() {
   useEffect(() => {
     if (!CLOUD_AVAILABLE) return
     void import('../lib/cloud').then((cloud) => {
-      const signed = cloud.signedInAs()
-      setWho(signed)
-      setStage(signed ? (cloud.hasVaultKey() ? 'ready' : 'locked') : 'signedout')
+      // Gate on the session, not on the email: a Google sign-in arrives
+      // without one, and treating that as signed-out strands the user on this
+      // screen holding a valid session.
+      setWho(cloud.signedInAs())
+      setStage(cloud.isSignedIn() ? (cloud.hasVaultKey() ? 'ready' : 'locked') : 'signedout')
     })
   }, [])
 
@@ -142,15 +155,17 @@ export function CloudSync() {
               Email me a code
             </button>
           </div>
-          <div className="setrow">
-            <div className="setrow__text">
-              <span>Or use Google</span>
-              <em>Faster, but if you use Cardstock from your Home Screen, the emailed code is more reliable</em>
+          {!GOOGLE_IS_A_TRAP && (
+            <div className="setrow">
+              <div className="setrow__text">
+                <span>Or use Google</span>
+                <em>Faster, but if you use Cardstock from your Home Screen, the emailed code is more reliable</em>
+              </div>
+              <button className="btn btn--ghost btn--sm" disabled={busy} onClick={google}>
+                Google
+              </button>
             </div>
-            <button className="btn btn--ghost btn--sm" disabled={busy} onClick={google}>
-              Google
-            </button>
-          </div>
+          )}
         </>
       )}
 
@@ -179,7 +194,8 @@ export function CloudSync() {
       {stage === 'locked' && (
         <>
           <p className="setsec__note">
-            Signed in as <b>{who}</b>. Now choose the passphrase that encrypts your cards. It is separate from your
+            Signed in{who ? <> as <b>{who}</b></> : ''}. Now choose the passphrase that encrypts your cards. It is
+            separate from your
             login on purpose — without it, whoever runs the server could read every collection.
           </p>
           <p className="setsec__warn">
@@ -211,7 +227,7 @@ export function CloudSync() {
       {stage === 'ready' && (
         <>
           <p className="setsec__note">
-            Signed in as <b>{who}</b>, vault unlocked.{' '}
+            Signed in{who ? <> as <b>{who}</b></> : ''}, vault unlocked.{' '}
             {existing ? 'Merged with what was already stored.' : 'This device started the vault.'}
           </p>
           <div className="setrow">

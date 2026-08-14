@@ -255,7 +255,81 @@ again, an evening of scanning does not.
 shape, so a decoded vault goes through `sanitizeBackup()` exactly like a
 pasted link (decision 7).
 
-**What is not verified.** The transport was written in an environment whose
-network policy blocked the Supabase host, so sign-in, unlock and a round-trip
-have never run against a live project in CI or in a session. The pure halves
-have 19 unit tests; the transport needs a browser.
+**What is verified, and how.** The transport now runs against the live project.
+`npm run test:cloud` (`tests/harness/cloud-live.mjs`) drives the real
+`cloud.ts` with only `./db` and `./settings` stubbed, creating and deleting its
+own throwaway users, and covers: first push, ciphertext-at-rest, a second
+device adopting the vault, a wrong passphrase refused before download, the
+union merge, the `put_vault` stale-base rejection, the pull-merge-retry under
+genuine concurrency, and RLS isolation both signed-in and anonymous. It needs
+`SUPABASE_SECRET` and is therefore not in CI. The two-device case was also
+walked by hand in two browser origins against real IndexedDB: 11 cards pushed,
+adopted by an empty second device, then a card added on each — both survived,
+no quantity doubled, no duplicate rows.
+
+**The grant trap, which cost the whole feature.** `create table` in a Supabase
+project no longer grants DML to `anon`/`authenticated`. Projects made before
+roughly 2026 inherited `grant all on tables` from `ALTER DEFAULT PRIVILEGES`;
+newer ones land with only REFERENCES/TRIGGER/TRUNCATE. RLS was enabled and the
+policy was correct, and every single request still failed — PostgREST answers
+`42501 permission denied for table vaults` *before* it consults a policy, so
+the failure looks like a broken table rather than a missing grant. The grants
+are now written out explicitly in `supabase/schema.sql`. Do not delete them on
+the grounds that Supabase "does that automatically"; it does not.
+
+**Emailed codes need custom SMTP, and that is not a preference.** On Supabase's
+own email provider the six-digit code cannot work at all: template edits are
+refused on the free tier, and the stock template emits only
+`{{ .ConfirmationURL }}` — so no code is ever in the message no matter what the
+client asks for. That sender is also capped at 2 emails per hour, which is
+unusable regardless. The failure is worth recognising because it does not look
+like this: the app reports something that reads like a rejected address.
+
+The project now sends through **Resend on `corrupt.solutions`** — SMTP
+`smtp.resend.com:465`, user `resend`, from `Cardstock
+<cardstock@corrupt.solutions>`; the password is a Resend API key kept at
+`~/.secrets/cardstash/resend` and never in the repo. That unlocked the
+templates, so both the confirmation and magic-link bodies now carry
+`{{ .Token }}`, and `mailer_otp_length` is 6 to match the UI's "six-digit"
+copy. The per-hour send cap was raised from 2 to 100 at the same time; 2 was
+low enough that a single user retrying would have locked themselves out.
+
+Verified with a real emailed code, not a synthesised one: the app sent from
+the sign-in screen, Resend reported it delivered, and typing the six digits it
+contained produced a session with both tokens. A rejected code toasts "Token
+has expired or is invalid" and leaves the user on the code screen to retry.
+
+If sign-in ever starts failing with what looks like an address error, check the
+sender before touching `cloud.ts`.
+
+**Google needs its redirect URI registered**, and it now is:
+`https://<project>.supabase.co/auth/v1/callback`. Supabase's provider shares the
+OAuth client with Drive backup, and that client deliberately carried no redirect
+URIs (the GIS token flow uses postMessage), so every Google sign-in used to die
+at Google with `redirect_uri_mismatch` — on every platform, not just iOS.
+Adding that URI does **not** disturb the Drive token flow, which never uses one;
+the "no redirect URIs, deliberately" note attached to the Drive client is about
+diagnosing Drive, and is not a reason to leave this off. Redirect URLs on the
+Supabase side must also match the deploy path exactly, capitals included —
+`/CardStash/`, not `/cardstash/`, which 404s.
+
+**Google is not offered in an iOS Home Screen app at all.** `GOOGLE_IS_A_TRAP`
+in `CloudSync.tsx` hides it when `IS_IOS && IS_STANDALONE`: the OAuth round
+trip has a long history of surfacing in Safari rather than returning to the
+app, and a session that lands in Safari lands in the storage container this
+feature exists to escape. Better absent than present and quietly broken.
+
+**An OAuth session has no identity in it.** GoTrue returns tokens in the
+fragment and nothing else, so a Google sign-in produces a valid session whose
+email is empty. `signedInAs()` therefore is not the signed-in test —
+`isSignedIn()` is — and `adoptOAuthRedirect()` fills the email in with one
+call to `/auth/v1/user`. Gating the UI on the email alone stranded the user on
+the sign-in screen while holding a working session.
+
+**Why the Drive backup stays.** It overlaps the vault and is deliberately kept
+(decision 14). They answer different questions: Drive is an automatic daily
+*snapshot* into storage the user already owns, with no passphrase and so no way
+to lock yourself out; the vault is deliberate two-way *sync* whose passphrase
+has no reset by design. Retiring Drive would make an unrecoverable passphrase
+the only route back to a lost collection, and would put a per-user cloud cost
+on free users the tiering explicitly keeps free.
