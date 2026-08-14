@@ -277,25 +277,34 @@ the failure looks like a broken table rather than a missing grant. The grants
 are now written out explicitly in `supabase/schema.sql`. Do not delete them on
 the grounds that Supabase "does that automatically"; it does not.
 
-**Emailed codes need custom SMTP — they cannot work on the free tier.** The
-default email provider does not permit template edits, and the stock template
-emits only `{{ .ConfirmationURL }}`, so no six-digit code is ever in the
-message no matter what the app asks for. The built-in sender is also capped at
-2 emails per hour, which is unusable for real users regardless. Configuring any
-custom SMTP provider unlocks both the template and the rate limit. Until then
-the code path is dead on arrival — this is infrastructure, not a bug in
-`cloud.ts`, and no amount of client work fixes it.
+**Emailed codes need custom SMTP, and that is not a preference.** On Supabase's
+own email provider the six-digit code cannot work at all: template edits are
+refused on the free tier, and the stock template emits only
+`{{ .ConfirmationURL }}` — so no code is ever in the message no matter what the
+client asks for. That sender is also capped at 2 emails per hour, which is
+unusable regardless. The failure is worth recognising because it does not look
+like this: the app reports something that reads like a rejected address.
 
-**Google needs its redirect URI registered.** Supabase's provider is configured
-with the same OAuth client as Drive backup, and that client deliberately
-carries no redirect URIs (the GIS token flow uses postMessage). Supabase's flow
-does need one — `https://<project>.supabase.co/auth/v1/callback` — and without
-it every Google sign-in dies at Google with `redirect_uri_mismatch`, on every
-platform, not just iOS. Adding that URI does **not** disturb the Drive token
-flow, which never uses it; the "no redirect URIs, deliberately" note attached
-to the Drive client is about diagnosing Drive, not a reason to leave this off.
-Redirect URLs on the Supabase side must also match the deploy path exactly,
-capitals included — `/CardStash/`, not `/cardstash/`.
+The project now sends through **Resend on `corrupt.solutions`** (SMTP
+`smtp.resend.com:465`, user `resend`, password is a Resend API key — kept at
+`~/.secrets/cardstash/resend`, never in the repo). That unlocked the templates,
+so both the confirmation and magic-link bodies now carry `{{ .Token }}`, and
+`mailer_otp_length` is 6 to match the UI's "six-digit" copy. Verified
+end to end: `/auth/v1/otp` → Resend → delivered.
+
+If sign-in ever starts failing with what looks like an address error, check the
+sender before touching `cloud.ts`.
+
+**Google needs its redirect URI registered**, and it now is:
+`https://<project>.supabase.co/auth/v1/callback`. Supabase's provider shares the
+OAuth client with Drive backup, and that client deliberately carried no redirect
+URIs (the GIS token flow uses postMessage), so every Google sign-in used to die
+at Google with `redirect_uri_mismatch` — on every platform, not just iOS.
+Adding that URI does **not** disturb the Drive token flow, which never uses one;
+the "no redirect URIs, deliberately" note attached to the Drive client is about
+diagnosing Drive, and is not a reason to leave this off. Redirect URLs on the
+Supabase side must also match the deploy path exactly, capitals included —
+`/CardStash/`, not `/cardstash/`, which 404s.
 
 **Google is not offered in an iOS Home Screen app at all.** `GOOGLE_IS_A_TRAP`
 in `CloudSync.tsx` hides it when `IS_IOS && IS_STANDALONE`: the OAuth round
