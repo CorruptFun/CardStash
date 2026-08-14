@@ -37,6 +37,18 @@ export interface Settings {
    * installing by any other route also ends it.
    */
   installHintDismissed: boolean
+  /** base64 KDF salt for the cloud vault — not secret, lets a returning
+   * device re-derive its key without a round trip. */
+  cloudSalt: string
+  /** Non-secret fingerprint of the vault key, so a wrong passphrase is
+   * caught before a large download. */
+  cloudKeyCheck: string
+  /** Server revision this device last saw; a stale one means merge first. */
+  cloudRevision: number
+  /** Last successful cloud sync. */
+  cloudSyncedAt: number
+  /** Sync after collection writes rather than only on demand. */
+  cloudAuto: boolean
   /** Powers the AI deck builder only — scanning is fully on-device. */
   geminiKey: string
   geminiModel: string
@@ -83,6 +95,11 @@ export const useSettings = create<Settings>()(
       cameraApproved: false,
       iosCameraHintShown: false,
       installHintDismissed: false,
+      cloudSalt: '',
+      cloudKeyCheck: '',
+      cloudRevision: 0,
+      cloudSyncedAt: 0,
+      cloudAuto: true,
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
       pokemonKey: '',

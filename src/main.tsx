@@ -64,6 +64,12 @@ function announceVersion(storage: Storage, version: string, onNewVersion: (versi
 
 async function boot(): Promise<void> {
   requestPersistence()
+  // GoTrue hands OAuth tokens back in the URL fragment, and this app routes
+  // on the fragment — so the session must be claimed and the hash cleared
+  // before the router ever reads it, or sign-in lands on a garbage route.
+  await import('./lib/cloud')
+    .then((cloud) => cloud.adoptOAuthRedirect())
+    .catch(() => false)
   if (params.get('demo') === '1' && !(await hasAnyData().catch(() => true))) {
     await seedDemoData().catch(() => {})
   }
