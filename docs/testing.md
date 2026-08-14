@@ -116,6 +116,39 @@ Known stub bias, stable across runs so before/after deltas still hold: an OCR
 misread that a *real* API might fuzzy-resolve to some other card returns "no
 match" here — both grade as failures, only the stage label differs.
 
+## Real photographs and clips (`tests/harness/photos/`)
+
+The matrix composes its inputs. Real cameras do not, and the difference is not
+cosmetic — **it is where the wrong cards live.**
+
+- `npm run test:photos` — hand-curated real photographs, plus binder pages
+  (`--binders-only`) graded against an unordered multiset of names.
+- Clips: frames extracted from ordinary handheld video at ingest
+  (`ingest-clip.mjs`) and committed, in **bursts** — across bursts answers "does
+  any frame identify" (frame selection), within a burst answers "does averaging
+  beat the best of them" (stacking). Frames 5s apart cannot answer the second;
+  three frames 33ms apart cannot answer the first.
+
+These images **are committed to this repo**, unlike the matrix fixtures. CI
+force-pushes `harness-fixtures`, and a photograph cannot be regenerated.
+
+Two results worth carrying in your head before you quote a number:
+
+1. The standard matrix reports **zero** wrong cards across 282 cells. Two
+   ordinary clips produced **10 wrong in 40 identifications**. A battery of
+   stills cannot bound the wrong-card rate of a live scanner.
+2. Consecutive frames disagree. In one burst, frames 0 and 1 read "Krookodile
+   ex" and identified correctly; frame 2, 33ms later, read "Krookodile" and
+   matched a real, different, far cheaper card at score 1.0. The scanner commits
+   to one frame with no corroboration.
+
+**Ingest resolution is a silent ceiling.** `ingest.mjs` capped every photo at
+`CAPTURE_MAX_EDGE` (1600), which is right for one card and wrong for a page —
+cards reached the pipeline ~370px wide, well under the ~790px where a collector
+line stops being legible. Pages now ingest at `PAGE_MAX_EDGE` (3200). When a
+tool normalises an input, check its constant against the consumer that will
+actually read it.
+
 ## Capture check (`test:capture`)
 
 The matrix composes stacked frames in-page; the phone runs
@@ -150,6 +183,12 @@ node tests/harness/run-matrix.mjs --out=report/before.json   # baseline FIRST
 # … make the change …
 node tests/harness/run-matrix.mjs --baseline=report/before.json
 npm run test:unit
+npm run test:photos         # real photographs — where wrong cards show up
 npm run build && node tests/harness/smoke-app.mjs
 npm run test:capture        # only if camera.ts or the scan screen changed
 ```
+
+If the change touches `detectCardRegions` or anything multi-card, also run
+`node tests/harness/run-matrix.mjs --binders-only` and
+`node tests/harness/preview.mjs --detect` — **always look at the boxes, never
+trust the count.**

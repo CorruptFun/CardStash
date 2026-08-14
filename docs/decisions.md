@@ -169,3 +169,42 @@ incomplete result is served immediately (better than nothing), memory-cached
 failure falls back to a stale cache rather than an error screen. Cache-shape
 versions (`CATALOG_VERSION`, the `v2` group key, the `IMG`/`EXT` suffixes) exist
 so a bad cache is fixable by shipping a deploy.
+
+### 13. The paid tier has a seam, but no authority
+
+**Why.** Photo upload and binder/multi-card scanning are intended to become a
+paid subscription. Neither is gated today, and neither should be while it is
+still being built — but retrofitting a gate across call sites later is how you
+end up gating the wrong thing.
+
+**Consequences.** `lib/entitlement.ts` is a `GATED` table with every row `false`
+and one `isEntitled()` check. Flipping a row is the whole change. It
+deliberately reads and writes **no** settings: nothing stores an entitlement
+yet, and inventing storage for one would pick an answer to the open question
+below by accident.
+
+The seam sits on **entry points** — the upload control, the page-scan path — and
+**never on `detectCardRegions`**. That primitive is shared with ordinary
+single-card detection on cluttered backgrounds, which is the free path and the
+dominant real-world failure. Gating the detector would quietly degrade free
+scanning for everyone who never buys anything.
+
+**Still open, and deliberately so.** Entitlement has no home in this
+architecture. The deployed app is a static `gh-pages` bundle with no backend,
+and `server/` is a sync box the *user* hosts, so it can never be the authority
+on whether that same user has paid. Three honest options, ordered by how well
+they preserve local-first:
+
+1. **Soft/client-side gating** — a settings flag, trivially bypassed via
+   devtools. Fine if the subscription is support rather than enforcement. No
+   backend, stays offline-first.
+2. **A third-party entitlement check** (Stripe/RevenueCat/similar) at launch,
+   result cached, app fully usable offline afterwards. Introduces the first hard
+   network dependency — decide deliberately what happens when it is unreachable,
+   and make that *keep working*, not *lock out*.
+3. **A first-party backend** — contradicts decision 1 and is a much larger
+   change.
+
+Whichever is chosen: scanning keeps working offline, and analytics stay
+content-free. Subscription state is not a reason to start sending card data
+anywhere.

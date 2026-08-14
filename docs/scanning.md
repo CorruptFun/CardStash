@@ -28,6 +28,11 @@ ScanView ──▶ useScanner ──▶ camera.ts        (getUserMedia, torch, c
                                        ├──▶ cardsearch  (bestMatchAcrossGames / matchGame)
                                        ├──▶ sealed.ts   (pack/box mode)
                                        └──▶ scandebug   (trace ring)
+
+ScanView ──▶ multiscan.ts ──┬──▶ vision.ts    (detectCardRegions: N boxes)
+  (upload / Page pill)      └──▶ identify.ts  (each crop, reduced budget)
+                                      │
+                                      └──▶ review screen ──▶ user confirms
 ```
 
 ## 1. The camera (`lib/camera.ts`)
@@ -284,7 +289,50 @@ and plain numbers — and it always ranks *below* a readable set name.
 `sealedmatch.ts` is deliberately free of catalog/DB imports so node unit tests
 can exercise the scoring rules directly.
 
-## 6. Diagnostics
+## 6. Multi-card / binder scanning (`lib/multiscan.ts`)
+
+A binder page, a fanned stack, a row of cards in one photo. `detectCardRegions`
+(`vision.ts`) finds the rectangles, each crop is identified on its own, and the
+caller shows a **review screen** before anything is written.
+
+**Nothing in this path adds a card.** A page files ~9 rows in one confirmation,
+so a silent wrong card is nine times more expensive than in single scanning —
+the user confirms, always.
+
+Three constants carry the design:
+
+- `PAGE_MAX_EDGE` (3200) — the long-edge cap for a multi-card source,
+  deliberately *above* the single-card `CAPTURE_MAX_EDGE` (1600). A 3x3 page cut
+  out of a 1600px frame leaves each card ~500px wide, under the ~790px where a
+  printed collector fraction stops being legible, so a page scaled like a single
+  card arrives pre-blinded and the collector-line rescue can never fire. 3200 is
+  7.7M pixels, inside Safari's 16.7M canvas ceiling.
+- This is an **upload** ceiling. `captureFrame` only downscales and the stream is
+  requested at 1440p, so a *live* page scan gets ~2560px at best — roughly 340px
+  per card on a 3x3 page. That is the honest reason to shoot a binder page as a
+  photo rather than through the viewfinder.
+- `PAGE_SCAN_BUDGET` — a fraction of the single-card budget, since breadth is
+  traded for depth. `rescanPageCard` re-reads one row from the review screen on
+  the **full** single-card budget; that is the built-in fix for a row the page
+  pass got wrong.
+
+`MAX_PAGE_CARDS` is 12.
+
+### The entitlement seam
+
+Photo upload and page scanning are the **planned paid tier**. Neither is gated
+today. The seam is `lib/entitlement.ts` — a `GATED` table with every row `false`,
+checked at two entry points: the upload control (`UploadButton` in `ScanView`)
+and the page-scan path (the Page pill's live tap, and the page branch of an
+upload).
+
+**Never gate `detectCardRegions` itself.** That primitive is shared: it is also
+the fix for ordinary single-card detection over-reaching on cluttered
+backgrounds, which is the *free* path and the dominant real-world failure
+(scan-harness lessons 32, 34-38). Gating it would quietly degrade free scanning
+for everyone. See [decisions.md](decisions.md#13-the-paid-tier-has-a-seam-but-no-authority).
+
+## 7. Diagnostics
 
 `scandebug.ts` keeps the last 24 attempt traces: every OCR pass's raw text,
 the candidates produced, each lookup and its score, collector-line parses, crop
@@ -305,3 +353,35 @@ content-free by contract.
   either into a wrong card, that loosening is wrong.
 - Auto mode has no collector-line rescue, so a non-English card requires picking
   the game. The miss message says so.
+- **The multi-card detector cannot see a quarter-turned card, at all.**
+  `detectCardRegions` sweeps aspects 0.587..0.859 (from `CARD_ASPECT` 63/88) —
+  portrait only — and a sideways card's bounding box is landscape at ~1.40, so
+  the right rectangle is never *proposed*. Measured on a real 3x3 page: 5 boxes,
+  none of them on a single card, one swallowing six. Note the *single*-card path
+  handles turned cards fine (`looksSideways`/`uprightOrientations`); the gap is
+  entirely in the detector, so every crop would identify once the boxes are
+  right. Two obvious fixes were built and measured and **both were rejected** —
+  orientation scoring does not discriminate (a known-upright page scored *higher*
+  turned, 14.09 vs 11.61), and proposing both aspect bands broke the arbitration
+  rules that assume one card shape (a known-good page fell 8/8 → 4/8). See
+  scan-harness lessons 52 and 54 before attempting a third.
+
+### Where the numbers actually stand
+
+Three batteries, three different questions. Quoting one for another is the
+easiest way to overstate the scanner:
+
+| Battery | Command | Result |
+| ------- | ------- | ------ |
+| Standard matrix (rendered fixtures, 9 degradations) | `npm run test:scan` | **204/282 (72%), zero wrong cards** |
+| Hand-curated real photographs | `npm run test:photos` | **4/12 (33%)**, 1 wrong card |
+| Handheld clips (frames from real video) | see lesson 47 | **10 wrong in 40 identifications** |
+
+The matrix reports zero wrong cards across 282 cells; two ordinary handheld
+clips produced ten. `compose()` structurally cannot generate the input that
+causes it — a frame where a *moving* highlight leaves the name half-legible in
+one specific way. **A battery of stills cannot bound the wrong-card rate of a
+live scanner**, and the wrong-card rate is the number that matters most.
+Per-game on the matrix: Yu-Gi-Oh 36/36, One Piece 18/18, Riftbound 50/54,
+MTG 46/57, Pokémon 54/117 — Pokémon is the standing weak spot (58 ocr-misread,
+5 match-none).

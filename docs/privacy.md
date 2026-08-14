@@ -57,7 +57,8 @@ forbidden-key list) and never travel in a share link or backup.
 error identities. It is designed so that content *cannot* leak, not merely so
 that it doesn't today.
 
-1. **Fixed event whitelist.** `EVENT_TYPES` — `scan_attempt`, `card_added`,
+1. **Fixed event whitelist.** `EVENT_TYPES` — `app_open`, `session_end`,
+   `screen_view`, `scan_attempt`, `scan_failure`, `card_added`,
    `variant_selected`, `import_completed`, `search`, `deck_created`,
    `ai_builder_run`, `price_refresh`, `friend_added`, `social_share`,
    `trade_update`, `want_update`, `sync_run`, `error`. Adding an event means
@@ -74,6 +75,24 @@ that it doesn't today.
      survives and a card name does not.
 3. **Errors are hashed.** `trackError` stores a sanitized component name and an
    FNV-1a hash of the message. The message text itself is never stored.
+3b. **Failing cards are hashed, never named.** `scan_failure` carries the stage
+   the pipeline died at plus `card` — `hashToken(readName)`, an FNV-1a hash over
+   the name normalised for case, spacing, punctuation and accents. That groups
+   repeat failures of one card across devices ("this card fails everywhere" is
+   answerable) while the payload stays free of card names. A maintainer resolves
+   a bucket by hashing *catalog* names, which needs the catalog rather than the
+   log. Two caveats worth knowing: the hash is 32-bit, so within a large
+   single-game catalog (Pokémon is ~20k names) there is a low but real chance of
+   two cards sharing a bucket — the event's `game` field is what disambiguates —
+   and a cached miss is deliberately *not* counted, since it is the same frame
+   the pipeline already gave up on and counting it would just weight whichever
+   card sat in front of the lens longest.
+3c. **Who is here, without knowing who.** A random per-install id (minted in the
+   analytics DB, not derived from anything about the device or person) plus
+   `app_open` / `session_end` / `screen_view`, an install record (first seen,
+   session count, active days), a coarse device shape, and collection size as a
+   **bucket** — never an exact count. `clearAnalytics()` drops the install
+   record along with the events.
 4. **Upload is doubly gated.** `flushTelemetry` no-ops unless `diagShare` is on
    **and** an endpoint **and** a token are set. Batches of 500, minimum 30s
    between flushes, 10s timeout, keepalive batches halved until under 60 KB.
@@ -87,6 +106,46 @@ and lookup scores. It is an in-memory ring of 24 entries, rendered on-device in
 the "what the scanner saw" panel, and it leaves the device **only** if the user
 explicitly taps Copy and pastes it somewhere. It must never be fed into
 `analytics.ts`, and the analytics redaction above would strip it anyway.
+
+## If you build a receiver
+
+No receiver exists. `diagEndpoint` is a free-form URL the user supplies, and the
+client posts `{app, v, device, firstSeen, sessions, activeDays, sentAt, events[]}`
+as JSON with `Authorization: Bearer <token>`. Four things to get right, three of
+them learned the expensive way in a sibling project (`CorruptFun/viva-maya`,
+whose `supabase/migrations/0010`, `0015` and `0019` are worth reading before you
+write any of this):
+
+1. **Bucket unknown event names — never reject them.** Cardstock is a PWA with a
+   hand-written service worker, so users sit on several bundles at once. A
+   receiver that only accepts today's vocabulary silently drops every event from
+   every un-updated client. Normalise the name (lowercase, snake_case, length
+   cap) and file anything unrecognised as `unknown`, where a client-side typo
+   becomes *visible* instead of vanishing.
+2. **Stamp receipt time server-side.** The client's `at` is its own clock and
+   `sentAt` is advisory. A device with a wrong clock will otherwise bend every
+   time-series query on the table.
+3. **There is no idempotency key, so make the write idempotent or accept
+   double-counting.** The client advances `flushedThrough` only on a 2xx, which
+   is the safe direction — a *lost response* on an accepted batch means the same
+   events are re-sent. If exact counts matter, have the client mint a per-event
+   uuid and dedupe on it. And if the receiver is Supabase/PostgREST over an
+   append-only table: `ON CONFLICT` **cannot execute** against a table with no
+   SELECT policy — Postgres folds the (empty) SELECT policy list in as an extra
+   `WITH CHECK` that is constant false, so every insert 401s, including the
+   first. Put the conflict handling in a `SECURITY DEFINER` function instead.
+   That is `0019`, and it cost that project its entire event stream while it was
+   wrong.
+4. **The receiver never needs to be reachable.** Analytics failing must never be
+   a reason the app behaves differently. `flushTelemetry` already swallows
+   everything and retries; keep it that way.
+
+**Do not align this schema with viva-maya's.** They are different architectures
+solving different problems — that project posts single rows to its own Supabase
+with RLS as the trust boundary; this one posts a batched envelope to whatever
+endpoint the user names, with a bearer token as the whole trust model. Sharing a
+table would mean giving Cardstock a backend, which decision 1 forbids. The
+lessons above transfer; the schema does not.
 
 ## What a share actually contains
 

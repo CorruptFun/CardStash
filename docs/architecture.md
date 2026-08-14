@@ -52,10 +52,12 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `games.ts` | 102 | The `GAMES` list and per-game tables (labels, finishes, which games have a cheap by-name API). |
 | `db.ts` | 733 | Dexie schema + every write to user data. Backup export/import + sanitization. |
 | `settings.ts` | 114 | zustand-persist preference store (localStorage). |
-| `identify.ts` | 870 | The scan pipeline orchestrator: cache, orientation, OCR passes, lookups, collector-line rescue. |
+| `identify.ts` | 1055 | The scan pipeline orchestrator: cache, orientation, OCR passes, lookups, collector-line rescue. |
 | `ocr.ts` | 648 | Tesseract workers, image preprocessing, name-band geometry, name-candidate extraction. |
 | `corner.ts` | 283 | Collector-line crop regions and the parsers that dig set code / number / passcode out of noisy OCR. |
-| `vision.ts` | 497 | Frame analysis (motion, sharpness, card region), deskew/crop refinement, foil sheen, perceptual hash, sideways detection. |
+| `vision.ts` | 939 | Frame analysis (motion, sharpness, card region), deskew/crop refinement, foil sheen, perceptual hash, sideways detection, **and `detectCardRegions` — the multi-card detector**. |
+| `multiscan.ts` | 203 | Binder-page / multi-card scanning: detect regions, crop, identify each on a reduced budget, hand the lot to a review screen. Writes nothing itself. |
+| `entitlement.ts` | 40 | The seam for the planned paid tier. A `GATED` table, every row `false`. Checked at entry points only — never at `detectCardRegions`. |
 | `camera.ts` | 251 | `getUserMedia` lifecycle, torch/exposure controls, iOS stream parking, frame capture (incl. low-light stacking). |
 | `scandebug.ts` | 76 | In-memory ring of per-attempt diagnostic traces. Local only. |
 | `cardsearch.ts` | 276 | The multi-game facade: search / match / by-id / refresh / printings, and the cross-game race used by scanning. |
@@ -71,7 +73,7 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `social.ts` | 618 | Profile/trade/reply payload build, encode/decode, and **every sanitizer for untrusted input**. |
 | `sync.ts` | 267 | The optional live-sync client and poll loop. |
 | `gemini.ts` | 211 | The AI deck builder — the app's only Gemini use. |
-| `analytics.ts` | 383 | Local diagnostics store, redaction, opt-in telemetry upload. |
+| `analytics.ts` | 746 | Local diagnostics store, redaction, install/session identity, opt-in telemetry upload. |
 | `importexport.ts` / `csv.ts` | 241 / 62 | Collection CSV import/export and a CSV parser. |
 | `demo.ts` | 431 | `?demo=1` seed data. |
 | `fetchJson.ts` | 40 | `fetch` + JSON + timeout + abort linking. Every card API uses it. |
