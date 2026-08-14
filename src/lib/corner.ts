@@ -68,6 +68,16 @@ export const SOLE_EVIDENCE_REGIONS: Partial<Record<Game, CornerRect[]>> = {
 export interface CornerRead {
   setCode?: string
   number?: string
+  /**
+   * Yu-Gi-Oh's 8-digit passcode, whenever it turned up in ANY text this read
+   * covered — not only in its own dedicated region. It is the strongest
+   * identifier on the card (same digits in every language, printed in plain
+   * black ink that no foil treatment touches) and the cheapest to trust: the
+   * id space is sparse, so a misread resolves to nothing rather than to a
+   * neighbour. Carrying it here means a pass that happened to read the bottom
+   * strip for some other reason does not throw it away.
+   */
+  passcode?: string
   /** Printed set size from "123/198" — disambiguates Pokémon sets. */
   total?: string
   /**
@@ -104,12 +114,16 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
   const upper = text.toUpperCase().replace(/[–—]/g, '-')
 
   if (CODE_GAMES.has(game)) {
+    // Yu-Gi-Oh prints its passcode on the same bottom strip as the set code,
+    // and any pass that read that strip has it whether or not the set code
+    // parsed. Harvest it here so it survives to the caller.
+    const passcode = game === 'yugioh' ? (parsePasscode(text) ?? undefined) : undefined
     // LOB-EN001, OP01-016, BT12-041, GD01-003 — tolerate OCR gaps.
     const code = upper.match(/\b([A-Z]{1,4}\d{0,3})\s*-\s*([A-Z]{0,2}\s?\d{2,4})\b/)
-    if (!code) return {}
+    if (!code) return passcode ? { passcode } : {}
     const prefix = code[1].replace(/[^A-Z0-9]/g, '')
     const suffix = code[2].replace(/[^A-Z0-9]/g, '')
-    return { number: `${prefix}-${suffix}`, setCode: prefix }
+    return { number: `${prefix}-${suffix}`, setCode: prefix, ...(passcode ? { passcode } : {}) }
   }
 
   if (game === 'mtg') {

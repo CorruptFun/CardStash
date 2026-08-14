@@ -133,3 +133,37 @@ test('mtg: fraction read carries the total; padded solo is flagged', () => {
   const bare = parseCornerInfo('mtg', '269 M\nMH3 • EN')
   assert.equal(bare.padded, undefined)
 })
+
+/*
+ * The passcode has to survive whichever pass happened to read the bottom
+ * strip. It is Yu-Gi-Oh's strongest identifier — the same eight digits in
+ * every language, printed in plain black ink that no foil treatment touches —
+ * and the pipeline used to parse it from ONE dedicated 7%-tall rectangle. On a
+ * real secret-rare photograph that rectangle returned "" while the wider band
+ * read moments earlier in the same attempt returned the digits perfectly, so
+ * the card went unidentified with its own id sitting in the trace.
+ */
+test('yugioh: passcode is carried off any bottom-strip text', () => {
+  assert.equal(parseCornerInfo('yugioh', '72444406 1" Edition O22)').passcode, '72444406')
+  assert.equal(parseCornerInfo('yugioh', '1 72444406 I Edition ©2020').passcode, '72444406')
+  // Alongside a set code, both survive — the code picks the printing, the
+  // passcode picks the card.
+  const both = parseCornerInfo('yugioh', 'PHNI-EN042 72444406 1st Edition')
+  assert.equal(both.passcode, '72444406')
+  assert.equal(both.number, 'PHNI-EN042')
+})
+
+test('yugioh: passcode stays absent unless eight digits actually read', () => {
+  // A mangled read must resolve to nothing rather than to a neighbouring id.
+  assert.equal(parseCornerInfo('yugioh', 'S741 788* L-dition').passcode, undefined)
+  assert.equal(parseCornerInfo('yugioh', 'ATK/2900 DEF/2500').passcode, undefined)
+  assert.equal(parseCornerInfo('yugioh', '©2020 Studio Dice/SHUEISHA').passcode, undefined)
+  // Nine digits is not a passcode.
+  assert.equal(parseCornerInfo('yugioh', '724444064 1st Edition').passcode, undefined)
+})
+
+test('other code games do not acquire a passcode', () => {
+  // Only Yu-Gi-Oh prints one; an 8-digit run on a One Piece card is something
+  // else and must not be handed to an id lookup.
+  assert.equal(parseCornerInfo('onepiece', 'OP01-016 12345678').passcode, undefined)
+})
