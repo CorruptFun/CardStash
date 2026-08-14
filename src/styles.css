@@ -10,9 +10,23 @@
   --paper: #f4efe8;
   --paper-2: #a89f95;
   --paper-3: #867d73;
-  --signal: #8b7cff;
-  --signal-fill: #1d1932;
-  --signal-rule: #40376e;
+  /* The accent register is metallic, not chromatic — this is a collectible-card
+     app and the chrome should read like the foil on a card rather than like a
+     brand colour. It works because the base is deliberately WARM (`--ink-*`,
+     `--paper`): a cool desaturated silver against warm near-black reads as
+     metal catching light, where a warm grey would just read as more paper.
+
+     Two tokens, not one, and the split is load-bearing. `--signal` is bright
+     enough to be an accent against `--paper` text; white content on top of it
+     would be invisible, so every place that fills a shape and puts `#fff`
+     inside uses `--signal-solid` instead. Collapsing them silently destroys
+     the toggle knob and the two selection checkmarks. */
+  --silver: #c3ccd9;
+  --silver-deep: #7c8797;
+  --signal: var(--silver);
+  --signal-solid: var(--silver-deep);
+  --signal-fill: #171b22;
+  --signal-rule: #3a4250;
   --up: #4cc38a;
   --up-fill: #10241c;
   --down: #f2685c;
@@ -43,6 +57,21 @@
     rgba(255, 255, 255, 0) 36%,
     rgba(255, 255, 255, 0.42) 46%,
     rgba(255, 255, 255, 0) 56%
+  );
+  /* Silver foil: `--holo`'s desaturated sibling. `--holo` means "this CARD is
+     a foil" and is data, so it must stay rainbow; this is chrome, and it says
+     "collectible" without claiming anything about the card. The alternating
+     bright/dim stops are what sell metal — a flat grey gradient reads as a
+     disabled surface. */
+  --foil: linear-gradient(
+    112deg,
+    #eef3fa 0%,
+    #a9b6c8 15%,
+    #e2e9f3 30%,
+    #8d9bb0 46%,
+    #e8eff7 62%,
+    #9fadc0 80%,
+    #eef3fa 100%
   );
   --font-ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -269,7 +298,9 @@ button {
   transform: translate(-50%);
   width: 28px;
   height: 2px;
-  background: var(--signal);
+  /* Foil rather than flat silver: it is 2px tall, so the gradient reads as a
+     glint along the bar rather than as a gradient. */
+  background: var(--foil);
 }
 .btn {
   display: inline-flex;
@@ -528,8 +559,8 @@ button {
     background var(--t-2) var(--ease-out);
 }
 .toggle--on {
-  background: var(--signal);
-  border-color: var(--signal);
+  background: var(--signal-solid);
+  border-color: var(--signal-solid);
 }
 .toggle--on span {
   transform: translate(18px);
@@ -982,8 +1013,8 @@ button {
   z-index: 2;
 }
 .cardcell__check--on {
-  background: var(--signal);
-  border-color: var(--signal);
+  background: var(--signal-solid);
+  border-color: var(--signal-solid);
   color: #fff;
 }
 .scan {
@@ -2221,7 +2252,7 @@ button {
 .typebars__fill {
   height: 100%;
   border-radius: 3px;
-  background: #8b7cff;
+  background: var(--signal);
   min-width: 3px;
 }
 .typebars__count {
@@ -4998,8 +5029,8 @@ button {
   color: #fff;
 }
 .pickrow__check--on {
-  background: var(--signal);
-  border-color: var(--signal);
+  background: var(--signal-solid);
+  border-color: var(--signal-solid);
 }
 .pickrow .stepper {
   align-self: flex-end;
@@ -5309,15 +5340,19 @@ button {
   flex-direction: column;
   gap: var(--s3);
 }
+/* The one place the foil gradient runs at full strength — it is the first
+   thing anyone sees, and a stamped-foil card corner is the image worth
+   borrowing. Everywhere else uses the flat silver; a page of gradients reads
+   as decoration rather than material. */
 .welcome__mark {
   display: grid;
   place-items: center;
   width: 54px;
   height: 54px;
   border-radius: var(--r-2);
-  background: var(--signal-fill);
-  border: 1px solid var(--signal-rule);
-  color: var(--signal);
+  background: var(--foil);
+  color: var(--ink-000);
+  box-shadow: var(--lift-1);
 }
 .welcome__title {
   margin: var(--s2) 0 0;

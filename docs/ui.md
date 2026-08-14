@@ -66,12 +66,32 @@ Token families:
 | ------ | -------- | ----- |
 | Surfaces | `--ink-000` … `--ink-300`, `--rule`, `--surface`, `--bg-elev` | A warm near-black ladder; the app is dark-only (`color-scheme: dark`). |
 | Text | `--paper`, `--paper-2`, `--paper-3` → `--text`, `--text-2`, `--text-3` | |
-| Signal | `--signal` (violet), `--up`/`--down`/`--warn` + their fills | Gains green, losses red, warnings amber. |
+| Signal | `--silver` → `--signal`, `--silver-deep` → `--signal-solid`, `--signal-fill`/`--signal-rule`, `--up`/`--down`/`--warn` + their fills | The accent is **metallic, not chromatic** — a collectible-card app should read like foil on card stock, not like a brand colour. Works because the surface ladder is warm: cool silver on warm near-black reads as metal catching light. Gains green, losses red, warnings amber. |
+| Foil (chrome) | `--foil` | Silver gradient for the few hero moments (the welcome mark, the nav indicator). Distinct from `--holo` below — see the note under this table. |
 | Per-game | `--game-mtg`, `--game-pkm`, `--game-ygo`, `--game-rft`, `--game-lor`, `--game-op`, `--game-swu`, `--game-dgm`, `--game-gcg` | One hue per game, used for badges and accents. **A new game needs one.** |
 | Foil | `--holo`, `--holo-spec` | The rainbow gradient + specular sweep used for foil treatments. |
 | Rhythm | `--s1` … `--s12` (4→48px), `--r-0/1/2` radii | |
 | Motion | `--t-1/2/3` (0.12/0.16/0.22s), `--ease-out`, `--ease-spring` | |
 | Chrome | `--nav-h` (58px), `--sat`/`--sab` safe-area insets, `--lift-1/2`, `--sheen` | |
+
+### Two things about the accent that will bite
+
+**`--signal` and `--signal-solid` are not interchangeable.** `--signal` is
+bright enough to be an accent against `--paper` text, which means white content
+placed *on top of it* is invisible. Every site that fills a shape and puts
+`#fff` inside — the toggle knob, the card-cell checkmark, the picker checkmark
+— uses `--signal-solid`. Collapsing them back into one token silently destroys
+all three, and it looks fine in a diff.
+
+**`--foil` and `--holo` mean different things.** `--holo` is the rainbow
+gradient and it is *data*: it marks a card as an actual foil printing, so it
+must stay rainbow. `--foil` is silver and it is *chrome*: it says "collectible"
+without claiming anything about the card under it. Reaching for `--holo` to
+decorate UI would make the app assert a card is foil when it isn't.
+
+Charts that stroke SVG or canvas can't read CSS variables, so `InsightsPanel`,
+`DecksView` and `CardSheet` each mirror `--silver` as a literal with a comment
+saying so. If the accent moves, those move too.
 
 `index.html` inlines a tiny critical style block that paints the near-black
 ground and the dock hairline **before the bundle arrives**, so first paint is

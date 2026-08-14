@@ -637,7 +637,8 @@ function AddCardsModal({ open, onClose, deck }: { open: boolean; onClose: () => 
 
 /* Deck charts */
 
-const CURVE_COLOR = '#8b7cff'
+/** Mirrors `--silver` in styles.css — keep in step if the accent moves. */
+const CURVE_COLOR = '#c3ccd9'
 
 const MTG_COLORS: Record<string, { fill: string; label: string }> = {
   W: { fill: '#a3903f', label: 'White' },

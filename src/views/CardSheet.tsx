@@ -835,7 +835,8 @@ function mergeToast(before: CollectionItem, after: CollectionItem): string {
 const SPARK_W = 320
 const SPARK_H = 84
 const SPARK_PAD = { top: 10, right: 8, bottom: 6, left: 8 }
-const SPARK_LINE = '#8b7cff'
+/** Mirrors `--silver` in styles.css — keep in step if the accent moves. */
+const SPARK_LINE = '#c3ccd9'
 
 function Sparkline({ points }: { points: PricePoint[] }) {
   const priced = useMemo(() => points.filter((point) => point.best != null), [points])

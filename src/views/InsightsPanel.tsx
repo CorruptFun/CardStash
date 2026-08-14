@@ -10,7 +10,8 @@ const WINDOW_DAYS = 30
 const CHART_W = 320
 const CHART_H = 108
 const PAD = { top: 12, right: 54, bottom: 17, left: 8 }
-const LINE = '#8b7cff'
+/** Mirrors `--silver` in styles.css — SVG strokes can't read CSS vars here. */
+const LINE = '#c3ccd9'
 const OPEN_KEY = 'cardstock-insights-open'
 
 export function InsightsPanel({
