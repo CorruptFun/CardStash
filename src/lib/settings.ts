@@ -73,6 +73,17 @@ export interface Settings {
   /** Last successful Drive backup, epoch ms. 0 = never. */
   driveAt: number
   /**
+   * First run has been dealt with — signed in, or explicitly skipped. 0 means
+   * the welcome screen has never been answered. Not the same as being signed
+   * in: someone who skips is onboarded and gets the nudge instead.
+   */
+  onboardedAt: number
+  /**
+   * Last time the "connect an account" nudge was shown. It returns every
+   * three days until there is nothing left to connect.
+   */
+  accountNudgeAt: number
+  /**
    * Hosted social is on: publish my binder, poll friends, drain the trade
    * inbox. Off (the default) means the app is exactly as social as it ever
    * was — links and files, nothing published anywhere.
@@ -115,6 +126,8 @@ export const useSettings = create<Settings>()(
       shareScope: 'trade',
       driveBackup: false,
       driveAt: 0,
+      onboardedAt: 0,
+      accountNudgeAt: 0,
       socialOn: false,
       socialHandle: '',
       socialCursor: 0,

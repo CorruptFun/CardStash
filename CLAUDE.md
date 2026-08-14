@@ -171,6 +171,20 @@ published beyond what the user chose.
 claiming a handle publishes no cards and only makes you reachable; putting the
 binder up is the separate, privacy-bearing act. Don't collapse them.
 
+**First run asks for an account** (`Welcome.tsx`, state machine in
+`lib/onboarding.ts`), and `ConnectNudge.tsx` re-asks every three days until
+there is nothing left to connect. It is prominent but **skippable on purpose**
+— a hard gate would break offline first launch and put every new user behind
+the mail provider's uptime; `ALLOW_SKIP` in `Welcome.tsx` is the whole change
+if that is ever wanted, and `?welcome=0` must go with it. Harnesses skip it
+with `?welcome=0`.
+
+**Never write "your data isn't saved" in that copy.** It is false — cards are
+in IndexedDB — and signing in does not back anything up either; the vault needs
+a passphrase. `nextConnectStep()` returns `signin | handle | backup` and each
+has copy naming what is actually missing. A warning users can disprove gets
+dismissed reflexively for the rest of the product's life.
+
 - `lib/authsession.ts` — sign-in, shared by the vault and social. `cloud.ts`
   re-exports it so existing call sites keep one import site.
 - `lib/socialcloud.ts` — the hosted transport. Everything it receives still

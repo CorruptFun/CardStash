@@ -62,19 +62,39 @@ const fail = async (what) => {
   process.exit(1)
 }
 
-// ?nosw=1: the service worker must not install from a preview run.
+/*
+ * First run gates on an account, so check BOTH sides before anything else:
+ * the welcome must appear for a fresh visitor, and `?welcome=0` must get past
+ * it. Every assertion below this point rides on that flag, so if the escape
+ * ever stops working the whole file fails with a misleading error instead of
+ * this one.
+ */
 await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/scan`, { waitUntil: 'load' })
 await page.waitForTimeout(600)
+if (!(await page.getByText('Connect an account').isVisible().catch(() => false))) {
+  await fail('first run did not show the welcome screen')
+}
+if (!(await page.getByText('Skip for now').isVisible().catch(() => false))) {
+  await fail('welcome screen offered no way past it')
+}
+
+// ?nosw=1: the service worker must not install from a preview run.
+// ?welcome=0: skip first-run onboarding (harness escape, see lib/onboarding.ts).
+await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/scan`, { waitUntil: 'load' })
+await page.waitForTimeout(600)
+if (await page.getByText('Connect an account').isVisible().catch(() => false)) {
+  await fail('?welcome=0 did not skip the welcome screen')
+}
 
 if (!(await page.getByText('Start scanning').isVisible().catch(() => false))) await fail('scan start gate did not render')
 if ((await page.locator('.shutter').count()) !== 0) await fail('a shutter button is still in the DOM')
 
-await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/settings`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/settings`, { waitUntil: 'load' })
 await page.waitForTimeout(400)
 const pkg = (await import(`file://${join(REPO, 'package.json')}`, { with: { type: 'json' } })).default
 if (!(await page.getByText(`v${pkg.version}`).isVisible().catch(() => false))) await fail(`Settings does not show v${pkg.version}`)
 
-await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/search`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/search`, { waitUntil: 'load' })
 await page.waitForTimeout(300)
 if ((await page.locator('input').count()) === 0) await fail('search screen did not render an input')
 
@@ -83,7 +103,7 @@ if ((await page.locator('input').count()) === 0) await fail('search screen did n
  * one, so removing it has to work. Seeded straight into Dexie because the
  * headless browser has no camera to scan with.
  */
-await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/scan`, { waitUntil: 'load' })
+await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/scan`, { waitUntil: 'load' })
 await page.waitForTimeout(600)
 const seeded = await page.evaluate(async () => {
   const open = () => new Promise((res) => {

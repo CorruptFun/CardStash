@@ -317,6 +317,53 @@ collection, which is the one decision this design most wants to be deliberate.
 The poller reflects it: friends and the inbox are pulled whenever you have a
 handle, and only the outbound publish is gated on `socialOn`.
 
+### First run and the three-day nudge (v0.16.0)
+
+`components/Welcome.tsx` takes over the screen on a first launch and asks for
+an account: sign in, then pick a handle (pre-filled from the email, so the
+common case is one tap). `lib/onboarding.ts` owns the state machine;
+`components/ConnectNudge.tsx` is the recurring reminder.
+
+**It is presented as the way in, but it is not a hard lock**, and that is a
+considered call rather than a softening. A true gate would mean no first launch
+without a network, the whole app dark whenever Supabase or the mail provider
+has a bad day, and the core promise — point a camera at a card, see what it is
+worth, offline, with nothing signed in — broken for exactly the case it was
+built for. The emailed code rides on a third-party mail provider with an hourly
+cap; making that a prerequisite for opening the app puts every new user behind
+someone else's uptime. `ALLOW_SKIP` in `Welcome.tsx` is the whole change if a
+real lock is ever wanted — and `?welcome=0` has to go with it.
+
+Two escapes exist: `?welcome=0` (the browser harnesses are first-time visitors
+by definition) and `?demo=1` (asking a demo visitor for an account defeats the
+flag). Neither is a security boundary — the screen is skippable anyway. The
+welcome also never covers the `#/x?d=…` ingest route: a share link is how most
+people meet this app, and answering someone's trade offer with a signup wall
+loses both the trade and the user.
+
+**The copy has to be true, and the obvious copy is not.** "Your data isn't
+saved" is wrong — cards are in IndexedDB and survive a reload. Worse, *signing
+in does not back anything up either*: the vault needs a passphrase, a second
+deliberate act with no reset. So `nextConnectStep()` names what is actually
+missing:
+
+| Step | Missing | What doing it buys |
+| ---- | ------- | ------------------ |
+| `signin` | no account | an identity that survives losing the device |
+| `handle` | account, no handle | being findable, and receiving trades |
+| `backup` | neither vault nor Drive | cards that outlive the device |
+
+The `backup` case is the one that most wants care: someone who signed in
+*because we told them to* would otherwise be left believing their cards were
+safe. Its copy says so in as many words.
+
+The nudge returns every three days (`NUDGE_INTERVAL_MS`) and has **no permanent
+dismissal, by request** — the escape is to finish the step, after which
+`nextConnectStep()` returns null and it never renders again. It shares the
+banner slot with `InstallPrompt` and yields to it: on iOS that warning is about
+storage being deleted *this week*, which outranks anything here, and two
+stacked banners is how both get ignored.
+
 ### One identity
 
 `claimHandle`/`loadMyProfile` point `settings.profileId` at the Supabase user

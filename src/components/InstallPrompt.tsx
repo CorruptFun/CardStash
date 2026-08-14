@@ -47,7 +47,7 @@ interface InstallEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
-export function InstallPrompt() {
+export function InstallPrompt({ onVisibleChange }: { onVisibleChange?: (visible: boolean) => void } = {}) {
   const config = useSettings()
   const toast = useUi((s) => s.toast)
   const [deferred, setDeferred] = useState<InstallEvent | null>(null)
@@ -120,13 +120,24 @@ export function InstallPrompt() {
     if (outcome === 'dismissed') dismiss()
   }, [deferred, dismiss])
 
-  if (IS_STANDALONE || installed || config.installHintDismissed) return null
-  if ((count ?? 0) < MIN_CARDS_TO_PROMPT) return null
   // iOS never fires beforeinstallprompt — there, instructions are the only
   // route. Elsewhere, no event means the browser can't install this at all
   // (desktop Safari, Firefox), and a button that cannot work is worse than
   // no banner.
-  if (!IS_IOS && !deferred) return null
+  const visible =
+    !IS_STANDALONE &&
+    !installed &&
+    !config.installHintDismissed &&
+    (count ?? 0) >= MIN_CARDS_TO_PROMPT &&
+    (IS_IOS || !!deferred)
+
+  // Reported so the account nudge can yield the slot: this banner is about
+  // storage being deleted this week, which outranks it.
+  useEffect(() => {
+    onVisibleChange?.(visible)
+  }, [visible, onVisibleChange])
+
+  if (!visible) return null
 
   return (
     <div className="installtip" role="status">

@@ -5283,6 +5283,101 @@ button {
   text-transform: uppercase;
   color: var(--up);
 }
+/* --- first run ----------------------------------------------------------- */
+
+/* Full-bleed and opaque: this is the way into the app, not a dialog floating
+   over a usable screen. Scrolls rather than compresses, because the sign-in
+   step grows a code field and small phones in landscape exist. */
+.welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: calc(var(--sat) + var(--s6)) var(--s4) calc(var(--sab) + var(--s6));
+  background: var(--bg);
+  -webkit-overflow-scrolling: touch;
+}
+.welcome__inner {
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.welcome__mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--r-2);
+  background: var(--signal-fill);
+  border: 1px solid var(--signal-rule);
+  color: var(--signal);
+}
+.welcome__title {
+  margin: var(--s2) 0 0;
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--paper);
+}
+.welcome__lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--paper-2);
+}
+.welcome__points {
+  list-style: none;
+  margin: var(--s1) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.welcome__points li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--paper-2);
+}
+.welcome__points svg {
+  flex: none;
+  color: var(--signal);
+}
+.welcome__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.welcome__fine {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--paper-3);
+}
+/* Quiet on purpose — the account is the path, this is the door out of it. */
+.welcome__skip {
+  align-self: center;
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s4);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--paper-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.welcome__skip:active {
+  color: var(--paper-2);
+}
+
 /* --- hosted social ------------------------------------------------------- */
 
 /* The "@" that prefixes a handle field. Sits outside the input so the caret

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ConnectNudge } from './components/ConnectNudge'
 import { Icon, type IconName } from './components/Icon'
 import { InstallPrompt } from './components/InstallPrompt'
 import { Toasts } from './components/Toasts'
+import { Welcome } from './components/Welcome'
 import { trackScreen } from './lib/analytics'
+import { shouldShowWelcome } from './lib/onboarding'
 import { warmOwnedCatalogs } from './lib/tcgcsv'
 import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
@@ -68,6 +71,8 @@ const TABS: { route: string; icon: IconName; label: string; match: string[] }[] 
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
+  const [welcome, setWelcome] = useState(() => shouldShowWelcome())
+  const [installVisible, setInstallVisible] = useState(false)
   useEffect(() => {
     const onHashChange = () => {
       uiStore.getState().closeSheet()
@@ -108,7 +113,12 @@ export function App() {
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
-      {route.name !== 'scan' && route.name !== 'ingest' && <InstallPrompt />}
+      {route.name !== 'scan' && route.name !== 'ingest' && (
+        <>
+          <InstallPrompt onVisibleChange={setInstallVisible} />
+          <ConnectNudge suppressed={installVisible} />
+        </>
+      )}
       <nav className="nav safe-bottom" aria-label="Main">
         {TABS.map((tab) => {
           const active = tab.match.includes(route.name)
@@ -122,6 +132,10 @@ export function App() {
       </nav>
       <CardSheetHost />
       <Toasts />
+      {/* Not over the ingest route: a share link is how most people meet this
+          app, and answering someone's trade offer with a signup wall loses
+          both the trade and the user. */}
+      {welcome && route.name !== 'ingest' && <Welcome onDone={() => setWelcome(false)} />}
     </div>
   )
 }
