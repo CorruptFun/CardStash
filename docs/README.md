@@ -30,6 +30,12 @@ Live: <https://corruptfun.github.io/CardStash/> · Source of truth: `main`.
 | 10 | [extending.md](extending.md) | Task-shaped playbooks: add a game, a source, a screen, a table, a setting, a release. |
 | 11 | [decisions.md](decisions.md) | The load-bearing decisions and why they are what they are. |
 
+The table above is what the app **is** today. [roadmap.md](roadmap.md) is what
+happens next and why — the plan of record for measurement, free-tier cloud
+backup, and hosted sync, plus the four things orientation found that the
+chapters above get wrong or omit. Read it before starting work in any of those
+areas; read the chapter it points at before changing the code.
+
 ## Other docs in the repo
 
 - [`../README.md`](../README.md) — user-facing product README.
