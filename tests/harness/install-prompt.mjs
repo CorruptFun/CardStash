@@ -16,7 +16,10 @@ if (!existsSync(join(REPO, 'dist', 'index.html'))) {
   console.error('No dist/ — run `npm run build` first.')
   process.exit(2)
 }
-const server = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), 'preview', '--port', String(PORT), '--strictPort'], { cwd: REPO, stdio: 'ignore' })
+// --host 127.0.0.1: vite's default binds the loopback *name*, which resolves
+// to ::1 on some machines, and the probe below then times out against
+// 127.0.0.1 and reports the server never started. Same fix as its siblings.
+const server = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { cwd: REPO, stdio: 'ignore' })
 process.on('exit', () => { try { server.kill('SIGTERM') } catch {} })
 
 const until = Date.now() + 20000
@@ -95,7 +98,10 @@ async function seeded(ctx, { ios = false } = {}) {
   // collection the banner exists to protect.
   check('ios: warns the installed app starts empty', /starts empty/i.test(body))
   check('ios: says storage is separate from Safari', /separate storage/i.test(body))
-  check('ios: tells them to import the backup after installing', /Import/.test(body))
+  // Which route back it names depends on the bundle — "Collection → Import"
+  // without Drive, "Settings → Restore from Drive" with it. Assert that it
+  // names one, not which: this harness runs against both builds.
+  check('ios: tells them how to get the backup back after installing', /Import|Restore from Drive/i.test(body), body.slice(0, 120))
   // The primary iOS action must be a BACKUP, never the install — the exact
   // label depends on whether Drive is configured ("Back up to Drive" vs
   // "Save a file"), so assert the intent, not the wording.
@@ -113,7 +119,10 @@ async function seeded(ctx, { ios = false } = {}) {
   check('ios: Save backup downloads a real backup file', /^cardstock-backup-.*\.json$/.test(name), name || 'no download fired')
   check('ios: banner stays up after saving (install is step two)', await page.locator('.installtip').isVisible().catch(() => false))
 
-  await page.locator('.installtip__dismiss').click()
+  // By label, never by class: `installtip__dismiss` is secondary *styling*, not
+  // the dismiss action. With Drive configured the file-backup button moves into
+  // that same class and the selector matches two nodes.
+  await page.getByRole('button', { name: /^(Done|Not now)$/ }).click()
   await page.waitForTimeout(300)
   check('ios: dismiss hides it', !(await page.locator('.installtip').isVisible().catch(() => false)))
   await page.reload({ waitUntil: 'load' })
