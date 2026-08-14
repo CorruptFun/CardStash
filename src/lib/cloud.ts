@@ -83,7 +83,18 @@ function saveSession(next: CloudSession | null): void {
 }
 
 export function signedInAs(): string | null {
-  return loadSession()?.email ?? null
+  return loadSession()?.email || null
+}
+
+/**
+ * Whether a session exists at all, which is NOT the same question as
+ * `signedInAs()`. The OAuth fragment carries tokens but no identity, so a
+ * Google sign-in produces a perfectly valid session with an empty email —
+ * and a UI that gates on the email alone puts the user back on the sign-in
+ * screen while signed in, with no way forward.
+ */
+export function isSignedIn(): boolean {
+  return loadSession() !== null
 }
 
 export function hasVaultKey(): boolean {
@@ -197,7 +208,7 @@ export function startGoogleSignIn(): void {
  * the fragment, so this must run before the router reads it, and must clear
  * what it consumed. Returns true if a session was adopted.
  */
-export function adoptOAuthRedirect(): boolean {
+export async function adoptOAuthRedirect(): Promise<boolean> {
   const hash = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash
   if (!hash.includes('access_token=')) return false
   const params = new URLSearchParams(hash)
@@ -213,7 +224,22 @@ export function adoptOAuthRedirect(): boolean {
     userId: '',
   })
   history.replaceState(null, '', `${location.pathname}${location.search}#/collection`)
+  // The fragment has no identity in it, so ask who this is before anything
+  // renders. One request, and only ever on the redirect itself — an ordinary
+  // boot returns above without touching the network.
+  await fillIdentity().catch(() => {})
   return true
+}
+
+/** Fill in the email/id an OAuth session arrives without. Best-effort: a
+ * failure here costs a name in the UI, never the session itself. */
+async function fillIdentity(): Promise<void> {
+  const current = loadSession()
+  if (!current || (current.email && current.userId)) return
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: authHeaders(current.accessToken) })
+  if (!res.ok) return
+  const user = (await res.json()) as { id?: string; email?: string }
+  saveSession({ ...current, email: user.email || current.email, userId: user.id || current.userId })
 }
 
 /* -------------------------------------------------------------------- vault */
