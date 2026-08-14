@@ -75,5 +75,20 @@ function serviceWorker(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [react(), ocrAssets(), serviceWorker()],
-  build: { assetsInlineLimit: 0 },
+  build: {
+    assetsInlineLimit: 0,
+    /**
+     * The 500 kB default is a false alarm here, and silencing it is the
+     * considered answer rather than the lazy one (docs/roadmap.md round 5).
+     * The main chunk is ~630 kB raw but ~200 kB gzipped, and the service worker
+     * precaches it as ONE build-keyed unit that is then served from cache
+     * offline — so splitting buys nothing on repeat visits and actively costs
+     * robustness: precache is all-or-nothing for critical assets, so more
+     * chunks means more ways for a half-installed shell to become a
+     * permanently blank offline launch (decision 8). The genuinely large
+     * payload is the ~11 MB OCR engine, already excluded from precache and
+     * fetched only by devices that actually scan.
+     */
+    chunkSizeWarningLimit: 800,
+  },
 })

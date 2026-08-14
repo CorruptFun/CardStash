@@ -129,7 +129,25 @@ export interface CollectionItem {
   forTrade?: number
   note?: string
   addedAt: number
+  /**
+   * When this row last changed, stamped by a Dexie hook on every create and
+   * update (db.ts v7). Optional only because rows written by builds before v7
+   * predate it; the v7 upgrade backfills them from `addedAt`. This is the
+   * left-hand side of any future three-way merge — see docs/roadmap.md round 3.
+   */
+  updatedAt?: number
   card: Card
+}
+
+/**
+ * A row the user deliberately deleted. Exists because absence is ambiguous: a
+ * device that deleted a card and a device that never owned it are otherwise
+ * indistinguishable, so a union merge would resurrect everything thrown away.
+ */
+export interface Tombstone {
+  /** The deleted CollectionItem's id. */
+  id: string
+  at: number
 }
 
 export type DeckBoard = 'main' | 'side' | 'extra'

@@ -1,7 +1,8 @@
 # Cardstock
 
-Camera-first TCG scanner & collection portfolio PWA (Magic · Pokémon · Yu-Gi-Oh):
-point your camera at a card, see what it's worth, track your collection like a
+Camera-first TCG scanner & collection portfolio PWA — Magic, Pokémon, Yu-Gi-Oh!,
+Riftbound, Lorcana, One Piece, Star Wars: Unlimited, Digimon and Gundam. Point
+your camera at a card, see what it's worth, track your collection like a
 portfolio, build decks — by hand, or with the AI deck builder.
 
 **Live: https://corruptfun.github.io/CardStash/** — open it on your phone and add
@@ -10,10 +11,13 @@ storage all work from there.
 
 ## How it works
 
-- **Scan** — live camera identification (Gemini vision with your own API key, or
-  on-device OCR fallback), price chip pops up, one tap to collect.
-- **Search** — Scryfall (Magic), pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!)
-  with prices, comps, printings and price history.
+- **Scan** — live camera identification that runs **entirely on your device**:
+  text recognition reads the card name and the collector line, a pixel check
+  spots foil sheen, price chip pops up, one tap to collect. No image ever leaves
+  the phone, no account and no API key are needed, and it works offline.
+- **Search** — Scryfall (Magic), pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!),
+  Lorcast (Lorcana) and TCGplayer data via TCGCSV (Riftbound, One Piece, Star
+  Wars: Unlimited, Digimon, Gundam) — with prices, comps, printings and history.
 - **Collection** — portfolio value, 30-day insights, cost basis / P&L, movers,
   CSV import/export, JSON backups.
 - **Decks** — build by hand from search or your collection, assign cards you own
@@ -36,10 +40,19 @@ storage all work from there.
   trades arrive in-app instead of by link. Off by default, one tap to leave.
   See [`server/README.md`](server/README.md).
 
-Everything is stored locally (IndexedDB). No accounts, no server required — API
-keys live on-device and are sent only to their own services. Social works
-serverlessly by default: a share link *is* the data (compressed into the URL),
-so nothing is published anywhere unless you send it to someone.
+- **Backup (optional)** — keep a daily copy of everything in **your own Google
+  Drive**, in a private folder only this app can see. Your browser talks to
+  Google directly; we host nothing and never see the file. Especially worth it
+  on iPhone, where Safari deletes the data of sites you haven't opened in about
+  a week.
+
+Everything is stored locally (IndexedDB). **No accounts and no server required**
+— that stays true however far the app grows: scanning, your collection, decks
+and link-based sharing all work offline with nothing signed in. API keys live
+on-device and are sent only to their own services. Social works serverlessly by
+default: a share link *is* the data (compressed into the URL), so nothing is
+published anywhere unless you send it to someone. The optional extras — Drive
+backup, live sync — are things you switch on, never things you're switched into.
 
 ## Documentation
 

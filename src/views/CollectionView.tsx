@@ -20,6 +20,7 @@ import {
   updateDeck,
 } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
+import { backupToDrive, isDriveConfigured } from '../lib/drive'
 import { GAMES, GAME_SHORT, FINISH_LABEL } from '../lib/games'
 import { collectionToCsv, parseCollectionCsv, type CsvImportRow } from '../lib/importexport'
 import { valueWindow } from '../lib/portfolio'
@@ -117,6 +118,7 @@ export function CollectionView() {
   const toast = useUi((s) => s.toast)
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
   const pokemonKey = useSettings((s) => s.pokemonKey)
+  const driveOn = useSettings((s) => s.driveBackup)
   const [gameFilter, setGameFilter] = useState<Game | 'all'>('all')
   const [filterText, setFilterText] = useState('')
   const [filter, setFilter] = useState('')
@@ -301,6 +303,21 @@ export function CollectionView() {
     setDataOpen(false)
   }
 
+  /** Interactive, so a lapsed Google session can re-consent from this tap. */
+  const backupToDriveNow = async () => {
+    setDataOpen(false)
+    setBusyText('Backing up to Drive…')
+    try {
+      await backupToDrive(true)
+      if (!driveOn) useSettings.getState().set({ driveBackup: true })
+      toast('Backed up to your Google Drive', 'success')
+    } catch (err: any) {
+      toast(err?.message ?? 'Drive backup failed', 'error')
+    } finally {
+      setBusyText(null)
+    }
+  }
+
   const importFile = async (file: File) => {
     try {
       const text = await readFileText(file)
@@ -445,6 +462,8 @@ export function CollectionView() {
           onJson={exportJson}
           onImport={() => fileRef.current?.click()}
           onRefresh={refreshAllPrices}
+          onDrive={backupToDriveNow}
+          driveOn={driveOn}
         />
         <input
           ref={fileRef}
@@ -641,6 +660,8 @@ export function CollectionView() {
         onJson={exportJson}
         onImport={() => fileRef.current?.click()}
         onRefresh={refreshAllPrices}
+        onDrive={backupToDriveNow}
+        driveOn={driveOn}
         csvScope={selectionLegend}
       />
       <input
@@ -698,6 +719,8 @@ function DataMenu({
   onJson,
   onImport,
   onRefresh,
+  onDrive,
+  driveOn,
   csvScope = 'spreadsheet-friendly',
 }: {
   open: boolean
@@ -706,6 +729,8 @@ function DataMenu({
   onJson: () => void
   onImport: () => void
   onRefresh: () => void
+  onDrive: () => void
+  driveOn: boolean
   csvScope?: string
 }) {
   return (
@@ -729,6 +754,17 @@ function DataMenu({
             Export backup <em>full JSON — collection, decks, history</em>
           </span>
         </button>
+        {/* Only when the build can actually do it — a button that cannot work
+            is worse than no button (same rule as the upload control). */}
+        {isDriveConfigured() && (
+          <button className="datamenu__opt" onClick={onDrive}>
+            <Icon name="refresh" size={18} />
+            <span>
+              {driveOn ? 'Back up to Drive now' : 'Back up to Google Drive'}{' '}
+              <em>{driveOn ? 'a daily copy already goes to your Drive' : 'a daily copy in your own Drive — set up in Settings'}</em>
+            </span>
+          </button>
+        )}
         <button className="datamenu__opt" onClick={onRefresh}>
           <Icon name="refresh" size={18} />
           <span>

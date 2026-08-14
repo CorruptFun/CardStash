@@ -17,6 +17,7 @@ import type {
   ProfilePayload,
   ReplyPayload,
   ScanRecord,
+  Tombstone,
   TradeRecord,
   TradeStatus,
   WantRow,
@@ -43,6 +44,7 @@ class CardstockDB extends Dexie {
   friends!: Table<Friend, string>
   trades!: Table<TradeRecord, string>
   wants!: Table<WantRow, string>
+  tombstones!: Table<Tombstone, string>
 
   constructor() {
     super('cardstock')
@@ -74,7 +76,70 @@ class CardstockDB extends Dexie {
     })
     // v6: want list (card-level, keyed by game+normalized name).
     this.version(6).stores({ wants: 'key, game, addedAt' })
+    /**
+     * v7: the two things a future merge cannot be built without — when a row
+     * last changed, and the fact that a row was deleted rather than never
+     * existing.
+     *
+     * This lands well before hosted sync (docs/roadmap.md round 3) on purpose.
+     * `updatedAt` backfills from `addedAt` here, which is a sane lower bound —
+     * but every edit made between today and the day sync ships is an edit a
+     * three-way merge cannot see, so the window is worth closing early rather
+     * than cheaply.
+     *
+     * Tombstones exist because absence is ambiguous. Without them a device
+     * that deleted a row and a device that never had it look identical, and a
+     * union merge — which is what first-sync must be, see the ManaBox footgun
+     * in the roadmap — silently resurrects everything the user threw away.
+     */
+    this.version(7)
+      .stores({
+        collection: 'id, cardId, game, name, addedAt, updatedAt',
+        tombstones: 'id, at',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('collection')
+          .toCollection()
+          .modify((item: CollectionItem) => {
+            if (item.updatedAt == null) item.updatedAt = item.addedAt
+          })
+      })
+
+    /**
+     * Stamped by hook rather than at the ~14 call sites that write collection
+     * rows. A hook cannot be forgotten by the next write path somebody adds,
+     * which is the entire difference between a seam and a game of whack-a-mole.
+     * Both hooks are same-table, so they never widen a transaction's scope.
+     */
+    this.collection.hook('creating', (_id, item) => {
+      const row = item as CollectionItem
+      if (row.updatedAt == null) row.updatedAt = row.addedAt ?? Date.now()
+    })
+    this.collection.hook('updating', (mods) => {
+      // A no-op update shouldn't bump the clock — it would make an untouched
+      // row look newer than the device that genuinely changed it.
+      if (!mods || typeof mods !== 'object' || !Object.keys(mods).length) return
+      if ('updatedAt' in (mods as Record<string, unknown>)) return
+      return { updatedAt: Date.now() }
+    })
   }
+}
+
+/**
+ * Record that rows were deliberately deleted. Callers pass the ids they just
+ * removed, inside the same transaction, so a rolled-back delete cannot leave a
+ * tombstone claiming otherwise.
+ *
+ * Deliberately NOT written by `clearAllData()`: "erase everything on this
+ * device" is a local act, and turning it into 8,000 tombstones would make the
+ * next sync delete the user's collection everywhere else too. Erasing a device
+ * must never be a remote-wipe button nobody asked for.
+ */
+export async function tombstone(ids: string[]): Promise<void> {
+  if (!ids.length) return
+  const at = Date.now()
+  await db.tombstones.bulkPut(ids.map((id) => ({ id, at })))
 }
 
 export const db = new CardstockDB()
@@ -181,7 +246,10 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
 
 export async function setItemQty(id: string, qty: number): Promise<void> {
   if (qty <= 0) {
-    await db.collection.delete(id)
+    await db.transaction('rw', [db.collection, db.tombstones], async () => {
+      await db.collection.delete(id)
+      await tombstone([id])
+    })
     return
   }
   await db.transaction('rw', db.collection, async () => {
@@ -201,12 +269,14 @@ export async function setItemForTrade(id: string, forTrade: number): Promise<voi
 }
 
 export async function removeCopies(id: string, count: number): Promise<void> {
-  await db.transaction('rw', db.collection, async () => {
+  await db.transaction('rw', [db.collection, db.tombstones], async () => {
     const item = await db.collection.get(id)
     if (!item) return
     const left = item.qty - count
-    if (left <= 0) await db.collection.delete(id)
-    else await db.collection.update(id, { qty: left, forTrade: tradeCount(item.forTrade, left) })
+    if (left <= 0) {
+      await db.collection.delete(id)
+      await tombstone([id])
+    } else await db.collection.update(id, { qty: left, forTrade: tradeCount(item.forTrade, left) })
   })
 }
 
@@ -219,7 +289,7 @@ export async function updateItem(
   id: string,
   patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade'>>,
 ): Promise<CollectionItem | null> {
-  return db.transaction('rw', db.collection, async () => {
+  return db.transaction('rw', [db.collection, db.tombstones], async () => {
     const item = await db.collection.get(id)
     if (!item) return null
     const edited: CollectionItem = { ...item, ...patch }
@@ -250,12 +320,19 @@ export async function updateItem(
     }
     await db.collection.put(merged)
     await db.collection.delete(id)
+    // A row absorbed into another is genuinely gone from this device, so it
+    // tombstones like any other delete — otherwise a merge re-creates it and
+    // the user's quantities double.
+    await tombstone([id])
     return merged
   })
 }
 
 export async function removeItems(ids: string[]): Promise<void> {
-  await db.collection.bulkDelete(ids)
+  await db.transaction('rw', [db.collection, db.tombstones], async () => {
+    await db.collection.bulkDelete(ids)
+    await tombstone(ids)
+  })
 }
 
 /* --- friends & trades (social) ------------------------------------------- */
@@ -347,7 +424,7 @@ export interface TradeApplyResult {
  */
 export async function applyTradeToCollection(trade: TradeRecord): Promise<TradeApplyResult> {
   const result: TradeApplyResult = { added: 0, removed: 0, short: 0 }
-  await db.transaction('rw', db.collection, db.trades, async () => {
+  await db.transaction('rw', db.collection, db.trades, db.tombstones, async () => {
     for (const row of trade.give) {
       let left = row.qty
       const candidates = (await db.collection.where('cardId').equals(row.cardId).toArray())
@@ -361,8 +438,10 @@ export async function applyTradeToCollection(trade: TradeRecord): Promise<TradeA
         if (left <= 0) break
         const take = Math.min(left, item.qty)
         const qty = item.qty - take
-        if (qty <= 0) await db.collection.delete(item.id)
-        else await db.collection.update(item.id, { qty, forTrade: tradeCount((item.forTrade ?? 0) - take, qty) })
+        if (qty <= 0) {
+          await db.collection.delete(item.id)
+          await tombstone([item.id])
+        } else await db.collection.update(item.id, { qty, forTrade: tradeCount((item.forTrade ?? 0) - take, qty) })
         left -= take
         result.removed += take
       }
@@ -723,9 +802,13 @@ export async function importBackup(raw: unknown): Promise<void> {
   const backup = sanitizeBackup(raw)
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants],
+    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants, db.tombstones],
     async () => {
       await db.collection.bulkPut(backup.collection)
+      // Restoring a row is the user un-deleting it. Leave the tombstone in
+      // place and the next sync would dutifully delete it again — the restore
+      // would appear to work and then quietly undo itself.
+      await db.tombstones.bulkDelete(backup.collection.map((item) => item.id))
       await db.decks.bulkPut(backup.decks)
       await db.deckCards.bulkPut(backup.deckCards)
       await db.history.bulkPut(backup.history)
@@ -739,9 +822,12 @@ export async function importBackup(raw: unknown): Promise<void> {
 export async function clearAllData(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades, db.wants],
+    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades, db.wants, db.tombstones],
     async () => {
       await Promise.all([
+        // Tombstones are cleared, never written, by an erase — see tombstone().
+        // "Erase this device" must not become a remote wipe.
+        db.tombstones.clear(),
         db.collection.clear(),
         db.decks.clear(),
         db.deckCards.clear(),
