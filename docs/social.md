@@ -1,0 +1,206 @@
+# Friends, trades and sync
+
+## The stance: serverless by default
+
+Everything social works with **no server at all**, and that path must keep
+working. A share *is* the data: a profile snapshot compressed into a URL
+fragment, or the same JSON as a file. Nothing is published anywhere unless the
+user sends it to someone.
+
+Live sync (`lib/sync.ts` + `server/`) is an **opt-in overlay** on top of that,
+not a replacement. With `syncOn` false, nothing in `sync.ts` runs. Never make
+links or files a second-class citizen, and never route them through a server.
+
+Everything decoded from a link, a file, a backup or a server response is
+**untrusted** and goes through the sanitizers in `social.ts`. There is one
+validation implementation, and this is it.
+
+## Identity
+
+`ensureProfileId()` mints a `uid()` on first share and keeps it forever.
+`myProfile()` returns `{ id, name, note, scope }` from settings. There are no
+accounts and no recovery: clearing browser storage loses the id (and, with live
+sync, the ability to republish under it).
+
+## Payloads
+
+Three kinds, all carrying `app: 'cardstock-social', v: 1`:
+
+| Kind | Built by | Contents |
+| ---- | -------- | -------- |
+| `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]` |
+| `trade` | `buildTradePayload(trade, me)` | `id`, `at`, `from`, `to?`, `note?`, `offer` (what the sender hands over), `want` (what they want back) |
+| `reply` | `buildReplyPayload(trade, me, status, note)` | `id`, `at`, `from`, `status: accepted \| declined`, `note?` |
+
+**Perspective flips at the wire.** A `TradeRecord` stores `give`/`get` from the
+local user's point of view. `buildTradePayload` sends `give` as `offer`;
+`tradeFromPayload` turns a received `offer` into the receiver's `get` and the
+`want` into their `give`. Get this backwards and both sides see the trade
+inverted.
+
+### Share scope
+
+`shareableItems(items, scope)` filters what travels: rows with `qty > 0` and
+never an **opened** sealed product.
+
+- `scope: 'trade'` (default) — only rows with `forTrade > 0`, and the shared
+  `qty` is set to the for-trade count. Your binder shows what you'll actually
+  trade, not what you own.
+- `scope: 'all'` — every row at full quantity.
+
+`SharedCard.price` is the finish's market unit **without** the condition factor
+applied; `sharedRowValue()` multiplies it in on the viewer's side. Both sides
+therefore agree on the maths even if their app versions differ.
+
+## Wire format
+
+```
+link:  <origin><path>#/x?d=<blob>
+blob:  'D' + base64url(deflate-raw(JSON))     ← normal
+       'J' + base64url(JSON)                   ← fallback where CompressionStream is missing
+file:  pretty-printed JSON, the same envelope
+```
+
+`decodeShareText()` accepts any of: a full link, a bare blob, file JSON, or a
+sync-server binder response (`{updatedAt, payload}` — it unwraps `payload` so a
+server endpoint can be pasted in like any other link).
+
+`LONG_LINK_CHARS = 20_000` is the point past which a link stops pasting cleanly
+into chat apps; the UI offers the file route beyond it.
+
+Hosted refresh: `fetchSharedProfile(url)` fetches a raw URL (a GitHub Gist raw
+link is the documented example — the host must allow cross-site reads) and
+decodes it as a profile. A friend imported that way keeps its `sourceUrl`, which
+is what makes one-tap refresh possible.
+
+## Wants and matchmaking
+
+Wants are **card-level**: `wantKeyFor(game, name)` → `` `${game}|${normalized
+name}` ``. Any printing matches. Matchmaking compares want *keys* on both sides
+— never card ids — so "I want a Charizard" matches their Charizard from any set.
+
+Wants travel inside a profile share, so both sides can see matches: cards of
+theirs you're hunting, and cards of yours they're hunting.
+
+## Friends
+
+`upsertFriendFromProfile(payload, sourceUrl?)` imports or refreshes a friend.
+`friendFromProfile` computes the row-level diff against the previous snapshot
+(`snapshotKey` = cardId + finish + condition + set + number) and stores it as
+`lastDelta` — the "+3 / −1 since last refresh" line. `addedAt` and `sourceUrl`
+survive refreshes; `exportedAt` (their own stamp) is the freshness test used by
+the sync poller so a re-publish of identical content doesn't churn local rows.
+
+Removing a friend leaves trades intact — a trade carries its own copy of the
+name and cards.
+
+## Trades
+
+Flow with **no server**:
+
+1. Propose — `TradeView`/`TradeComposer` builds a `TradeRecord` (direction
+   `out`, status `proposed`), then `ShareActions` hands over the link/file.
+2. The other side opens `#/x?d=…` → `IngestView` previews it → saving calls
+   `recordIncomingTrade` (direction `in`). A proposal they have already answered
+   is kept, not overwritten.
+3. They accept or decline; that produces a **reply** link.
+4. The proposer opens the reply link. `IngestView` applies it immediately —
+   the link *is* the answer — via `applyTradeReply`, which refuses to reopen a
+   trade that is already `completed` or `canceled`.
+5. When the physical cards actually change hands, `applyTradeToCollection`
+   books it: given copies leave (exact printing first, then for-trade rows),
+   received copies arrive as normal rows, the trade flips to `completed` with
+   `appliedAt`. Copies the collection no longer holds are reported as `short`
+   rather than blocking the booking.
+
+## Sanitization contract
+
+`sanitizePayload(raw)` is the only door. Rules:
+
+- an `app` field, if present, must equal `cardstock-social`;
+- `kind` must be one of the three; anything else throws `NOT_SOCIAL`;
+- a trade with neither an offer nor a want is rejected;
+- strings are trimmed and length-capped (name 60, note 400, cardId 160, card
+  name 200, setName 120, number 32, rarity 40, image URL 500);
+- `finish` and `condition` are validated against the enums, defaulting to
+  `nonfoil` / `NM`; the game is derived from the card id's prefix and must be a
+  known game;
+- quantities clamp to `[1, 9999]`, `forTrade` clamps to `[0, qty]`;
+- prices must be finite, `> 0` and `< 1_000_000`, rounded to cents;
+- timestamps outside 2001…now+1y are replaced with "now";
+- images must be `https://` — anything else is dropped;
+- collection caps: 8,000 profile cards, 400 cards per trade side, 2,000 wants.
+
+`sanitizeFriendRecord`, `sanitizeTradeRecord` and `sanitizeWantRecord` are the
+stored-row equivalents, reused by backup import so a backup file gets exactly
+the same treatment as a pasted link.
+
+---
+
+# Live sync (optional)
+
+## Client (`lib/sync.ts`)
+
+Off unless `syncOn` **and** `syncUrl` are set. `checkSyncServer(url)` verifies
+`GET /v1/health` returns `app: 'cardstock-sync'` before the address sticks.
+
+The loop (`startSyncLoop`) polls every 20 s, only while the document is visible,
+plus once on becoming visible and 2 s after boot. Each `syncNow()`:
+
+1. **publish** — `buildProfilePayload` from the live collection + wants, hashed
+   minus its timestamp; skipped when nothing changed since the last publish;
+2. **pull friends** — re-read every followed binder, apply only when their
+   `at` is newer than the stored `exportedAt`; a friend who hasn't published
+   there yet is normal, not an error;
+3. **drain inbox** — `GET /v1/inbox/:id?since=<cursor>`; trades become records,
+   replies update existing ones; junk items are skipped, never fatal; the
+   cursor advances to the newest item seen.
+
+`deviceToken()` mints and stores a `syncToken` on first use — it is what proves
+this device owns its profile id. `resetSyncState()` clears the publish hash and
+cursor when switching servers or identities.
+
+**Every response is re-sanitized.** A hostile or buggy server can only ever hand
+the app a well-formed profile/trade/reply.
+
+## Server (`server/sync-server.mjs`)
+
+Zero dependencies, plain `node`, state in a single JSON file at
+`server/data/state.json` (gitignored; delete to reset). Run with `npm run sync`
+(`-- --port 9000` to change the port); it prints the localhost and LAN addresses
+to hand out.
+
+| Method | Path | Auth | Purpose |
+| ------ | ---- | ---- | ------- |
+| GET | `/v1/health` | — | Identify the server (`app`, `v`, binder count). |
+| GET | `/v1/directory` | — | Who has published a binder here (id, name, updatedAt, card/want counts). |
+| PUT | `/v1/binders/:id` | owner token | Publish my binder. Payload must be a `profile` whose `id` matches the path. |
+| GET | `/v1/binders/:id` | — | Read a published binder. |
+| POST | `/v1/inbox/:id` | — | Drop a trade proposal or reply for someone. |
+| GET | `/v1/inbox/:id?since=` | owner token | Drain my inbox. |
+
+**Ownership is trust-on-first-use.** The first device to `PUT` a profile id
+claims it with a SHA-256 hash of its device token; only that token can publish
+again or read that inbox. Anyone who knows an id can *send* a trade to it —
+exactly as anyone can send you a link. An unclaimed id's inbox is readable by
+whoever asks, because nothing has been published under it yet and there is no
+owner to protect.
+
+Limits: 4 MB bodies, 500 profiles, 200 inbox items per id, 30-day inbox TTL,
+debounced atomic writes (temp file + rename). Profile ids must match
+`[A-Za-z0-9_-]{6,64}`. CORS is wide open (`*`) by design — it is a LAN tool.
+
+### Deliberate scope
+
+This is a LAN/dev convenience server, not a hosted service:
+
+- **No transport security.** Plain HTTP, tokens in headers. Fine on your own
+  network; don't port-forward it.
+- **No accounts or recovery.** Losing the device token means losing the ability
+  to republish under that profile id.
+- **It trusts the network it's on.** Anyone who can reach the port can read
+  published binders and the directory.
+
+The route/table shape (`binders`, `inbox`) deliberately matches the eventual
+hosted backend, so moving to Postgres/Supabase with real auth is a storage swap
+rather than a client rewrite.
