@@ -79,7 +79,10 @@ if (args.detect) {
     const file = join(OUT, `detect-${photo.key}.jpg`)
     writeFileSync(file, Buffer.from(out.image.split(',')[1], 'base64'))
     const truth = photo.cards ? photo.cards.length : 1
-    console.log(`${photo.key.padEnd(32)} found ${String(out.found.length).padStart(2)} / ${truth} truth  ${out.ms}ms  ${file}`)
+    console.log(
+      `${photo.key.padEnd(30)} found ${String(out.found.length).padStart(2)}/${truth}` +
+        `  lineRatio=${out.lineRatio ?? '?'}  ${out.ms}ms  ${file}`,
+    )
   }
   await browser.close()
   vite.kill('SIGTERM')

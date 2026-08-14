@@ -512,3 +512,27 @@ result seems absurd, check this list before writing code.
     partly a property of the ingest tool. Pages now ingest at PAGE_MAX_EDGE
     (3200). Rule: when a tool normalises an input, check that its constant
     matches the consumer that will actually read it.
+54. **Two obvious fixes for the sideways page, both measured, both rejected —
+    and the measurement is the deliverable.** The gap in lesson 52 has two
+    natural fixes and neither survives contact:
+    - *Decide the orientation, then rotate the frame.* Nothing available
+      decides it. Total border score is not a discriminator: on a KNOWN-UPRIGHT
+      page the turned frame scored HIGHER (14.09 vs 11.61), because a grid of
+      cards has strong structure whichever way you look at it — and a
+      score-margin rule misfired `turns=1` on upright SINGLE cards, which would
+      have broken ordinary uploads. `lineRatio` is measured and reliable for
+      one card (46/46 sideways, 0/246 upright) and does NOT generalise to a
+      page: 0.45 on a genuinely sideways page, but 1.23 and 1.47 on two others
+      just as turned, because the binder's own rows outvote the card text.
+    - *Propose both aspect bands and let the existing arbitration sort it out.*
+      It cannot. Containment suppression (lesson 35) and the size cluster both
+      assume ONE card shape; landscape boxes spanning two adjacent cards are
+      larger, get taken first, and swallow the correct ones. The known-good
+      page fell **8/8 → 4/8** while the sideways page did not improve at all,
+      and detection cost doubled.
+    Rule, again: a detector's arbitration rules encode assumptions as strong as
+    its scoring, and widening what it proposes can violate them. The lead that
+    remains is a structural decision made ONCE per page — the right way up puts
+    boxes on a regular lattice and the wrong way scatters them, and
+    `completeGrid` already infers that lattice — rather than a per-rectangle
+    shape guess. Ship nothing until it beats 8/8 on the upright page.
