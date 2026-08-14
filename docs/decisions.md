@@ -223,10 +223,15 @@ Settings → Export, by hand.
 discover the hard way:
 
 - **Loss.** A lost, wiped or reset device takes the collection with it. On iOS
-  the bar is even lower: WebKit deletes script-writable storage for
-  *uninstalled* sites after ~7 days of no visits, so inactivity alone can do
-  it. `InstallPrompt.tsx` (v0.12.0) addresses that half — see
-  `pwa-build-deploy.md` — but installing cannot protect a device that is gone.
+  the bar is far lower, and the shape of it matters: WebKit evicts
+  script-writable storage for an origin unused for ~7 days, `persist()` is
+  granted only to Home Screen web apps, **and** a Home Screen web app gets
+  storage partitioned away from Safari. So durable storage on iOS requires
+  installing, and installing starts from an empty collection. There is no
+  in-app path from one to the other — only export → install → import, by hand.
+  `InstallPrompt.tsx` (v0.12.0) walks the user through exactly that, but a
+  three-step manual migration is a workaround for a missing capability, not a
+  solution to it.
 - **One device.** Scanning is a phone job; organising a large collection is a
   desktop job. Today those are two unrelated collections, because nothing
   carries rows between them. The app is a fine desktop *app* already — it is a
@@ -235,7 +240,9 @@ discover the hard way:
 **Options, ordered by how well they preserve local-first.** None is chosen yet.
 
 1. **Export/import by hand** — what exists. Zero infrastructure, zero accounts,
-   and it works offline. Costs the user a deliberate act they must remember.
+   and it works offline. Costs the user a deliberate act they must remember,
+   and it is the *only* thing standing between an iOS user and losing
+   everything at the moment they follow our own advice to install.
 2. **User-owned cloud storage** (Google Drive `appDataFolder`, Dropbox,
    OneDrive). The browser talks to the provider directly; the app hosts and
    stores nothing, and the data sits in the user's own account rather than

@@ -1,21 +1,35 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../lib/db'
+import { db, exportBackup } from '../lib/db'
+import { downloadFile } from '../lib/csv'
+import { ymd } from '../lib/util'
 import { IS_IOS, IS_STANDALONE } from '../lib/camera'
 import { useSettings } from '../lib/settings'
+import { guarded, useUi } from '../store/ui'
 
 /**
- * Why this banner exists, and why it is not just polish:
+ * Why this banner exists, and why the iOS copy is shaped so awkwardly:
  *
- * Everything a user scans lives in IndexedDB on their device. For a site the
- * user has NOT installed, WebKit's storage policy deletes script-writable
- * storage after ~7 days without a visit — so a collection scanned in one
- * sitting and left alone for two weeks can simply be gone. Installing to the
- * Home Screen exempts the app from that sweep. Chromium never evicts this
- * aggressively, but an installed app there is still the durable choice.
+ * Every scanned card lives in IndexedDB on one device. WebKit deletes
+ * script-writable storage for an origin with no user interaction in the last
+ * seven days of browser use — so a collection scanned in one sitting and left
+ * alone for two weeks can simply be gone.
  *
- * Installing does NOT protect against a lost or wiped device; only an export
- * does. The banner says both, because the install alone is a half-answer.
+ * `requestPersistence()` (called in main.tsx boot) is the documented exemption
+ * from that sweep, but WebKit grants it on heuristics that in practice mean
+ * *Home Screen web apps only*. In a plain Safari tab the request is refused,
+ * so on iOS installing is the only route to durable storage.
+ *
+ * And that route has a trap. A Home Screen web app gets a SEPARATE storage
+ * container from Safari — IndexedDB, localStorage, cookies and service worker
+ * registrations are all partitioned. Installing does not migrate anything: the
+ * app opens with an empty collection and the Safari copy stays behind, then
+ * gets evicted on the ordinary schedule. Prompting someone to install without
+ * saying that is a data-loss trap aimed squarely at the users with the most to
+ * lose, so on iOS the backup is the primary action and the install is step two.
+ *
+ * Chromium partitions nothing — an installed app shares the profile's storage
+ * for the origin — so there the install is safe and unqualified.
  */
 
 /**
@@ -34,8 +48,10 @@ interface InstallEvent extends Event {
 
 export function InstallPrompt() {
   const config = useSettings()
+  const toast = useUi((s) => s.toast)
   const [deferred, setDeferred] = useState<InstallEvent | null>(null)
   const [installed, setInstalled] = useState(false)
+  const [saved, setSaved] = useState(false)
   const count = useLiveQuery(() => db.collection.count(), [])
 
   useEffect(() => {
@@ -56,6 +72,18 @@ export function InstallPrompt() {
   }, [])
 
   const dismiss = useCallback(() => config.set({ installHintDismissed: true }), [config])
+
+  const saveBackup = useCallback(async () => {
+    const ok = await guarded(async () => {
+      downloadFile(`cardstock-backup-${ymd()}.json`, JSON.stringify(await exportBackup(), null, 1), 'application/json')
+      return true
+    }, 'Export')
+    if (!ok) return
+    // Don't dismiss — on iOS the backup is step one of three, and the steps
+    // for installing and importing have to survive the tap that saved it.
+    setSaved(true)
+    toast('Backup saved — keep it somewhere safe', 'success')
+  }, [toast])
 
   const install = useCallback(async () => {
     if (!deferred) return
@@ -78,31 +106,44 @@ export function InstallPrompt() {
   return (
     <div className="installtip" role="status">
       <div className="installtip__body">
-        <strong className="installtip__title">Keep your collection safe</strong>
+        <strong className="installtip__title">
+          {IS_IOS ? 'Back up before you install' : 'Keep your collection safe'}
+        </strong>
         {IS_IOS ? (
-          <p>
-            iPhone and iPad clear the data of websites you haven't opened in a while — including your scanned cards.
-            Adding Cardstock to your Home Screen stops that. Tap <ShareGlyph /> <b>Share</b>, then{' '}
-            <b>Add to Home Screen</b>.
-          </p>
+          <>
+            <p>
+              iPhone and iPad delete the data of websites you haven't opened in about a week — including your scanned
+              cards. Adding Cardstock to your Home Screen is the only way to stop that.
+            </p>
+            <p>
+              <b>The Home Screen app starts empty.</b> iOS gives it separate storage from Safari, so nothing you've
+              scanned here comes along on its own. Save a backup first, then:
+            </p>
+            <p className="installtip__steps">
+              <ShareGlyph /> <b>Share</b> → <b>Add to Home Screen</b> → open it → <b>Collection → Import</b> your backup.
+            </p>
+          </>
         ) : (
           <p>
             Installing Cardstock keeps your scanned cards from being cleared with your browsing data, and opens it in
-            its own window.
+            its own window. Your collection carries over.
           </p>
         )}
         <p className="installtip__note">
-          Either way, a device you lose takes its collection with it — Settings → Export saves a backup file.
+          A backup is worth keeping either way — a device you lose takes its collection with it.
         </p>
       </div>
       <div className="installtip__actions">
+        <button className={IS_IOS ? 'installtip__go' : 'installtip__dismiss'} onClick={saveBackup}>
+          {saved ? 'Save again' : 'Save backup'}
+        </button>
         {deferred && (
           <button className="installtip__go" onClick={install}>
             Install
           </button>
         )}
         <button className="installtip__dismiss" onClick={dismiss}>
-          {deferred ? 'Not now' : 'Got it'}
+          {saved ? 'Done' : 'Not now'}
         </button>
       </div>
     </div>

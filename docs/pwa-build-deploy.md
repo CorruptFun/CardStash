@@ -138,13 +138,28 @@ maskable 512, apple-touch). `index.html` carries the iOS meta tags
 Installing is not a nicety here — for a meaningful share of users it is the
 difference between keeping a collection and losing it.
 
-Every scanned card lives in IndexedDB on the device (`src/lib/db.ts`). For a
-site the user has **not** installed, WebKit's storage policy deletes
-script-writable storage after roughly seven days without a visit. A user who
-scans a shoebox in one sitting and doesn't reopen the app for two weeks can
-find it empty, having done nothing wrong. Adding the app to the Home Screen
-exempts it from that sweep. Chromium never evicts this aggressively, but an
-installed app there is still the durable choice, and it earns its own window.
+Every scanned card lives in IndexedDB on the device (`src/lib/db.ts`). WebKit
+deletes script-writable storage for an origin with no user interaction in the
+last seven days of browser use, so a shoebox scanned in one sitting and left
+alone for two weeks can be gone, the user having done nothing wrong.
+
+`requestPersistence()` (`db.ts`, called at the top of `boot()` in `main.tsx`)
+is the documented exemption from that sweep — but WebKit grants it on
+heuristics that in practice mean **Home Screen web apps only**. In a plain
+Safari tab the request is refused, so on iOS installing is the only route to
+durable storage.
+
+**And that route strands the data.** An iOS Home Screen web app gets a
+*separate storage container* from Safari: IndexedDB, localStorage, cookies,
+sessionStorage and service worker registrations are all partitioned. Installing
+migrates nothing. The app opens with an empty collection while the Safari copy
+stays behind and is evicted on the ordinary schedule. So on iOS the honest
+sequence is **export → install → import**, and the banner leads with the
+backup rather than the install.
+
+Chromium partitions nothing — an installed app shares the profile's storage for
+the origin — so there the install carries the collection over and is offered
+without qualification.
 
 `InstallPrompt.tsx` is the nudge. What it has to reconcile:
 
@@ -160,10 +175,12 @@ installed app there is still the durable choice, and it earns its own window.
 - **It waits for `MIN_CARDS_TO_PROMPT` (5) rows.** A banner on card #1 gets
   dismissed reflexively, and dismissal is permanent — the one chance is worth
   spending on someone who has something to lose.
-- **Installing is only half the answer, so the banner says so.** It points at
-  Settings → Export, because a device that is lost or wiped takes its
-  IndexedDB with it no matter how the app was installed. Nothing in the app
-  today puts a user's collection anywhere but that one device.
+- **Installing is only half the answer, so the banner says so.** Its Save
+  backup button calls `exportBackup()` directly (the same JSON the Collection
+  screen writes), and saving does not dismiss the banner, because on iOS the
+  backup is step one of three. A device that is lost or wiped takes its
+  IndexedDB with it no matter how the app was installed, and nothing in the app
+  today puts a collection anywhere but that one device.
 
 Suppressed whenever `IS_STANDALONE` is true, after `appinstalled`, once
 dismissed (`installHintDismissed` in settings), and on the scan and ingest

@@ -69,6 +69,7 @@ async function seeded(ctx, { ios = false } = {}) {
   const hasInstall = await page.locator('.installtip__go').isVisible().catch(() => false)
   check('chromium: banner shows for a seeded collection', shown, `${cards} rows in collection`)
   check('chromium: offers a real Install button', hasInstall)
+  check('chromium: says the collection carries over', /carries over/i.test(await page.locator('.installtip').innerText().catch(() => '')))
   check('chromium: no console errors', errs.length === 0, errs.join(' | '))
 
   // Install must invoke the stashed event, not navigate anywhere.
@@ -83,15 +84,28 @@ async function seeded(ctx, { ios = false } = {}) {
 
 // 2. iOS: no event ever fires, so the Share instructions are the whole path.
 {
-  const ctx = await browser.newContext({ ...devices['iPhone 13'] })
+  const ctx = await browser.newContext({ ...devices['iPhone 13'], acceptDownloads: true })
   const { page, errs } = await seeded(ctx, { ios: true })
   const shown = await page.locator('.installtip').isVisible().catch(() => false)
   const body = await page.locator('.installtip').innerText().catch(() => '')
   check('ios: banner shows with no beforeinstallprompt', shown)
   check('ios: gives Share -> Add to Home Screen steps', /Add to Home Screen/.test(body) && /Share/.test(body))
-  check('ios: shows no Install button it cannot honour', !(await page.locator('.installtip__go').isVisible().catch(() => false)))
-  check('ios: still points at Export for device loss', /Export/.test(body))
+  // The load-bearing one: a Home Screen web app gets storage partitioned away
+  // from Safari, so prompting to install WITHOUT warning strands the very
+  // collection the banner exists to protect.
+  check('ios: warns the installed app starts empty', /starts empty/i.test(body))
+  check('ios: says storage is separate from Safari', /separate storage/i.test(body))
+  check('ios: tells them to import the backup after installing', /Import/.test(body))
+  check('ios: offers the backup as the primary action', await page.locator('.installtip__go').innerText().then(t => /Save backup/i.test(t)).catch(() => false))
   check('ios: no console errors', errs.length === 0, errs.join(' | '))
+
+  // The backup must actually produce a file — the whole iOS flow depends on it.
+  const pending = page.waitForEvent('download', { timeout: 10000 }).catch(() => null)
+  await page.locator('.installtip__go').click()
+  const dl = await pending
+  const name = dl ? dl.suggestedFilename() : ''
+  check('ios: Save backup downloads a real backup file', /^cardstock-backup-.*\.json$/.test(name), name || 'no download fired')
+  check('ios: banner stays up after saving (install is step two)', await page.locator('.installtip').isVisible().catch(() => false))
 
   await page.locator('.installtip__dismiss').click()
   await page.waitForTimeout(300)

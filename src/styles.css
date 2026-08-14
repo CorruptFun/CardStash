@@ -1518,6 +1518,13 @@ button {
   color: var(--paper);
   font-weight: 600;
 }
+.installtip__steps {
+  padding: 7px 9px;
+  border-radius: var(--r-2);
+  background: var(--ink-050);
+  border: 1px solid var(--rule);
+  color: var(--paper-2);
+}
 .installtip__note {
   color: var(--paper-2);
   opacity: 0.78;
