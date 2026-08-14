@@ -285,12 +285,19 @@ client asks for. That sender is also capped at 2 emails per hour, which is
 unusable regardless. The failure is worth recognising because it does not look
 like this: the app reports something that reads like a rejected address.
 
-The project now sends through **Resend on `corrupt.solutions`** (SMTP
-`smtp.resend.com:465`, user `resend`, password is a Resend API key — kept at
-`~/.secrets/cardstash/resend`, never in the repo). That unlocked the templates,
-so both the confirmation and magic-link bodies now carry `{{ .Token }}`, and
-`mailer_otp_length` is 6 to match the UI's "six-digit" copy. Verified
-end to end: `/auth/v1/otp` → Resend → delivered.
+The project now sends through **Resend on `corrupt.solutions`** — SMTP
+`smtp.resend.com:465`, user `resend`, from `Cardstock
+<cardstock@corrupt.solutions>`; the password is a Resend API key kept at
+`~/.secrets/cardstash/resend` and never in the repo. That unlocked the
+templates, so both the confirmation and magic-link bodies now carry
+`{{ .Token }}`, and `mailer_otp_length` is 6 to match the UI's "six-digit"
+copy. The per-hour send cap was raised from 2 to 100 at the same time; 2 was
+low enough that a single user retrying would have locked themselves out.
+
+Verified with a real emailed code, not a synthesised one: the app sent from
+the sign-in screen, Resend reported it delivered, and typing the six digits it
+contained produced a session with both tokens. A rejected code toasts "Token
+has expired or is invalid" and leaves the user on the code screen to retry.
 
 If sign-in ever starts failing with what looks like an address error, check the
 sender before touching `cloud.ts`.
