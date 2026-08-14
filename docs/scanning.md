@@ -53,14 +53,23 @@ change that. What the app *can* control is how often it re-acquires:
 - `CAMERA_REPROMPTS_EACH_ACQUIRE` = iOS **and** standalone display mode.
 - On those platforms `releaseCamera()` **parks** the live stream for 25s instead
   of stopping it (torch forced off first). Reopening the scanner inside that
-  window — closing a card sheet, hopping back from another tab — adopts the
-  parked stream: no `getUserMedia`, no dialog, no warm-up. iOS suspends the
-  capture itself while hidden, so holding the track is cheap.
+  window adopts the parked stream: no `getUserMedia`, no dialog, no warm-up.
+  iOS suspends the capture itself while hidden, so holding the track is cheap.
 - Hiding the app suspends the *work* but keeps the session, then probes after
   2s: if the track is still unmuted (a platform that keeps capturing in the
   background) the camera is released outright for privacy.
 
 Do not "simplify" either of these back into stop/reacquire.
+
+**But parking is only for an interruption ON the scan screen.** The card sheet
+a scan opens is one — the user closes it and scans the next card. A tab hop is
+not, and neither is the page-review screen: both hand the camera back outright
+(`stop()` defaults to no park, and `endParkedCamera()` collects anything already
+parked), because the alternative is a lit OS camera indicator on a screen with
+no viewfinder. That trade is not close — dodging a permission dialog is not
+worth looking like the app films you on the Collection tab. The scan screen is
+never unmounted, so nothing releases the camera except this; `test:camera` is
+what keeps it honest.
 
 **Capture.** `captureFrame()` crops a region of the live video into a canvas
 capped at 1100px on the long edge. `captureFrameStacked()` averages 3 frames

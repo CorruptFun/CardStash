@@ -22,9 +22,20 @@ gate, reproduce every verdict twice — lives in
 Read it first. It exists because synthetic tests passed while real cards failed
 on-device.
 
-Two paths the matrix cannot reach have their own checks: the camera itself
-(`test:capture`) and the built bundle (`smoke-app.mjs`). Changes to `camera.ts`
-or the scan screen need those, not just the matrix.
+Three paths the matrix cannot reach have their own checks: what the camera
+captures (`test:capture`), when it is allowed to be *on* (`test:camera`), and
+the built bundle (`smoke-app.mjs`). Changes to `camera.ts` or the scan screen
+need those, not just the matrix.
+
+`test:camera` is the one that answers a question no pixel test can: the scan
+screen is never unmounted, so a camera released by the wrong code path keeps
+running behind another tab with the OS indicator lit. It drives the real app
+against a fake camera device and asserts on `MediaStreamTrack.readyState`,
+twice — once as an ordinary browser, once with the app fooled into thinking it
+is an iOS Home-Screen app (iPhone UA + `navigator.standalone`), which is the
+only configuration where `releaseCamera()` parks a live stream at all. Run it
+in both modes or it proves nothing; the bug it was written for was invisible in
+the first.
 
 ## Unit tests (`tests/unit/`)
 
@@ -187,6 +198,7 @@ npm run test:unit
 npm run test:photos         # real photographs — where wrong cards show up
 npm run build && node tests/harness/smoke-app.mjs
 npm run test:capture        # only if camera.ts or the scan screen changed
+npm run test:camera         # ditto — camera on/off lifecycle, both platforms
 npm run test:install        # only if the install banner or its triggers changed
 ```
 

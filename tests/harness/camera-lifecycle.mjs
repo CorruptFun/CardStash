@@ -30,7 +30,8 @@ const IPHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
 
 const findChromium = () =>
-  process.env.CHROMIUM_PATH ?? (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined)
+  process.env.CHROMIUM_PATH ??
+  (existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : chromium.executablePath())
 
 const failures = []
 const check = (ok, what, detail = '') => {
@@ -38,10 +39,15 @@ const check = (ok, what, detail = '') => {
   if (!ok) failures.push(what)
 }
 
-const vite = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), '--port', String(PORT), '--strictPort'], {
-  cwd: REPO,
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
+// `--host 127.0.0.1` is not decoration: vite's default binds the loopback name,
+// which on a machine that resolves `localhost` to ::1 leaves nothing listening
+// on 127.0.0.1 — and both the readiness probe and the route filter below are
+// written against that literal.
+const vite = spawn(
+  'node',
+  [join(REPO, 'node_modules/vite/bin/vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'],
+  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] },
+)
 let viteLog = ''
 vite.stdout.on('data', (d) => (viteLog += d))
 vite.stderr.on('data', (d) => (viteLog += d))

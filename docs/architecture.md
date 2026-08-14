@@ -122,8 +122,10 @@ Hash-based, parsed in `App.tsx` (`parseRoute`). No router library.
 Two behaviours worth knowing:
 
 - The scan screen is **never unmounted** — it is rendered inside a `hidden`
-  wrapper and receives `active`. That keeps the camera session and OCR workers
-  from being torn down on every tab hop. Every other view mounts/unmounts.
+  wrapper and receives `active`, so its scan tray, mode pills and gate state
+  survive a tab hop. Every other view mounts/unmounts. The flip side: nothing
+  tears the camera down for it, so `ScanView` releases it on `!active` itself
+  (see scanning.md §1) — an unmounted view would have got that for free.
 - Any hash change closes the card bottom sheet (`uiStore.closeSheet()`).
 
 ## State: three stores, three lifetimes

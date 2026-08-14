@@ -28,8 +28,9 @@ Hash routing parsed in `App.tsx`; no router library. The shell is a
 `<main>` plus a six-tab bottom nav (Scan · Search · Collection · Friends ·
 Decks · Settings), with `CardSheetHost` and `Toasts` mounted above everything.
 
-The scan screen stays mounted (hidden) so the camera session and OCR workers
-survive tab hops. Every hash change closes the sheet.
+The scan screen stays mounted (hidden) so its own state survives tab hops — the
+camera does not, and is released the moment the tab changes (scanning.md §1).
+Every hash change closes the sheet.
 
 ## The UI store (`src/store/ui.ts`)
 

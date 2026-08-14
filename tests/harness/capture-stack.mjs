@@ -18,10 +18,15 @@ import { chromium } from 'playwright-core'
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const PORT = Number(process.env.CAPTURE_TEST_PORT ?? 5199)
 
-const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
-  cwd: REPO,
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
+// `--host 127.0.0.1` is not decoration: vite's default binds the loopback NAME,
+// so on a machine where `localhost` resolves to ::1 nothing listens on
+// 127.0.0.1 — and every URL below is written against that literal. Without it
+// this exits "dev server never came up" on a perfectly healthy checkout.
+const vite = spawn(
+  'node',
+  [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'],
+  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] },
+)
 process.on('exit', () => {
   try {
     vite.kill('SIGTERM')
