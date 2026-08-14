@@ -53,6 +53,11 @@ npm run test:foil          # holographic foil sheen (foil/foil-worst)
 npm run test:foiltext      # foil on the NAME's glyphs (Ultra/Secret Rare)
 npm run test:photos        # real photographs (tests/harness/photos/)
 npm run test:capture       # real captureFrameStacked in a browser (noise ↓)
+node tests/harness/run-matrix.mjs --binders-only        # binder pages: the
+                                   # multi-card path end to end, graded against
+                                   # an unordered multiset of names
+node tests/harness/preview.mjs --detect                 # draw the detector's
+                                   # boxes — ALWAYS look, never trust the count
 node tests/harness/run-matrix.mjs \
   --games=pokemon,riftbound --degradations=clean,glare --mode=hinted \
   --keys=tauros-fa-secret --pages=3 --verbose          # fast slice (~1 min)

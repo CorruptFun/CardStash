@@ -5194,3 +5194,191 @@ button {
   flex: none;
   color: var(--up);
 }
+
+/* --- Multi-card scanning: progress overlay + review screen ---------------
+ * A binder page files ~9 rows from one confirmation, so the review screen is
+ * a full takeover rather than a sheet: the thumbnail has to sit beside the
+ * name at a size where a wrong card is obvious, and the confirm has to be
+ * somewhere you arrive at after scrolling past every row. */
+
+.pagescan {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  padding: var(--s6);
+  background: rgba(10, 9, 8, 0.86);
+  backdrop-filter: blur(6px);
+  text-align: center;
+}
+.pagescan strong {
+  font-size: 15px;
+  color: var(--text);
+}
+.pagescan__hint {
+  font-size: 12px;
+  color: var(--paper-3);
+}
+
+.binder {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.binder__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.binder__title h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.binder__title span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--paper-3);
+}
+.binder__list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--s2) 0 var(--s4);
+}
+
+.binderrow {
+  display: grid;
+  grid-template-columns: 30px 46px 1fr auto auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+/* Flagged rows read as "look at me", not as an error — most of them are
+ * right, they just weren't read confidently enough to tick on the user's
+ * behalf. */
+.binderrow--flagged {
+  background: linear-gradient(90deg, var(--warn-fill) 0%, transparent 60%);
+}
+.binderrow--on {
+  background: linear-gradient(90deg, var(--up-fill) 0%, transparent 60%);
+}
+.binderrow__tick {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-0);
+  border: 1.5px solid var(--line-2);
+  background: transparent;
+  color: var(--ink-000);
+}
+.binderrow--on .binderrow__tick {
+  background: var(--up);
+  border-color: var(--up);
+}
+.binderrow__tick:disabled {
+  opacity: 0.35;
+}
+.binderrow__thumb {
+  width: 46px;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+  border-radius: var(--r-0);
+  background: var(--surface-2);
+}
+.binderrow__body {
+  min-width: 0;
+}
+.binderrow__name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.binderrow__name--miss {
+  color: var(--paper-2);
+  font-weight: 450;
+  font-style: italic;
+}
+.binderrow__meta,
+.binderrow__warn {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-num);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--paper-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.binderrow__warn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warn);
+}
+.binderrow__retry {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-0);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--paper-2);
+}
+.binderrow__retry:disabled {
+  opacity: 0.5;
+}
+.binderrow__price {
+  font-family: var(--font-num);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.binder__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.binder__sum {
+  flex: 1;
+  min-width: 0;
+}
+.binder__sum strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.binder__sum span {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--paper-3);
+}
+.binder__foot .btn {
+  min-width: 42%;
+}

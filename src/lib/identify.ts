@@ -109,10 +109,41 @@ export interface IdentificationMeta {
   foil?: boolean
 }
 
+/**
+ * What one attempt may spend. The defaults are the single-card numbers, tuned
+ * for a user holding a phone over one card and willing to wait a few seconds
+ * for it — a slow miss beats a failure there.
+ *
+ * A page scan inverts that trade. Nine cards on the single-card budget is up
+ * to three minutes of sustained OCR on a device in someone's hand, which is a
+ * heat and battery problem long before it is a patience problem, so each card
+ * on a page gets a fraction and the breadth pays for the depth.
+ */
+export interface ScanBudget {
+  /** Wall clock for card-API lookups. */
+  lookupMs: number
+  /** Slow (>1.5s) lookups before the attempt stops exploring candidates. */
+  slowLookups: number
+  /** Ceiling on OCR escalation before the attempt drops to the collector path. */
+  ocrMs: number
+  /** Collector-line rescue passes (hinted mode only). */
+  cornerPasses: number
+}
+
+/**
+ * Per-card budget inside a page scan. Roughly a third of a single card's,
+ * which puts a nine-card page in the tens of seconds rather than the minutes
+ * the full budget would allow — and every card the user actually cares about
+ * can still be re-read at full budget from the review screen
+ * (`rescanPageCard`), which is where the depth belongs once there is a human
+ * looking at one row.
+ */
+export const PAGE_SCAN_BUDGET: ScanBudget = { lookupMs: 7_000, slowLookups: 2, ocrMs: 6_500, cornerPasses: 2 }
+
 export async function identifyFrame(
   capture: FrameCapture,
   hash: string,
-  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal } = {},
+  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal; budget?: ScanBudget } = {},
 ): Promise<IdentifyOutcome> {
   const mode = opts.mode ?? 'card'
   const config = settings()
@@ -172,7 +203,7 @@ export async function identifyFrame(
   const outcome =
     mode === 'sealed'
       ? await identifySealedFrame(capture.canvas, gameHint)
-      : await identifyViaOcr(capture.canvas, gameHint, opts.signal)
+      : await identifyViaOcr(capture.canvas, gameHint, opts.signal, opts.budget ?? DEFAULT_BUDGET)
   if (outcome.ok) {
     // Cache only well-evidenced hits: a collector-line-only identification
     // (confidence 0.7) must be re-derived per attempt, not re-served at
@@ -285,6 +316,9 @@ const CORNER_CONFIDENCE = 0.7
  * keep it tight enough that an unreadable card doesn't cook the phone. */
 const SOLE_EVIDENCE_PASS_BUDGET = 5
 
+/** The single-card budget: what an attempt spends when one card is in frame. */
+const DEFAULT_BUDGET: ScanBudget = { lookupMs: 20_000, slowLookups: 4, ocrMs: 18_000, cornerPasses: SOLE_EVIDENCE_PASS_BUDGET }
+
 /** Card-relative → frame-relative rect mapping for one crop refinement. */
 function mapThrough(refined: CropRefinement): (rect: OcrRect) => OcrRect {
   return (rect) => {
@@ -377,6 +411,7 @@ async function identifyViaOcr(
   frame: HTMLCanvasElement,
   gameHint: Game | undefined,
   signal?: AbortSignal,
+  budget: ScanBudget = DEFAULT_BUDGET,
 ): Promise<IdentifyOutcome> {
   /** Checked between passes: a stopped scanner must not keep escalating
    * OCR passes and lookups in the background. */
@@ -436,8 +471,8 @@ async function identifyViaOcr(
   // deep candidate exploration is the accuracy win, but lookups riding their
   // multi-second timeouts must not stretch one attempt into minutes — only
   // those count against the budget, plus a hard wall-clock deadline.
-  let slowLookupsLeft = 4
-  const lookupDeadline = Date.now() + 20_000
+  let slowLookupsLeft = budget.slowLookups
+  const lookupDeadline = Date.now() + budget.lookupMs
   const SLOW_LOOKUP_MS = 1_500
   // OCR escalation budget: two watchdog kills, or 18s of attempt, means this
   // frame's texture is pathological — more band passes won't read it, they
@@ -445,7 +480,7 @@ async function identifyViaOcr(
   // bounded) collector-line path still gets its chance.
   const timeoutsAtStart = ocrTimeouts()
   const attemptStarted = Date.now()
-  const outOfOcrRoad = () => ocrTimeouts() - timeoutsAtStart >= 2 || Date.now() - attemptStarted > 18_000
+  const outOfOcrRoad = () => ocrTimeouts() - timeoutsAtStart >= 2 || Date.now() - attemptStarted > budget.ocrMs
 
   /** Candidates not yet consumed by a lookup; remember the first plausible read. */
   const freshOf = (names: string[]): string[] => {
@@ -693,7 +728,11 @@ async function identifyViaOcr(
       // of grinding) gets a SHORT sole-evidence sweep, not the full one:
       // pathological texture won't suddenly resolve on the fifth
       // magnified pass either, and the user is watching "Identifying…".
-      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect, true, outOfOcrRoad() ? 2 : undefined)
+      // The frame that burned its OCR budget gets the short sweep; a page
+      // scan's cards get the short sweep from the start, because nine of them
+      // share one user's patience and one phone's thermal headroom.
+      const cornerPasses = Math.min(budget.cornerPasses, outOfOcrRoad() ? 2 : budget.cornerPasses)
+      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect, true, cornerPasses)
       let card: Card | null = null
       if (gameHint === 'pokemon' && read.number && read.total && (!read.fused || read.setCode)) {
         // A printed slash stands alone; a RECONSTRUCTED fraction ("0207066"

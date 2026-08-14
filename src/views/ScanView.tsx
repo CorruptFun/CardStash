@@ -1,21 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Icon } from '../components/Icon'
+import { BinderReview } from '../components/BinderReview'
 import { CardImg, Seg } from '../components/basics'
 import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
-import { CAMERA_REPROMPTS_EACH_ACQUIRE, cameraPermissionState, IS_STANDALONE } from '../lib/camera'
+import {
+  CAMERA_REPROMPTS_EACH_ACQUIRE,
+  CAPTURE_MAX_EDGE,
+  cameraPermissionState,
+  decodeImage,
+  IS_STANDALONE,
+} from '../lib/camera'
 import { addToCollection, clearScans, db, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
-import type { IdentifyOutcome, ScanMode } from '../lib/identify'
+import { isEntitled } from '../lib/entitlement'
+import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
+import { MAX_PAGE_CARDS, PAGE_MAX_EDGE, scanPage, type PageCard, type PageScanProgress } from '../lib/multiscan'
 import { warmOcr } from '../lib/ocr'
-import { headlineFinish, itemUnitPrice } from '../lib/prices'
+import { itemUnitPrice, scannedFinish } from '../lib/prices'
 import { warmSealedIndex } from '../lib/sealed'
 import { settings, useSettings } from '../lib/settings'
 import { warmCatalog } from '../lib/tcgcsv'
 import type { Card, Finish, ScanRecord } from '../lib/types'
 import { haptic, money } from '../lib/util'
+import { frameHash } from '../lib/vision'
 import { guarded, uiStore, useUi } from '../store/ui'
 
 /**
@@ -24,15 +34,7 @@ import { guarded, uiStore, useUi } from '../store/ui'
  * foil-only printings as foil rather than "Normal").
  */
 function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
-  if (hit.card.sealed) return 'nonfoil'
-  const options = finishOptions(hit.card)
-  const foil = hit.identification.foil
-  if (foil === true) {
-    const premium = options.find((f) => f !== 'nonfoil')
-    if (premium) return premium
-  }
-  if (foil === false && options.includes('nonfoil')) return 'nonfoil'
-  return headlineFinish(hit.card.prices, options)
+  return scannedFinish(hit.card, hit.identification.foil)
 }
 
 /**
@@ -177,6 +179,31 @@ function ScanChip({
   return null
 }
 
+/**
+ * Photo upload. Subtle on purpose — the camera is the primary path and this is
+ * the fallback for a card already photographed, a page shot earlier, or a
+ * phone whose camera the user won't grant.
+ *
+ * This is one of the two ENTRY POINTS the planned paid tier would gate (see
+ * lib/entitlement.ts): the gate belongs here and on the page-scan path, never
+ * on the detector underneath, which free single-card scanning also depends on.
+ */
+function UploadButton({ busy, onPick, wide = false }: { busy: boolean; onPick: () => void; wide?: boolean }) {
+  if (!isEntitled('photo-upload')) return null
+  if (wide) {
+    return (
+      <button className="btn btn--ghost" onClick={onPick} disabled={busy}>
+        <Icon name="upload" size={16} /> {busy ? 'Reading…' : 'Upload a photo instead'}
+      </button>
+    )
+  }
+  return (
+    <button className="iconbtn iconbtn--glass" onClick={onPick} disabled={busy} aria-label="Scan a photo from your library">
+      {busy ? <span className="chip__spinner" /> : <Icon name="upload" size={18} />}
+    </button>
+  )
+}
+
 export function ScanView({ active }: { active: boolean }) {
   const openSheet = useUi((s) => s.openSheet)
   const toast = useUi((s) => s.toast)
@@ -195,6 +222,20 @@ export function ScanView({ active }: { active: boolean }) {
   const [finishPick, setFinishPick] = useState<{ id: string; finish: Finish } | null>(null)
   /** The "what did the scanner see" diagnostics overlay. */
   const [debugOpen, setDebugOpen] = useState(false)
+  /**
+   * Page mode: one tap reads EVERY card in the frame instead of the one in the
+   * reticle. Explicitly a mode rather than something the scanner infers,
+   * because a page scan costs ~9 identifications and must never fire on its
+   * own — see runPageScan.
+   */
+  const [pageMode, setPageMode] = useState(false)
+  /** Non-null while a page scan is running: {done, total} for the overlay. */
+  const [pageProgress, setPageProgress] = useState<PageScanProgress | null>(null)
+  /** The finished page, waiting on the review screen. Nothing is added until then. */
+  const [pageCards, setPageCards] = useState<PageCard[] | null>(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const pageAbortRef = useRef<AbortController | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
@@ -241,11 +282,141 @@ export function ScanView({ active }: { active: boolean }) {
     })
   }, [toast])
 
-  useEffect(() => {
-    if (visible && started && scanner.status === 'idle') scanner.start()
-    if (!visible && scanner.status !== 'idle') scanner.stop()
+  /**
+   * Read every card in one image.
+   *
+   * Sequential, bounded, and never automatic. Nine identifications is a
+   * different cost profile from one — the budgets in identify.ts were tuned
+   * for a single card, so each card here runs on the smaller PAGE_SCAN_BUDGET
+   * — and it is the heaviest sustained work this app does on a phone. So it
+   * only ever runs from a deliberate tap, the sensing loop is parked for the
+   * duration (the live preview is behind the progress overlay anyway), and the
+   * user can abandon it mid-way.
+   */
+  const runPageScan = useCallback(
+    async (source: HTMLCanvasElement) => {
+      const ctrl = new AbortController()
+      pageAbortRef.current = ctrl
+      scanner.pauseSensing(true)
+      setPageProgress({ done: 0, total: 0 })
+      try {
+        const cards = await scanPage(source, {
+          signal: ctrl.signal,
+          maxCards: MAX_PAGE_CARDS,
+          onProgress: setPageProgress,
+        })
+        if (ctrl.signal.aborted) return
+        track('scan_attempt', {
+          engine: 'ocr',
+          outcome: cards.some((c) => c.outcome.ok) ? 'hit' : 'miss',
+          mode: 'card',
+          manual: true,
+        })
+        if (!cards.length) {
+          toast('No cards found — fill the frame with the page', 'info')
+          return
+        }
+        setPageCards(cards)
+      } catch (err: any) {
+        if (!ctrl.signal.aborted) toast(err?.message?.slice(0, 90) ?? 'Page scan failed', 'error')
+      } finally {
+        source.width = 0
+        source.height = 0
+        pageAbortRef.current = null
+        setPageProgress(null)
+        scanner.pauseSensing(false)
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, started, scanner.status])
+    [toast],
+  )
+
+  const cancelPageScan = useCallback(() => {
+    pageAbortRef.current?.abort(new DOMException('Cancelled', 'AbortError'))
+  }, [])
+
+  /** One card from a picked photo, through the same pipeline a capture uses. */
+  const identifyOne = useCallback(
+    async (canvas: HTMLCanvasElement) => {
+      const outcome = await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card' })
+      if (outcome.ok) {
+        onHit(outcome)
+        openSheet({ card: outcome.card, origin: 'scan', finish: scanFinish(outcome) })
+        return
+      }
+      toast(
+        outcome.readName ? `Read “${outcome.readName}” but couldn't match it` : outcome.message,
+        'info',
+        outcome.readName
+          ? {
+              label: 'Search it',
+              fn: () => {
+                setSearchPrefill({ query: outcome.readName ?? '', game: outcome.readGame })
+                location.hash = '#/search'
+              },
+            }
+          : undefined,
+      )
+    },
+    [onHit, openSheet, setSearchPrefill, toast],
+  )
+
+  /**
+   * A photo from the library. The scan pipeline never sees a file — it sees a
+   * canvas at the resolution a live capture would have produced, so an upload
+   * is the same input a scan is, minus the shake.
+   */
+  const onPickFile = useCallback(
+    async (file: File) => {
+      if (!isEntitled('photo-upload')) return
+      setUploadBusy(true)
+      try {
+        // A page needs more pixels than a card: a 3x3 grid cut out of a
+        // single-card frame leaves each crop too small to read a collector
+        // line off. Decoding at the larger cap either way lets the detector
+        // answer "is this a page?" before that choice is locked in.
+        const canvas = await decodeImage(file, pageMode ? PAGE_MAX_EDGE : CAPTURE_MAX_EDGE)
+        if (pageMode) {
+          if (!isEntitled('page-scan')) return
+          await runPageScan(canvas)
+          return
+        }
+        // No "looks like several cards, try Page mode?" nudge here on purpose.
+        // Measured on the committed photos, the detector returns 3-11 boxes for
+        // a SINGLE card on a cluttered desk — a card held in a hand has a
+        // yellow border against skin, which is a strong colour edge and a weak
+        // luma one, and the sweep reads luma. A count that wrong is worse than
+        // no hint at all; the Page toggle is in the top bar either way.
+        await identifyOne(canvas)
+        canvas.width = 0
+        canvas.height = 0
+      } catch (err: any) {
+        toast(err?.message?.slice(0, 90) ?? "Couldn't read that image", 'error')
+      } finally {
+        setUploadBusy(false)
+      }
+    },
+    [identifyOne, pageMode, runPageScan, toast],
+  )
+
+  /** Page mode's shutter: the whole frame, not the reticle window. */
+  const scanLivePage = useCallback(() => {
+    if (!isEntitled('page-scan')) return
+    const frame = scanner.grabFrame(PAGE_MAX_EDGE)
+    if (!frame) return
+    haptic(settings().haptics ? 10 : 0)
+    void runPageScan(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runPageScan, scanner.grabFrame])
+
+  // The review screen owns the screen while it is up: keeping a camera and a
+  // Sobel loop alive behind it costs battery for a preview nobody can see.
+  const reviewOpen = pageCards != null
+  useEffect(() => {
+    if (visible && !reviewOpen && started && scanner.status === 'idle') scanner.start()
+    if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, reviewOpen, started, scanner.status])
 
   useEffect(() => {
     if (visible) warmOcr()
@@ -335,14 +506,19 @@ export function ScanView({ active }: { active: boolean }) {
       : 'Dark — more light helps'
     : scanner.status === 'locking' || scanner.sensing
       ? 'Hold steady…'
-      : scanMode === 'sealed'
-        ? 'Fill the frame with the pack or box front'
-        : 'Fill the frame with a card'
+      : pageMode
+        ? 'Fit the whole page in frame, then tap'
+        : scanMode === 'sealed'
+          ? 'Fill the frame with the pack or box front'
+          : 'Fill the frame with a card'
   const tapRescan = () => {
-    if (!scanner.busy && scanning) {
-      haptic(config.haptics ? 8 : 0)
-      scanner.scanNow()
+    if (scanner.busy || !scanning || pageProgress) return
+    if (pageMode) {
+      scanLivePage()
+      return
     }
+    haptic(config.haptics ? 8 : 0)
+    scanner.scanNow()
   }
   /* iOS re-asks for the camera BY DESIGN — per Safari visit unless the user
    * allows the site permanently, per launch (unfixably) for Home-Screen
@@ -389,6 +565,24 @@ export function ScanView({ active }: { active: boolean }) {
               <span className="collectpill__label">Packs</span>
             </button>
             <button
+              className={`collectpill ${pageMode ? 'collectpill--on' : ''}`}
+              onClick={() => {
+                const next = !pageMode
+                setPageMode(next)
+                if (next && scanMode === 'sealed') setScanMode('card')
+                scanner.rescan()
+                toast(
+                  next ? 'Page mode: tap to read every card in frame' : 'Single card mode',
+                  'info',
+                )
+              }}
+              aria-pressed={pageMode}
+              aria-label="Scan a whole page of cards"
+            >
+              <Icon name="cards" size={14} />
+              <span className="collectpill__label">Page</span>
+            </button>
+            <button
               className={`collectpill ${config.collectMode ? 'collectpill--on' : ''}`}
               onClick={() => {
                 config.set({ collectMode: !config.collectMode })
@@ -400,6 +594,7 @@ export function ScanView({ active }: { active: boolean }) {
               <Icon name={config.collectMode ? 'check' : 'plus'} size={14} />
               <span className="collectpill__label">Collect</span>
             </button>
+            <UploadButton busy={uploadBusy} onPick={() => fileRef.current?.click()} />
             {scanner.torchAvailable && (
               <button
                 className={`iconbtn iconbtn--glass ${scanner.torchOn ? 'iconbtn--on' : ''}`}
@@ -431,6 +626,7 @@ export function ScanView({ active }: { active: boolean }) {
           >
             <Icon name="scan" size={18} /> Start scanning
           </button>
+          <UploadButton busy={uploadBusy} onPick={() => fileRef.current?.click()} wide />
           <p className="scan__gatehint">
             Everything runs on this device — the card name, its collector number, even foil sheen. No account, no API.
           </p>
@@ -486,6 +682,9 @@ export function ScanView({ active }: { active: boolean }) {
           >
             Try again
           </button>
+          {/* A blocked camera is exactly when a photo from the library is the
+            * only way in — don't strand the user on a dead end. */}
+          <UploadButton busy={uploadBusy} onPick={() => fileRef.current?.click()} wide />
         </div>
       )}
       {started && scanning && (
@@ -544,6 +743,46 @@ export function ScanView({ active }: { active: boolean }) {
           )}
         </>
       )}
+      {pageProgress && (
+        <div className="pagescan" role="status" aria-live="polite">
+          <span className="chip__spinner" />
+          <strong>
+            {pageProgress.total
+              ? `Reading card ${Math.min(pageProgress.done + 1, pageProgress.total)} of ${pageProgress.total}`
+              : 'Finding the cards…'}
+          </strong>
+          <span className="pagescan__hint">Nothing is added until you review them</span>
+          <button className="chip__searchbtn" onClick={cancelPageScan}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {pageCards && (
+        <BinderReview
+          cards={pageCards}
+          onClose={() => setPageCards(null)}
+          onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
+          onAdded={(added) => {
+            setPageCards(null)
+            if (added) {
+              haptic(config.haptics ? [14, 60, 14] : 0)
+              toast(`Added ${added} ${added === 1 ? 'card' : 'cards'} to your collection`, 'success')
+            }
+          }}
+        />
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          // Reset first: picking the SAME file twice must fire onChange again.
+          event.target.value = ''
+          if (file) void onPickFile(file)
+        }}
+      />
       {debugOpen && <ScanDebugPanel onClose={() => setDebugOpen(false)} />}
       {(tray?.length ?? 0) > 0 && (
         <div className="tray">

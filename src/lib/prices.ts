@@ -1,3 +1,4 @@
+import { finishOptions } from './games'
 import type {
   Card,
   Condition,
@@ -52,6 +53,22 @@ export function bestEntry(prices: Prices, kind: 'best' | 'foil' = 'best'): Price
 }
 
 /** The finish the card's headline price refers to, clamped to `allowed`. */
+/**
+ * The finish a scanned copy most likely has: the on-device sheen reading when
+ * there is one, otherwise the printing's headline finish (which also files a
+ * foil-only printing as foil rather than "Normal").
+ */
+export function scannedFinish(card: Card, foil: boolean | undefined): Finish {
+  if (card.sealed) return 'nonfoil'
+  const options = finishOptions(card)
+  if (foil === true) {
+    const premium = options.find((f) => f !== 'nonfoil')
+    if (premium) return premium
+  }
+  if (foil === false && options.includes('nonfoil')) return 'nonfoil'
+  return headlineFinish(card.prices, options)
+}
+
 export function headlineFinish(prices: Prices, allowed?: Finish[]): Finish {
   const finish = bestEntry(prices, 'best')?.finish ?? 'nonfoil'
   return allowed && !allowed.includes(finish) ? allowed[0] : finish

@@ -20,6 +20,7 @@
     import { scanTraces, clearScanTraces } from '/src/lib/scandebug'
     import { compose, DEGRADATIONS } from '/tests/harness/augment.mjs'
     import { detectCardRegions } from '/src/lib/vision'
+    import { scanPage, PAGE_MAX_EDGE } from '/src/lib/multiscan'
 
     const images = new Map()
     async function loadImage(url) {
@@ -178,6 +179,42 @@
           ctx.fillText(`${i + 1}:${r.score.toFixed(2)}`, x + 3, y - 4)
         })
         return { image: canvas.toDataURL('image/jpeg', 0.85), found, ms }
+      },
+
+      /**
+       * A whole page of cards: detectCardRegions, then a real identifyFrame
+       * per crop — the same `scanPage` the app calls, not a reimplementation.
+       *
+       * Graded against an unordered MULTISET of names (run-matrix's
+       * gradePage), because a page has no "the" answer: three copies of a card
+       * mean three slots, and detection and identification fail independently.
+       * The per-card JPEG each result carries is dropped here — it is for the
+       * review screen, and shipping nine of them across the CDP bridge would
+       * cost more than the scan.
+       */
+      async runPage(cell) {
+        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        const img = await loadImage(cell.imageUrl)
+        const canvas = cell.photo
+          ? fitPhoto(img, cell.maxEdge ?? PAGE_MAX_EDGE)
+          : compose(img, { ...(DEGRADATIONS[cell.degradation] ?? {}), game: cell.game })
+        clearScanCache()
+        clearScanTraces()
+        const started = performance.now()
+        const found = await scanPage(canvas, { maxCards: cell.maxCards ?? 12 })
+        const ms = Math.round(performance.now() - started)
+        return {
+          ms,
+          source: { w: canvas.width, h: canvas.height },
+          found: found.map((f) => ({
+            region: f.region,
+            outcome: f.outcome.ok
+              ? { ok: true, name: f.outcome.card.name, game: f.outcome.card.game, setCode: f.outcome.card.setCode ?? null,
+                  number: f.outcome.card.number ?? null, via: f.outcome.identification.via,
+                  confidence: f.outcome.identification.confidence, readName: f.outcome.identification.name }
+              : { ok: false, reason: f.outcome.reason, message: f.outcome.message, readName: f.outcome.readName ?? null },
+          })),
+        }
       },
 
       async shutdown() {

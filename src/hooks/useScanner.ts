@@ -568,6 +568,41 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     patch({ hit: null, miss: null, status: 'searching', detail: null })
   }, [patch])
 
+  /**
+   * Stop/restart the sensing loop WITHOUT touching the camera or the OCR
+   * workers. A page scan runs 9-ish identifications off one captured frame,
+   * and for all of that time the live preview is behind a progress overlay: the
+   * Sobel pass, the auto-attempt gate and the torch logic are pure heat there,
+   * on the one code path that already asks the most of the phone. Tearing the
+   * scanner down instead would call stopOcr() and terminate the very workers
+   * the page scan is using.
+   */
+  const pauseSensing = useCallback(
+    (paused: boolean) => {
+      if (paused) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = 0
+        stillSinceRef.current = null
+        focusRef.current.blockedSince = 0
+      } else if (!rafRef.current && sessionRef.current) {
+        rafRef.current = requestAnimationFrame(senseLoop)
+      }
+    },
+    [senseLoop],
+  )
+
+  /**
+   * The whole frame, for the multi-card path — not the reticle window a single
+   * card is captured through, since a binder page fills the viewfinder edge to
+   * edge. `maxEdge` is the caller's because a page needs more pixels than one
+   * card does (see PAGE_MAX_EDGE in lib/multiscan.ts).
+   */
+  const grabFrame = useCallback((maxEdge?: number): HTMLCanvasElement | null => {
+    const video = videoRef.current
+    if (!video?.videoWidth) return null
+    return captureFrame(video, null, maxEdge).canvas
+  }, [])
+
   const scanNow = useCallback(() => {
     if (jobRef.current?.running || !sessionRef.current) return
     lastAttemptRef.current = 0
@@ -612,5 +647,5 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
 
   useEffect(() => stop, [stop])
 
-  return { ...state, busy, videoRef, start, stop, toggleTorch, dismissHit, rescan, scanNow }
+  return { ...state, busy, videoRef, start, stop, toggleTorch, dismissHit, rescan, scanNow, pauseSensing, grabFrame }
 }

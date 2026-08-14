@@ -11,6 +11,8 @@
  *     --games=pokemon,riftbound   --degradations=clean,glare
  *     --photos            also run the real-photo cells (tests/harness/photos)
  *     --photos-only       run ONLY those
+ *     --binders           also grade the binder pages (multi-card detect+ID)
+ *     --binders-only      run ONLY those
  *     --keys=tauros-fa-secret     --mode=hinted|auto|both
  *     --pages=3                   # parallel browser pages
  *     --out=tests/harness/report/run.json
@@ -95,6 +97,54 @@ function graded(expected, outcome) {
   return similarity(expected.name, outcome.name) >= 0.9
 }
 
+/**
+ * Grade a binder page against an unordered MULTISET of names.
+ *
+ * A page is a different kind of ground truth from a card and must never be
+ * collapsed into one: the page has no "the" answer, three copies of a card
+ * mean three slots, and detection and identification fail independently — a
+ * card that was never FOUND and a card that was found and misread need
+ * different fixes. So this reports three numbers, and the one to watch is the
+ * third: on a page, a wrong card is nine times more expensive than in single
+ * scanning, because it arrives inside a batch the user confirms once.
+ *
+ * Greedy best-first assignment against the remaining truth, at the same 0.9
+ * name-similarity bar single cells are graded at.
+ */
+function gradePage(truth, found) {
+  const remaining = truth.slice()
+  const identified = found.filter((f) => f.outcome?.ok)
+  const pairs = []
+  for (const hit of identified) {
+    for (let i = 0; i < remaining.length; i++) {
+      pairs.push({ hit, i, score: String(hit.outcome.name) === String(remaining[i]) ? 1 : similarity(remaining[i], hit.outcome.name) })
+    }
+  }
+  pairs.sort((a, b) => b.score - a.score)
+  const usedTruth = new Set()
+  const usedHit = new Set()
+  const matched = []
+  for (const pair of pairs) {
+    if (pair.score < 0.9 || usedTruth.has(pair.i) || usedHit.has(pair.hit)) continue
+    usedTruth.add(pair.i)
+    usedHit.add(pair.hit)
+    matched.push({ name: remaining[pair.i], read: pair.hit.outcome.name })
+  }
+  // Identified confidently, matches nothing left on the page: the expensive
+  // class. A card the detector found twice would land here too, which is
+  // correct — a duplicate row is a wrong row in a batch the user confirms once.
+  const wrong = identified
+    .filter((h) => !usedHit.has(h))
+    .map((h) => ({ read: h.outcome.name, game: h.outcome.game }))
+  return {
+    truth: truth.length,
+    detected: found.length,
+    identified: matched.length,
+    wrong,
+    missed: remaining.filter((_, i) => !usedTruth.has(i)),
+  }
+}
+
 /** Attribute a failed cell to the stage that lost it, from the trace. */
 function failureStage(expected, result) {
   const { outcome, trace } = result
@@ -167,7 +217,7 @@ async function main() {
   const cells = []
   // --photos runs the photo cells IN ADDITION to the battery; --photos-only
   // runs just them (the fast loop when new photos land).
-  const photosOnly = !!args['photos-only']
+  const photosOnly = !!args['photos-only'] || !!args['binders-only']
   const degradations = (all) =>
     degFilter ? [...all, ...EXTRA_DEGRADATION_KEYS].filter((d) => degFilter.includes(d)) : all
   for (const fixture of photosOnly ? [] : fixtures) {
@@ -192,7 +242,7 @@ async function main() {
   // cannot be machine-regenerated, so it CANNOT live on harness-fixtures,
   // which CI force-pushes — these are committed under tests/harness/photos/
   // with their ground truth beside them.
-  if (args.photos || photosOnly) {
+  if (args.photos || args['photos-only']) {
     const dir = join(HERE, 'photos')
     const file = join(dir, 'manifest.json')
     if (!existsSync(file)) {
@@ -216,11 +266,30 @@ async function main() {
     }
   }
 
-  if (!cells.length) {
+  // Binder pages: the multi-card path end to end — detectCardRegions, a crop
+  // and a full identification per region. Kept OUT of `cells` because the
+  // per-game battery rates are a like-for-like series and a page is not a
+  // cell; it is graded against a multiset and reported on its own.
+  const binderCells = []
+  if (args.binders || args['binders-only']) {
+    const file = join(HERE, 'photos', 'manifest.json')
+    if (!existsSync(file)) {
+      console.error(`No photo manifest at ${file} — see tests/harness/photos/README.md`)
+      process.exit(2)
+    }
+    for (const binder of JSON.parse(readFileSync(file, 'utf8')).binders ?? []) {
+      if (gamesFilter && !gamesFilter.includes(binder.game)) continue
+      if (keysFilter && !keysFilter.includes(binder.key)) continue
+      binderCells.push(binder)
+    }
+    if (!binderCells.length) console.log('No binder pages match the filters.')
+  }
+
+  if (!cells.length && !binderCells.length) {
     console.error('Nothing matches the filters.')
     process.exit(2)
   }
-  console.log(`${cells.length} cells on ${pages} page(s)\n`)
+  console.log(`${cells.length} cells on ${pages} page(s)${binderCells.length ? ` + ${binderCells.length} binder page(s)` : ''}\n`)
 
   // --- dev server -----------------------------------------------------------
   const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
@@ -329,6 +398,35 @@ async function main() {
         }
       }),
     )
+    // Binder pages run after the battery, one at a time on a single page: each
+    // is ~9 identifications sharing one OCR worker pool, so racing them would
+    // contend rather than finish sooner — the same reason scanPage is
+    // sequential on the phone.
+    const binderResults = []
+    for (const binder of binderCells) {
+      const page = workers[0]
+      let out
+      try {
+        out = await page.evaluate((c) => window.__harness.runPage(c), {
+          imageUrl: `/tests/harness/photos/${binder.file}`,
+          hint: binder.game,
+          photo: true,
+        })
+      } catch (err) {
+        out = { found: [], ms: 0, error: String(err).slice(0, 200) }
+      }
+      const score = gradePage(binder.cards ?? [], out.found ?? [])
+      binderResults.push({ key: binder.key, game: binder.game, note: binder.note, ms: out.ms, error: out.error, ...score,
+        found: (out.found ?? []).map((f) => ({ region: f.region, ok: !!f.outcome?.ok, name: f.outcome?.ok ? f.outcome.name : null, stage: f.outcome?.ok ? 'pass' : f.outcome?.reason, readName: f.outcome?.readName ?? null })) })
+      console.log(
+        `  ▣ ${binder.game}/${binder.key} · detected ${score.detected}/${score.truth}` +
+          ` · identified ${score.identified}/${score.truth}` +
+          ` · WRONG ${score.wrong.length}${out.error ? ` · ${out.error}` : ''} [${out.ms}ms]`,
+      )
+      for (const w of score.wrong) console.log(`      wrong: “${w.read}”`)
+      if (score.missed.length) console.log(`      missed: ${score.missed.map((m) => `“${m}”`).join(', ')}`)
+    }
+
     const wallMs = Date.now() - t0
 
     // --- report -------------------------------------------------------------
@@ -349,6 +447,7 @@ async function main() {
       args: { games: gamesFilter, keys: keysFilter, degradations: degFilter, mode, pages },
       overall,
       byGame,
+      binders: binderResults,
       stubCalls: stubs.stats.calls,
       unknownHosts: [...new Set(stubs.stats.unknown)],
       cells: results,
@@ -373,6 +472,13 @@ async function main() {
     for (const [game, g] of Object.entries(byGame)) {
       const stages = Object.entries(g.stages).sort((a, b) => b[1] - a[1])
       if (stages.length) console.log(`  ${game} failures: ${stages.map(([s, n]) => `${s}×${n}`).join(', ')}`)
+    }
+    if (binderResults.length) {
+      const t = binderResults.reduce(
+        (a, b) => ({ truth: a.truth + b.truth, detected: a.detected + b.detected, identified: a.identified + b.identified, wrong: a.wrong + b.wrong.length }),
+        { truth: 0, detected: 0, identified: 0, wrong: 0 },
+      )
+      console.log(`\n=== binder pages: detected ${t.detected}/${t.truth} · identified ${t.identified}/${t.truth} · WRONG ${t.wrong} ===`)
     }
     if (report.unknownHosts.length) console.log(`  unstubbed hosts hit: ${report.unknownHosts.join(', ')}`)
     console.log(`  report: ${out}`)

@@ -220,7 +220,7 @@ export interface FrameCapture {
  * of legibility; 1600 carries it clear while still downscaling from a
  * 1440p-class stream rather than upsampling.
  */
-const CAPTURE_MAX_EDGE = 1600
+export const CAPTURE_MAX_EDGE = 1600
 
 /** Crop a region of the live video into a canvas for OCR/analysis, capped at maxEdge. */
 export function captureFrame(video: HTMLVideoElement, region: Region | null, maxEdge = CAPTURE_MAX_EDGE): FrameCapture {
@@ -282,4 +282,56 @@ export async function captureFrameStacked(
     ctx.putImageData(image, 0, 0)
   }
   return first
+}
+
+/**
+ * Decode a picked photo (or a kept crop) to a canvas at capture resolution.
+ *
+ * The scan pipeline never sees a file — it sees the same thing a live capture
+ * hands it, at the same scale. Everything downstream is calibrated for that:
+ * band prep widths, the 192px detection buffer, and above all the magnified
+ * collector-line reads, which is why CAPTURE_MAX_EDGE exists at all. An image
+ * left at its native 4032px would not be "better input", it would be input the
+ * pipeline has never been measured on.
+ *
+ * EXIF orientation is honoured. A phone stores a portrait photo as landscape
+ * pixels plus a rotation tag, and ignoring it would hand the pipeline a
+ * quarter-turned card — pushing an ordinary upload down the sideways path,
+ * which pays two full name ladders before it can answer.
+ */
+export async function decodeImage(src: Blob | string, maxEdge = CAPTURE_MAX_EDGE): Promise<HTMLCanvasElement> {
+  const bitmap = await loadBitmap(src)
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(bitmap as CanvasImageSource, 0, 0, canvas.width, canvas.height)
+  if ('close' in bitmap) bitmap.close()
+  return canvas
+}
+
+async function loadBitmap(src: Blob | string): Promise<ImageBitmap | HTMLImageElement> {
+  if (typeof src !== 'string' && typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(src, { imageOrientation: 'from-image' })
+    } catch {
+      /* Safari < 17 has no imageOrientation option — fall through to <img>,
+       * which applies EXIF itself. */
+    }
+  }
+  const url = typeof src === 'string' ? src : URL.createObjectURL(src)
+  try {
+    return await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.decoding = 'async'
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error("That image couldn't be read"))
+      img.src = url
+    })
+  } finally {
+    if (typeof src !== 'string') setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
 }

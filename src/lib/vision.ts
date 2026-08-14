@@ -580,7 +580,16 @@ function completeGrid(
       if (taken) continue
       const x = (cx - w / 2) * sw
       const y = (cy - h / 2) * sh
-      if (x < -w * sw * 0.1 || y < -h * sh * 0.1 || x + w * sw > sw * 1.1 || y + h * sh > sh * 1.1) continue
+      // Same overhang the sweep allows. Held at 0.1 this guard rejected exactly
+      // the clipped edge slots the lattice is best placed to find — the grid
+      // knows where the top row IS even when the camera cut its border off.
+      if (
+        x < -w * sw * OVERHANG_MAX ||
+        y < -h * sh * OVERHANG_MAX ||
+        x + w * sw > sw * (1 + OVERHANG_MAX) ||
+        y + h * sh > sh * (1 + OVERHANG_MAX)
+      )
+        continue
       const score = borderScore(x, y, w * sw, h * sh)
       if (score < GRID_FILL_SCORE_MIN) continue
       out.push({ x: cx - w / 2, y: cy - h / 2, w, h, score })
@@ -603,6 +612,23 @@ const ASPECT_MIN = CARD_ASPECT * 0.82
 const ASPECT_MAX = CARD_ASPECT * 1.2
 /** A detection must beat the frame's average edge energy by this much on ALL four sides. */
 const BORDER_SCORE_MIN = 1.35
+/**
+ * A border strip must be at least this visible to be measurable at all;
+ * below it the frame cut the side off and the number would be noise.
+ */
+const CLIPPED_SIDE_VISIBLE = 0.4
+/**
+ * What the three REMAINING sides must clear when the fourth is off-frame.
+ * Above BORDER_SCORE_MIN because three sides is weaker evidence than four —
+ * the discount is for the camera's framing, not for the card's borders.
+ */
+const CLIPPED_BORDER_MIN = 1.5
+/**
+ * How far off the frame a card may hang and still be findable, as a fraction
+ * of its own size. Generous enough for the top row of a hand-held binder page;
+ * short of the point where a rectangle is mostly imaginary.
+ */
+const OVERHANG_MAX = 0.4
 /** Overlap above which two detections are the same card. */
 const NMS_IOU = 0.3
 /** A box this much swallowed by an already-taken one is a panel inside a card. */
@@ -685,6 +711,23 @@ export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): Car
       const W = sw + 1
       return ii[by * W + bx] - ii[ay * W + bx] - ii[by * W + ax] + ii[ay * W + ax]
     }
+    /** Fraction of a rectangle that is actually inside the frame. */
+    const visible = (x0: number, y0: number, x1: number, y1: number): number => {
+      const w = Math.round(x1) - Math.round(x0)
+      const h = Math.round(y1) - Math.round(y0)
+      if (w <= 0 || h <= 0) return 0
+      const iw = Math.max(0, Math.min(sw, Math.round(x1)) - Math.max(0, Math.round(x0)))
+      const ih = Math.max(0, Math.min(sh, Math.round(y1)) - Math.max(0, Math.round(y0)))
+      return (iw * ih) / (w * h)
+    }
+    // Deliberately divided by the REQUESTED area while `sum` clamps to the
+    // frame: a strip hanging over the edge is scaled down by however much of
+    // it is missing. That looks like a bug and is load-bearing — it is the
+    // only thing penalising rectangles that wander off the picture, and
+    // "fixing" it measured a binder page down from 7 cards to 4, because a box
+    // drawn around the whole BINDER then scored well enough to swallow the
+    // cards inside it (a card is never inside another card — but the binder is
+    // not a card). Clipped SIDES are handled explicitly in borderScore instead.
     const mean = (ii: Float64Array, x0: number, y0: number, x1: number, y1: number): number => {
       const area = Math.max(1, (Math.round(x1) - Math.round(x0)) * (Math.round(y1) - Math.round(y0)))
       return sum(ii, x0, y0, x1, y1) / area
@@ -696,14 +739,39 @@ export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): Car
     for (let i = 0; i < vert.length; i++) energy += vert[i] + horiz[i]
     const base = Math.max(1, energy / (2 * sw * sh))
 
-    /** Weakest of a rectangle's four borders, relative to the frame's energy. */
+    /**
+     * Weakest of a rectangle's four borders, relative to the frame's energy.
+     *
+     * Min-of-four is the whole idea (a card is a CLOSED rectangle, and
+     * requiring all four sides is what separates one from the strong-but-open
+     * edge clusters a real scene is full of) — with one exception, and it is
+     * an exception about the CAMERA rather than about the card: a border the
+     * frame cut off cannot be measured at all. The top row of a binder page is
+     * routinely half out of shot, and scoring those cards on a border that is
+     * not in the picture rejects them for the photograph's framing rather than
+     * for anything about them. Measured on the committed page: two of the
+     * three top-row cards found by nothing else.
+     *
+     * Guarded the way every other tolerance here is. The exemption is granted
+     * only where the frame boundary PHYSICALLY prevents the measurement — the
+     * strip is mostly off-image, not merely weak — only one side may claim it,
+     * and the three sides that remain must clear a higher bar than four would
+     * have. A rectangle wandering off the edge of the picture gets no discount
+     * for the sides it left behind.
+     */
     const borderScore = (x: number, y: number, w: number, h: number): number => {
       const t = Math.max(1, w * 0.035)
-      const left = mean(iv, x - t, y, x + t, y + h)
-      const right = mean(iv, x + w - t, y, x + w + t, y + h)
-      const top = mean(ih, x, y - t, x + w, y + t)
-      const bottom = mean(ih, x, y + h - t, x + w, y + h + t)
-      return Math.min(left, right, top, bottom) / base
+      const sides: Array<[number, number]> = [
+        [mean(iv, x - t, y, x + t, y + h), visible(x - t, y, x + t, y + h)],
+        [mean(iv, x + w - t, y, x + w + t, y + h), visible(x + w - t, y, x + w + t, y + h)],
+        [mean(ih, x, y - t, x + w, y + t), visible(x, y - t, x + w, y + t)],
+        [mean(ih, x, y + h - t, x + w, y + h + t), visible(x, y + h - t, x + w, y + h + t)],
+      ]
+      const clipped = sides.filter(([, seen]) => seen < CLIPPED_SIDE_VISIBLE)
+      if (clipped.length !== 1) return Math.min(...sides.map(([v]) => v)) / base
+      const rest = sides.filter(([, seen]) => seen >= CLIPPED_SIDE_VISIBLE).map(([v]) => v)
+      const weakest = Math.min(...rest) / base
+      return weakest >= CLIPPED_BORDER_MIN ? weakest : Math.min(...sides.map(([v]) => v)) / base
     }
 
     const candidates: CardDetection[] = []
@@ -714,8 +782,18 @@ export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): Car
         const h = w / aspect
         if (h > sh * 0.995) continue
         const step = Math.max(2, w * 0.11)
-        for (let x = 0; x + w <= sw; x += step) {
-          for (let y = 0; y + h <= sh; y += step) {
+        // Sweep PAST the frame edges. A card the photograph cut off has its
+        // rectangle partly outside the image, and a sweep anchored at x,y >= 0
+        // cannot propose that rectangle at all — no border score, however
+        // generous, ever gets a say. That was the whole reason the top row of a
+        // binder page went missing: not a scoring question, a search-space one.
+        // Bounded to OVERHANG_MAX of a card, and every proposal still has to
+        // earn its place through borderScore, where at most one side may be
+        // excused for being off-frame.
+        const ox = w * OVERHANG_MAX
+        const oy = h * OVERHANG_MAX
+        for (let x = -ox; x + w <= sw + ox; x += step) {
+          for (let y = -oy; y + h <= sh + oy; y += step) {
             const weakest = borderScore(x, y, w, h)
             if (weakest < BORDER_SCORE_MIN) continue
             candidates.push({ x: x / sw, y: y / sh, w: w / sw, h: h / sh, score: weakest })
@@ -772,9 +850,19 @@ export function detectCardRegions(source: HTMLCanvasElement, maxCards = 12): Car
      * this runs on one geometry at a time and refinement happens between the
      * two passes.
      */
+    /** Area actually inside the frame — what a box is worth as a card. */
+    const seenArea = (c: CardDetection): number =>
+      Math.max(0, Math.min(1, c.x + c.w) - Math.max(0, c.x)) * Math.max(0, Math.min(1, c.y + c.h) - Math.max(0, c.y))
+
     const select = (list: CardDetection[]): CardDetection[] => {
       const out: CardDetection[] = []
-      for (const c of list.slice().sort((a, b) => b.w * b.h - a.w * a.h)) {
+      // Largest VISIBLE first, not largest. Once the sweep may propose
+      // rectangles that hang off the frame, raw area lets a box win first pick
+      // on pixels that are not in the picture — and first pick is decisive
+      // here, because whatever is taken first suppresses everything it
+      // contains. Measured: ranking by raw area, the overhanging boxes along
+      // the bottom edge swallowed two correctly-found cards.
+      for (const c of list.slice().sort((a, b) => seenArea(b) - seenArea(a))) {
         const clash = out.some((k) => {
           const ix = Math.max(0, Math.min(c.x + c.w, k.x + k.w) - Math.max(c.x, k.x))
           const iy = Math.max(0, Math.min(c.y + c.h, k.y + k.h) - Math.max(c.y, k.y))

@@ -54,6 +54,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   sheen detector, `camera.ts`), sealed-product scanning (`sealed.ts`, backed
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
   an `opened` flag and stop counting at the sealed price once opened),
+  multi-card / binder scanning (`multiscan.ts` — detect regions, crop, identify
+  each on a reduced per-card budget; the UI reviews before anything is added),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
@@ -114,6 +116,14 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 subscription option.** Neither is gated today and neither should be gated
 while it is still being built — the note exists so the seam is designed in
 rather than retrofitted.
+
+The seam now exists: `src/lib/entitlement.ts`, a `GATED` table with every
+feature set to false, checked at the two entry points — the upload control
+(`UploadButton` in `ScanView.tsx`) and the page-scan path (the Page pill's
+live tap and the page branch of an upload). Flipping a row there is the whole
+change. It deliberately does NOT read or write settings: nothing stores an
+entitlement yet, and inventing storage for one would pick an answer to the
+question below by accident.
 
 Where the seam goes matters more than the note. Gate the ENTRY POINTS — the
 upload control, the multi-card review screen, the "scan a whole page" path —

@@ -363,3 +363,54 @@ result seems absurd, check this list before writing code.
     couldn't match it" = match layer (trace shows scores); "Couldn't read
     the card name" = OCR + corner both empty. Keep messages honest about
     which stage gave up — the eye-icon trace panel depends on it.
+
+## Multi-card detection, round two (wiring it up)
+
+39. **A card the frame cut off was a SEARCH-SPACE problem, not a scoring one.**
+    The top row of the binder page went missing and the obvious reading is
+    "those cards have no top border to score" — which is true, and led to a
+    border-exemption rule that changed nothing at all. The sweep loop runs
+    `for (x = 0; x + w <= sw; ...)`: a rectangle that starts above the frame or
+    ends past it is never PROPOSED, so no scoring rule, however generous, ever
+    gets a say. Letting the sweep run past the edges by `OVERHANG_MAX` took the
+    top row from 1/3 to 3/3. Rule: before tuning what a detector scores, check
+    that it can express the answer at all.
+40. **Once boxes may hang off the frame, "largest-first" has to mean largest
+    VISIBLE.** Suppression takes the biggest box first and drops whatever it
+    contains (lesson 35), and that first pick is decisive. Ranking by raw area
+    let boxes overhanging the bottom edge win it on pixels that are not in the
+    picture, and they swallowed two correctly-found cards — the page read 3/3
+    on the top row and lost the bottom, staying at 7. Ranking by the area
+    actually inside the frame: **8/8, 7 of them on identifiable cards** (from
+    6). A geometric change to what a detector may propose is also a change to
+    every comparison downstream that assumed the old constraint.
+41. **`detectCardRegions` does NOT fix single-card detection on cluttered
+    backgrounds — measured, against the hypothesis.** Lesson 32 concluded that
+    `refineCardCrop` over-reaches on real photos and that the 2D detector would
+    likely fix it. It does not. On `pkm-machamp-revholo` the detector returns 3
+    boxes and **none of them is the card**, on `pkm-blastoise-ex-fullart` 7 with
+    the same result. The reason is lesson 23 wearing different clothes: a card
+    held in a HAND has a yellow border against skin, which is a strong colour
+    edge and a weak luma one, and the sweep runs on `grayscale()`. So the
+    single-card substitution was NOT shipped, and the gap stands open with a
+    named cause. The lead for whoever takes it: run the detector's gradient on
+    a chroma projection (min/max/sat of RGB) rather than luma — the same fix
+    that paid off for OCR, in the place it was never applied.
+42. **A "correctness fix" to a formula can be load-bearing as a heuristic.**
+    `mean()` divides by the REQUESTED rectangle area while `sum()` clamps to
+    the frame, so a partly-offscreen strip is scaled down by however much of it
+    hangs over the edge. That reads as an obvious bug. Fixing it measured the
+    binder page down from 7 cards to 4: the dilution is the only thing
+    penalising rectangles that wander off the picture, and without it a box
+    drawn around the whole BINDER scored well enough to swallow the cards
+    inside it. Reverted, with the reason written where the next person will
+    read it — a card is never inside another card, but a binder is not a card.
+43. **A page needs more pixels than a card does.** `CAPTURE_MAX_EDGE` (1600) is
+    calibrated for one card filling the frame; a 3x3 page cut out of 1600px
+    leaves each crop ~500px wide, under the ~790px where the printed collector
+    fraction stops being legible. So the multi-card path decodes at
+    `PAGE_MAX_EDGE` (3200) and each crop lands at single-card scale. The
+    committed binder PHOTO is itself only 1200x1600 (the photos README says to
+    downscale to 1600, which is right for a single card and wrong for a page):
+    its cards arrive ~370px wide, so its identification numbers are a floor set
+    by the fixture, not by the pipeline. Shoot pages at full resolution.

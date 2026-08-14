@@ -82,6 +82,32 @@ separate `binders` list, because a nine-card photo is a different kind of
 ground truth from one card and must never be graded as one. The single-card
 runner ignores that list.
 
+Grade them with:
+
+```sh
+node tests/harness/run-matrix.mjs --binders-only     # just the pages
+node tests/harness/run-matrix.mjs --binders          # battery + pages
+node tests/harness/preview.mjs --detect              # draw the boxes and LOOK
+```
+
+A page run reports three numbers, and they fail independently:
+
+- **detected** — how many card-shaped regions the sweep found. A card never
+  found cannot be misread; that is a detector fix, not an OCR one.
+- **identified** — how many of the truth names were matched, greedily, at the
+  same 0.9 similarity bar a single cell is graded at.
+- **WRONG** — confidently identified, matching nothing left on the page. Watch
+  this one hardest. A page files ~9 rows from one confirmation, so a wrong card
+  here costs nine times what it does in single scanning, and a card the
+  detector found TWICE lands here too — a duplicate row is a wrong row.
+
+**Shoot pages at full resolution.** The "downscale to ~1600px" rule above is
+right for a single card and wrong for a page: at 1600 a 3x3 grid leaves each
+card ~370px wide, well under the ~790px where a printed collector line stops
+being legible, so the identification numbers are a floor set by the photo
+rather than by the pipeline. The app decodes a page at `PAGE_MAX_EDGE` (3200,
+lib/multiscan.ts) for exactly this reason.
+
 ## What is worth photographing
 
 The point is finishes the scans cannot show, so shoot the same card the way a
