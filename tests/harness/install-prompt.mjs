@@ -96,12 +96,18 @@ async function seeded(ctx, { ios = false } = {}) {
   check('ios: warns the installed app starts empty', /starts empty/i.test(body))
   check('ios: says storage is separate from Safari', /separate storage/i.test(body))
   check('ios: tells them to import the backup after installing', /Import/.test(body))
-  check('ios: offers the backup as the primary action', await page.locator('.installtip__go').innerText().then(t => /Save backup/i.test(t)).catch(() => false))
+  // The primary iOS action must be a BACKUP, never the install — the exact
+  // label depends on whether Drive is configured ("Back up to Drive" vs
+  // "Save a file"), so assert the intent, not the wording.
+  const primary = await page.locator('.installtip__go').first().innerText().catch(() => '')
+  check('ios: offers a backup as the primary action, not the install', /back up|save a file|save backup/i.test(primary), primary)
   check('ios: no console errors', errs.length === 0, errs.join(' | '))
 
   // The backup must actually produce a file — the whole iOS flow depends on it.
   const pending = page.waitForEvent('download', { timeout: 10000 }).catch(() => null)
-  await page.locator('.installtip__go').click()
+  // Target the file route explicitly: the Drive button, when configured, sits
+  // in the same primary slot but uploads instead of downloading.
+  await page.getByRole('button', { name: /save a file|save backup|save again/i }).first().click()
   const dl = await pending
   const name = dl ? dl.suggestedFilename() : ''
   check('ios: Save backup downloads a real backup file', /^cardstock-backup-.*\.json$/.test(name), name || 'no download fired')
