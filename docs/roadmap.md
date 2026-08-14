@@ -31,7 +31,8 @@ scanning, upload — zero marginal cost); it structurally mismatches hosted sync
 | Question | Answer | Consequence |
 | -------- | ------ | ----------- |
 | Analytics consent | **Opt-out** — on by default, disclosed, one tap off | Needs a first-run disclosure and an EU carve-out (below). Without it the measured population is ~0. |
-| Receiver platform | **Supabase** | The `first-party-analytics` and `supabase-migrations` skills target this shape, and viva-maya's `0010`/`0015`/`0019` lessons transfer directly. Reusable as the round-3 sync backend. |
+| Receiver platform | **Supabase — a NEW project, in its own organization** | See "Why not the shared project" below. The `first-party-analytics` and `supabase-migrations` skills target this shape, and viva-maya's `0010`/`0015`/`0019` lessons transfer directly. Reusable as the round-3 sync backend. |
+| Consent geography | **US-first; timezone-derived EEA/UK carve-out** | No geolocation API, no IP lookup, no prompt. US users are auto-on with zero interaction. |
 | Naming | **CardStash** for the product; storage/wire identifiers **frozen** as `cardstock` | See round 7 — renaming the Dexie DB would orphan every existing collection. |
 
 ---
@@ -97,6 +98,53 @@ Lesson 47: the still matrix reports **0 wrong cards across 282 cells**; two
 ordinary handheld clips produced **10 wrong in 40 identifications**. Decision 4
 calls a confident wrong card the worst failure class, and in **collect mode it is
 filed silently with no confirmation.** Identify rate is not the number to move.
+
+### 5. `telemetry.corrupt.solutions` is not a telemetry receiver (verified 2026-08-14)
+
+It ships as `DEFAULT_DIAG_ENDPOINT` in every install, and it is not what it looks
+like:
+
+| Check | Result |
+| ----- | ------ |
+| DNS | resolves, Cloudflare-proxied |
+| `GET /` | **200 — serves Family Hub** |
+| `GET /ingest/telemetry` | **404** |
+| References across `~/Creative` | **only CardStash** |
+
+No harm has been done, because the `diagToken` gate meant nothing was ever sent.
+But removing that gate without repointing the endpoint would 404 every event into
+Family Hub's origin. **The endpoint constant and the `merge()` rewrite in round 0a
+are therefore both required, not optional.**
+
+What the sibling apps actually use: viva-maya, Turbo Maze and primos-run all POST
+directly to Supabase project `deskabqqxqqibxjffwmb` at
+`/rest/v1/rpc/ingest_events`. The "Gmail for game saves" path is viva-maya's
+`core/cloud.ts` — Google OAuth straight to that same project. Its contract is a
+good model for round 3: **dormant until configured, localStorage stays
+authoritative, the cloud is a mirror.**
+
+### 6. Why not the shared Supabase project
+
+Three apps already share `deskabqqxqqibxjffwmb`, and
+`primos-run/docs/ANALYTICS.md` documents what that cost:
+
+- `schema_migrations` is **per-project, not per-app**, so Primos' `0001`–`0003`
+  collided with Viva Maya's and Turbo Maze's by numeric coincidence.
+- **`supabase db push` applied nothing and reported success.** Silent failure.
+- The CLI's suggested repair would have marked **Viva Maya's and Turbo Maze's
+  twenty migrations as reverted.**
+- The standing workaround is applying every migration by hand via `db query` and
+  recording nothing in `schema_migrations` — permanently.
+
+CardStash would be the fourth app paying that tax, and it needs the most
+migrations of any of them (analytics now, sync schema later, entitlement later).
+Blast radius compounds it: an anonymous high-volume event firehose must never be
+able to fill the database holding users' game saves.
+
+**A new project in its own organization** sidesteps both the migration collision
+and the per-org free-project cap. ⚠️ Confirm the current cap in the dashboard —
+`deskabqqxqqibxjffwmb` + `family-hub` may already occupy it, and that limit has
+moved before.
 
 ### Also worth knowing
 
@@ -170,6 +218,30 @@ Non-negotiables:
 
 Two-phase deploy per the `supabase-migrations` rule: schema first, client second.
 Cached clients sit on old bundles for days.
+
+### 0b-ii. Volume — retention and rollups are day-one, not later
+
+At ~38 events/day per active user and ~350 bytes/row all-in with indexes:
+
+| Users | Raw, no retention | With 60-day retention (steady state) |
+| ----- | ----------------- | ------------------------------------ |
+| 100 DAU | 40 MB/mo | ~80 MB — free tier, indefinitely |
+| 1,000 DAU | **400 MB/mo — free tier gone in ~5 weeks** | ~800 MB — needs Pro (8 GB) |
+| 10,000 DAU | ~4 GB/mo | ~8 GB — at Pro's included limit |
+
+**~1,000 DAU eats the free tier in about a month.** Three levers, in the order
+they should exist:
+
+1. **Nightly rollups into `metrics_daily`** — DAU, sessions, scan success by
+   game, top failure hashes. A few KB/day, **~2 MB/year, kept forever.** Raw
+   events become the expensive disposable layer; aggregates become the cheap
+   permanent one. This is the structural answer to volume.
+2. **60-day retention on raw events** — viva-maya's `prune_events` pattern,
+   tighter. Nobody queries a raw scan attempt from six months ago.
+3. **Sampling on `scan_attempt` only** — it is ~40% of all volume and the least
+   individually valuable (one binder session fires ~50). 1-in-5 cuts total volume
+   ~32% while `scan_failure` stays at 100%, because failure diagnosis needs every
+   failure. **A knob for if volume shows up — do not turn it on before measuring.**
 
 ### 0c. Dashboard
 
@@ -361,9 +433,12 @@ README also lists three games; there are nine.
 
 ## Things to verify before relying on them
 
-- `drive.appdata`'s current scope tier and review requirement (round 1).
-- What `telemetry.corrupt.solutions` actually is today — it ships as the default
-  endpoint in every install and round 0a's migration depends on knowing.
+- `drive.appdata`'s current scope tier and review requirement (round 1). The
+  whole cost case for Drive backup rests on it being non-sensitive.
+- Supabase's current free-project cap per organization (finding 6).
 - Whether zustand `persist` has written `diagEndpoint` for installs that never
   changed a setting, or only for those that did. The `merge()` fix covers both,
   but the blast radius differs.
+
+~~What `telemetry.corrupt.solutions` actually is~~ — **answered, see finding 5.**
+It serves Family Hub and `/ingest/telemetry` 404s.
