@@ -1,11 +1,20 @@
 /**
  * Bring a real card photograph into the harness.
  *
- * Phones shoot 4000px, 4MB JPEGs. The harness resizes to CAPTURE_MAX_EDGE
- * (1600) anyway — that is what the app's own captureFrame hands identifyFrame
- * — so anything above it is repo weight for no signal. This downscales to
- * that edge, writes the file under a stable key, and adds the manifest row so
- * ground truth lands beside the image instead of in someone's memory.
+ * Phones shoot 4000px, 4MB JPEGs, and the app resizes to its own capture cap
+ * anyway, so anything above that is repo weight for no signal. This downscales
+ * to the right cap, writes the file under a stable key, and adds the manifest
+ * row so ground truth lands beside the image instead of in someone's memory.
+ *
+ * The right cap is NOT the same for the two kinds of photograph, and getting
+ * this wrong quietly caps what a binder page can ever score. A single card is
+ * capped at CAPTURE_MAX_EDGE (1600) because that is what `captureFrame` hands
+ * `identifyFrame`. A PAGE is cut into ~9 crops first, so the same 1600 leaves
+ * each card ~370px wide — under the ~790px where a printed collector line
+ * stops being legible — and the app decodes pages at PAGE_MAX_EDGE (3200,
+ * lib/multiscan.ts) for exactly that reason. The first committed binder page
+ * was ingested at 1600 and its identification numbers are a floor set by the
+ * ingest tool rather than by the pipeline.
  *
  *   node tests/harness/photos/ingest.mjs <source> \
  *     --key=ygo-secret-ip-masquerena --game=yugioh --name="I:P Masquerena" \
@@ -20,7 +29,10 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const MANIFEST = join(HERE, 'manifest.json')
+/** Single card: what captureFrame hands identifyFrame (lib/camera.ts). */
 const MAX_EDGE = 1600
+/** A page, which gets cut into ~9 crops first (PAGE_MAX_EDGE, lib/multiscan.ts). */
+const BINDER_MAX_EDGE = 3200
 const QUALITY = 0.82
 
 const positional = []
@@ -74,7 +86,7 @@ const out = await page.evaluate(
       fromH: img.naturalHeight,
     }
   },
-  { url: dataUrl, maxEdge: MAX_EDGE, quality: QUALITY },
+  { url: dataUrl, maxEdge: args.binder ? BINDER_MAX_EDGE : MAX_EDGE, quality: QUALITY },
 )
 await browser.close()
 
