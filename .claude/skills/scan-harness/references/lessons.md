@@ -448,3 +448,46 @@ result seems absurd, check this list before writing code.
     be done from the view, and the effect that does it must depend on
     `scanner.status`: `start()` and `resumeScanning()` restart the rAF loop
     without the mode changing, and nothing else re-parks it.
+
+## What real video said (the clips round)
+
+47. **The live path produces WRONG CARDS, and no still-image battery can show
+    it.** The standard matrix reports zero wrong cards across 282 cells. Two
+    ordinary handheld clips produced **10 in 40 identifications**: frames of a
+    Krookodile ex that read "Krookodile" match a real, different, far cheaper
+    card EXACTLY at score 1.0 (lesson 29's class, with `parsePokemonVariant`
+    silent because the rules box never read), and Azure-Eyes Silver Dragon
+    answered "Agave Dragon" off a partial "DRAGON". `compose()` structurally
+    cannot produce the input that causes this — a frame where a MOVING
+    highlight leaves the name half-legible in one specific way. Rule: a battery
+    of stills cannot bound the wrong-card rate of a live scanner, and the
+    wrong-card rate is the number that matters most.
+48. **Consecutive frames disagree, so which frame the scanner grabs decides
+    whether the user gets their card.** In one burst of the Krookodile clip,
+    frames 0 and 1 read "Krookodile ex" and identify correctly and frame 2 —
+    33ms later — reads "Krookodile" and answers the wrong card. The scanner
+    commits to a single frame with no corroboration. The obvious lever is
+    frame SELECTION, and the obvious guard is agreement across two attempts
+    before committing, which matters most in collect mode where a hit is filed
+    with no confirmation.
+49. **Stacking is for noise, not for glare — measured, against the
+    hypothesis.** The natural extension of `captureFrameStacked` (dark scenes,
+    3 frames, measured 4/21 → 17/21 there) is to run it always. On real
+    clips it is WORSE than picking the best frame in the same burst: 3/10
+    against 4/10 bursts that contained a readable frame. The mechanism says
+    why — averaging divides INDEPENDENT noise by root N, and a specular
+    highlight moving across the card is not independent noise, so averaging
+    smears it across the glyphs instead of cancelling it. Keep stacking gated
+    on darkness.
+50. **A clip needs both shapes of sample, or it answers only half the
+    question.** `ingest-clip.mjs` stores bursts of consecutive frames spread
+    across the clip: across bursts answers "does any frame identify" (frame
+    selection), within a burst answers "does averaging beat the best of them"
+    (stacking). Frames 5 seconds apart cannot answer the second; three frames
+    33ms apart cannot answer the first.
+51. **Tooling reality: nothing in the sandbox decodes an iPhone clip.**
+    Playwright's ffmpeg is built `--disable-everything` (no QuickTime demuxer)
+    and its Chromium reports `canPlayType` empty for H.264 — a `<video>` never
+    loads. `npm i --no-save ffmpeg-static` works (registry traffic bypasses the
+    proxy, lesson 14). So frames are extracted once at ingest and committed;
+    the clip itself is not stored, since the harness could not read it anyway.
