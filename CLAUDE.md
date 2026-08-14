@@ -43,8 +43,13 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - Deploys are automatic: pushing/merging to `main` triggers the GitHub Actions
   workflow that builds and publishes `gh-pages`. `npm run deploy` is a manual
   fallback only — don't use it when Actions works.
-- `npm run sync` — optional self-hosted live-sync server (`server/`, zero deps,
-  state in the gitignored `server/data/`). The app never requires it.
+- `npm run sync` — self-hosted live-sync server (`server/`, zero deps, state in
+  the gitignored `server/data/`). The app never requires it, and it is being
+  retired in favour of hosted social — see below.
+- `npm run test:social` — the hosted-social RLS harness against a real Supabase
+  project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
+  after any migration touching `binders`, `friendships`, `trade_offers` or
+  `inbox`.
 - `npm run test:unit` — node tests (corner parsing, name candidates, harness
   stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
@@ -73,8 +78,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
-  the Dexie writes for friends/trades live in `db.ts`), optional live sync
-  (`sync.ts` — publish/poll against `server/sync-server.mjs`), opt-in backup to
+  the Dexie writes for friends/trades live in `db.ts`), live sync
+  (`sync.ts` — publish/poll against `server/sync-server.mjs`; **being retired**,
+  see Hosted social below), opt-in backup to
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
@@ -141,6 +147,31 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   NOT applied — viewers multiply by condition factor. Wants are card-level,
   keyed `${game}|${normalizeName(name)}` (any printing matches); matchmaking
   compares want keys, never card ids.
+
+## Hosted social (schema landed 2026-08-14, client not built)
+
+Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
+on the same Supabase project as the cloud vault. **The database is now defined
+by `supabase/migrations/` (0000–0004), not `supabase/schema.sql`** — that file
+is a pointer, and the migration history is baselined on the live project so a
+`db push` cannot replay from zero. Read `docs/social.md` and decision 16 before
+touching any of it.
+
+The one rule that is not obvious from the SQL: **scope drives visibility.** A
+`scope='trade'` binder is readable by any signed-in user (being findable is the
+point, and it is what makes global matching possible); a `scope='all'` binder
+only by accepted friends. Only `trade` publishers enter the `trade_offers`
+index, so a friends-only binder is never globally matchable — `publish_binder()`
+rebuilds row and index in one call to keep that true at every instant.
+
+`binders` is plaintext and that is deliberate: a friend's app must *read* it, so
+it cannot be E2E-encrypted like `vaults`. The two are separate tables, separate
+opt-ins, and `erase_social()` leaves `vaults` alone. Never widen what is
+published beyond what the user chose.
+
+Still to build: `lib/socialcloud.ts` (plan in `docs/social.md`), the UI, and
+retiring `sync.ts` + `server/`. Until the replacement exists, leave `sync.ts`
+alone — removing it first takes the live tier away with nothing in its place.
 
 ## Planned paid tier — binder scanning and photo upload
 

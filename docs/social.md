@@ -1,26 +1,48 @@
 # Friends, trades and sync
 
-## The stance: serverless by default
+## The stance: serverless by default, hosted by choice
 
 Everything social works with **no server at all**, and that path must keep
 working. A share *is* the data: a profile snapshot compressed into a URL
 fragment, or the same JSON as a file. Nothing is published anywhere unless the
 user sends it to someone.
 
-Live sync (`lib/sync.ts` + `server/`) is an **opt-in overlay** on top of that,
-not a replacement. With `syncOn` false, nothing in `sync.ts` runs. Never make
-links or files a second-class citizen, and never route them through a server.
+**Hosted social** (Supabase — see the second half of this document) is an
+opt-in overlay on top of that, not a replacement. Signed out, or signed in
+without publishing, nothing about the link path changes. Never make links or
+files a second-class citizen, and never route them through a server.
 
 Everything decoded from a link, a file, a backup or a server response is
 **untrusted** and goes through the sanitizers in `social.ts`. There is one
-validation implementation, and this is it.
+validation implementation, and this is it — hosting does not earn the server
+any trust it would not extend to a pasted string.
+
+> **The self-hosted box is being retired.** `server/sync-server.mjs` and
+> `lib/sync.ts` were the LAN answer to live updates. Hosted social supersedes
+> them, and the migration note at the end of this document records what that
+> costs and who it affects.
 
 ## Identity
 
-`ensureProfileId()` mints a `uid()` on first share and keeps it forever.
-`myProfile()` returns `{ id, name, note, scope }` from settings. There are no
-accounts and no recovery: clearing browser storage loses the id (and, with live
-sync, the ability to republish under it).
+Two identities exist, and which one you have decides what social can do.
+
+**Serverless — `profileId`.** `ensureProfileId()` mints a `uid()` on first share
+and keeps it forever; `myProfile()` returns `{ id, name, note, scope }` from
+settings. There are no accounts and no recovery: clearing browser storage loses
+the id, every friend who followed that binder is now following a dead id, and
+nothing can ever be republished under it. That is the worst property of the
+serverless design, and it is why accounts exist at all.
+
+**Hosted — the Supabase user.** Signed in, the account *is* the identity. Sign
+in anywhere and you are you; a lost device costs nothing. The `handle`
+(`@rae`) is the human-facing name for that row and the thing friends type
+instead of pasting a link.
+
+**They coexist deliberately.** A `ProfilePayload.id` is an opaque string that
+`sanitizeParty` caps at 64 characters, so a legacy `uid()` and a Supabase uuid
+both validate. Friends imported before hosting keep working, and a signed-in
+user's shares carry their uuid so the two halves of their social graph converge
+on one id rather than forking.
 
 ## Payloads
 
@@ -82,6 +104,14 @@ name}` ``. Any printing matches. Matchmaking compares want *keys* on both sides
 Wants travel inside a profile share, so both sides can see matches: cards of
 theirs you're hunting, and cards of yours they're hunting.
 
+**Two tiers, same key.** Serverless matchmaking can only compare against
+friends whose binder you already imported — which means you only ever find
+cards held by people you already know. Hosted adds a global tier: the
+`match_wants` RPC answers "who is offering this key?" across every publisher
+with a discoverable binder. It is the one genuinely new capability hosting
+buys, and it is impossible without a server. The key shape is identical, so a
+match is a match whichever tier found it.
+
 ## Friends
 
 `upsertFriendFromProfile(payload, sourceUrl?)` imports or refreshes a friend.
@@ -137,74 +167,202 @@ the same treatment as a pasted link.
 
 ---
 
-# Live sync (optional)
+# Hosted social (Supabase)
 
-## Client (`lib/sync.ts`)
+Accounts, mutual friends, a trade inbox and global want-matching, on the same
+project that already holds the cloud vault. Schema in `supabase/migrations/`
+(`0001`–`0004`); applied and verified against the live project 2026-08-14.
 
-Off unless `syncOn` **and** `syncUrl` are set. `checkSyncServer(url)` verifies
-`GET /v1/health` returns `app: 'cardstock-sync'` before the address sticks.
+**It is dormant until the user opts in.** Signed out, none of this runs and the
+link path behaves exactly as it always has.
 
-The loop (`startSyncLoop`) polls every 20 s, only while the document is visible,
-plus once on becoming visible and 2 s after boot. Each `syncNow()`:
+## Why hosting was worth it here
 
-1. **publish** — `buildProfilePayload` from the live collection + wants, hashed
-   minus its timestamp; skipped when nothing changed since the last publish;
-2. **pull friends** — re-read every followed binder, apply only when their
-   `at` is newer than the stored `exportedAt`; a friend who hasn't published
-   there yet is normal, not an error;
-3. **drain inbox** — `GET /v1/inbox/:id?since=<cursor>`; trades become records,
-   replies update existing ones; junk items are skipped, never fatal; the
-   cursor advances to the newest item seen.
+Every one of these is a property the serverless design cannot have, not a
+polish item:
 
-`deviceToken()` mints and stores a `syncToken` on first use — it is what proves
-this device owns its profile id. `resetSyncState()` clears the publish hash and
-cursor when switching servers or identities.
+| Serverless today | Hosted |
+| ---------------- | ------ |
+| `profileId` in localStorage; clearing storage destroys your identity permanently and orphans every follower | The account is the identity — recoverable on any device |
+| Add a friend by pasting a link up to 20,000 chars, then a file beyond that | Add by `@handle` |
+| A trade is four hops of links, either of which can be lost in a chat app | A proposal is a row addressed to a user; their app finds it |
+| Friends' binders refresh manually, or you host a JSON file somewhere with CORS | They refresh themselves |
+| Matchmaking only against friends whose binder you already imported | Global — "who has the card I'm hunting?" |
 
-**Every response is re-sanitized.** A hostile or buggy server can only ever hand
-the app a well-formed profile/trade/reply.
+## THE VISIBILITY RULE
 
-## Server (`server/sync-server.mjs`)
+The one thing to understand before touching `0003_social_binders.sql`. Scope
+drives visibility, reusing the **For trade / Everything** toggle already in
+`FriendsView` rather than adding a second privacy control beside it:
 
-Zero dependencies, plain `node`, state in a single JSON file at
-`server/data/state.json` (gitignored; delete to reset). Run with `npm run sync`
-(`-- --port 9000` to change the port); it prints the localhost and LAN addresses
-to hand out.
+| `scope` | Who can read the binder | Why |
+| ------- | ----------------------- | --- |
+| `trade` | **any signed-in user** | You published cards you want to swap. Being findable is the entire purpose, and it is what makes global matching possible. |
+| `all` | **accepted friends only** | A full collection inventory is a valuation and theft target. Never world-readable, whatever else is on. |
 
-| Method | Path | Auth | Purpose |
-| ------ | ---- | ---- | ------- |
-| GET | `/v1/health` | — | Identify the server (`app`, `v`, binder count). |
-| GET | `/v1/directory` | — | Who has published a binder here (id, name, updatedAt, card/want counts). |
-| PUT | `/v1/binders/:id` | owner token | Publish my binder. Payload must be a `profile` whose `id` matches the path. |
-| GET | `/v1/binders/:id` | — | Read a published binder. |
-| POST | `/v1/inbox/:id` | — | Drop a trade proposal or reply for someone. |
-| GET | `/v1/inbox/:id?since=` | owner token | Drain my inbox. |
+Expressed as three permissive `SELECT` policies that OR together — owner,
+`scope='trade'` + signed in, `scope='all'` + `are_friends()`. They are kept
+separate rather than folded into one boolean so each audience is independently
+reviewable.
 
-**Ownership is trust-on-first-use.** The first device to `PUT` a profile id
-claims it with a SHA-256 hash of its device token; only that token can publish
-again or read that inbox. Anyone who knows an id can *send* a trade to it —
-exactly as anyone can send you a link. An unclaimed id's inbox is readable by
-whoever asks, because nothing has been published under it yet and there is no
-owner to protect.
+Two consequences that must survive any later edit:
 
-Limits: 4 MB bodies, 500 profiles, 200 inbox items per id, 30-day inbox TTL,
-debounced atomic writes (temp file + rename). Profile ids must match
-`[A-Za-z0-9_-]{6,64}`. CORS is wide open (`*`) by design — it is a LAN tool.
+- **Only `scope='trade'` publishers enter the `trade_offers` index.** A
+  friends-only binder must never be globally matchable through a side door.
+  `publish_binder()` enforces this by rebuilding the row and the index in one
+  call, so there is no instant where a user who just switched to friends-only
+  is still globally listed. This is tested.
+- **Switching `all` → `trade` widens the audience of a document already
+  uploaded.** The client must say plainly which audience it is about to
+  publish to. Silently re-scoping someone's collection is the failure this
+  whole rule exists to prevent.
 
-### Deliberate scope
+## What the server can and cannot read
 
-This is a LAN/dev convenience server, not a hosted service:
+This is where hosted social and the cloud vault deliberately diverge, and
+conflating them would undo decision 15.
 
-- **No transport security.** Plain HTTP, tokens in headers. Fine on your own
-  network; don't port-forward it.
-- **No accounts or recovery.** Losing the device token means losing the ability
-  to republish under that profile id.
-- **It trusts the network it's on.** Anyone who can reach the port can read
-  published binders and the directory.
+| | `vaults` | `binders` |
+| --- | --- | --- |
+| Contents | your whole collection | only what you chose to publish |
+| At rest | ciphertext the server cannot read | plaintext JSON |
+| Key | your passphrase, never uploaded | none |
+| Audience | you | per the visibility rule above |
 
-The route/table shape (`binders`, `inbox`) deliberately matches the eventual
-hosted backend, so moving to Postgres/Supabase with real auth is a storage swap
-rather than a client rewrite.
+Social **cannot** be end-to-end encrypted the way the vault is: a friend's app
+has to read your binder, so the server has to serve something readable.
+Rather than weaken the vault to reach it, `binders` is a separate, narrow,
+plaintext table holding the same document that already travels in a share
+link. The vault is untouched, and either feature runs without the other.
 
+`erase_social()` reflects this: it drops your profile, binder, index entries,
+inbox and friendships, and deliberately **leaves `vaults` alone**. Erasing your
+social presence must not delete the encrypted backup of your cards.
+
+## The tables
+
+**`profiles`** — `user_id`, `handle`, `display_name`. Readable by any signed-in
+user, because resolving `@rae` to a user id is what a directory is for. Carries
+identity *only*; the contact blurb ("DM @rae on Discord") lives on the binder
+row so it inherits the visibility rule instead of being published to every
+stranger. `set_profile()` normalises, validates `^[a-z0-9_]{3,24}$`, and
+refuses the `reserved_handles` list (`support`, `admin`, `cardstock`, …) so
+nobody can impersonate the product inside a trade proposal.
+
+**`friendships`** — one row per *pair*, `requester`/`addressee`/`status`
+(`pending | accepted | blocked`). Directional columns because the UI needs
+"waiting on them" vs "needs your answer"; friendship itself is undirected, so
+`are_friends()` checks both column orders and there is no half-accepted state.
+Only the addressee may accept — the requester flipping their own row would be
+the whole consent gate, and it is explicitly tested that they cannot.
+`request_friend(handle)` auto-accepts when the other person already asked, so
+two people who both send a request end up friends rather than deadlocked.
+
+**`binders`** — `payload` is the `ProfilePayload` wire shape verbatim, stored
+whole rather than normalised: the client re-sanitizes it on arrival regardless
+(decision 7), so a decomposed copy would add a second shape to validate without
+removing the need to validate the first. `card_count`/`want_count` are
+denormalised so a friends list renders without downloading everyone's cards.
+
+**`trade_offers`** — `(user_id, want_key)` for cards actually offered. **No RLS
+policy and no grant to `authenticated`, deliberately.** An index of who owns
+what is the definition of a table that must not be enumerable — readable means
+dumpable, and a dump of this is a shopping list for deciding who to rob. It is
+reachable only through `match_wants()`, which answers ≤200 keys per call and
+≤20 holders per key. That is a lookup oracle rather than a database: a large
+improvement over publishing the table, and honestly not perfection.
+
+**`inbox`** — trade proposals and replies, the direct port of the self-hosted
+box's `POST/GET /v1/inbox/:id`. `sender` is stamped server-side from
+`auth.uid()` and is what the app should trust when it disagrees with the
+payload's client-authored `from` block. Recipient-only read (a sender cannot
+confirm delivery, or probe whether an account exists); no INSERT policy at all,
+so `send_to_inbox()` is the only door.
+
+You may send to an accepted friend, or to anyone publishing a `trade` binder —
+they advertised cards for swap, so being reachable about them is the point, and
+it mirrors today's rule that anyone holding your link can propose a trade. A
+user who publishes nothing and has no friends is unreachable, which is the
+correct default. Capped at 20 undrained items per sender-recipient pair, so one
+spammer can fill neither an inbox nor the table.
+
+## Client plan (not yet built)
+
+`lib/socialcloud.ts`, dynamically imported exactly like `cloud.ts`, reusing its
+session handling — one login serves the vault and social both.
+
+1. **Session** — reuse `cloud.ts`'s `loadSession`/`freshToken`. Do not mint a
+   second auth path.
+2. **`publishBinder()`** — `buildProfilePayload()` unchanged, then derive the
+   offers array with `wantKeyFor()` and call the `publish_binder` RPC. Keep
+   `sync.ts`'s payload-hash skip; it is a good idea that survives the rewrite.
+3. **`pullFriends()`** — select `binders` for followed user ids, compare
+   `revision`, and feed changed rows through `sanitizePayload()` →
+   `upsertFriendFromProfile()`. Unchanged from `sync.ts` apart from the
+   transport.
+4. **`drainInbox()`** — select `inbox` where `id > cursor` ordered by `id`,
+   sanitize each, `recordIncomingTrade` / `applyTradeReply`, advance the
+   cursor, then delete the drained rows.
+5. **`matchWants()`** — call `match_wants` with the local want keys; render
+   holders on the wants list.
+6. **Realtime is the obvious follow-up** and is deliberately not day one:
+   polling works, is simpler to reason about, and a subscription that silently
+   dies is worse than a poll that visibly lags.
+
+**Settings** gains `socialOn`, `socialHandle`, `socialCursor`, `socialAt`. The
+`syncUrl`/`syncOn`/`syncToken`/`syncCursor` keys are retired — leave them in
+the `merge()` sanitizer long enough to ignore stored values rather than
+crashing on them.
+
+**What does not change:** every payload still goes through `social.ts`'s
+sanitizers, the wire marker stays `cardstock-social` (roadmap round 7 — a
+rename breaks every link in the wild, in both directions), links and files stay
+first-class, and analytics stay content-free — handles and card names are
+never event props.
+
+## What is verified, and how
+
+`psql` as `postgres` bypasses RLS, so it can only prove objects exist. The
+probe drives the real REST surface with genuine user JWTs: four signed-in users
+and one anonymous caller, **43 assertions, run green locally and against the
+live project**, including —
+
+- a stranger reading a `trade` binder and **failing** to read an `all` binder;
+- a pending request not unlocking anything, and the requester **failing** to
+  accept their own request;
+- an accepted friend then reading it, while a third party still cannot;
+- `trade_offers` refusing a direct dump to a signed-in user;
+- `match_wants` excluding the friends-only publisher, and eviction from the
+  global index on an `all` → `trade` flip;
+- inbox sender stamped server-side, sender unable to read it back, direct
+  INSERT refused, unreachable recipients refused, the 20-item cap holding;
+- `erase_social()` clearing social while **the vault survives**;
+- control tests, so a refusal is provably a refusal and not a missing object.
+
+Throwaway users were deleted afterwards; every social table is back to zero
+rows on the live project.
+
+## Retiring the self-hosted server
+
+`server/sync-server.mjs` and `lib/sync.ts` are superseded. What that costs,
+stated plainly rather than discovered later:
+
+- **A LAN playgroup with no accounts loses its live path.** That was a real
+  property — no sign-up, no internet, everyone on one wi-fi. Hosted social
+  needs an account and a connection. Links still work offline-ish (they are
+  just text), so the floor is unchanged, but the no-account *live* tier is
+  gone.
+- **`npm run sync`, `checkSyncServer`, the directory and `followFromServer`
+  disappear**, along with the trust-on-first-use device token. Nothing
+  migrates: a self-hosted binder is republished by signing in and publishing.
+- **The route shape ported as predicted.** `binders` (whole-document write) and
+  `inbox` (append + cursor drain) became tables with policies almost
+  one-for-one — the claim in the old version of this document, and roadmap
+  finding 2, both held.
+
+Until `socialcloud.ts` lands, `sync.ts` still works and should be left alone;
+removing it before its replacement exists would take the live tier away with
+nothing in its place.
 
 ---
 
@@ -216,7 +374,7 @@ one person keeping their own collection across their own devices — which
 decision 14 established is otherwise impossible on iOS, where a Home Screen
 web app cannot see the Safari tab's IndexedDB.
 
-**Shape.** Supabase holds one row per user (`supabase/schema.sql`). The row is
+**Shape.** Supabase holds one row per user (`supabase/migrations/0000_vaults.sql`). The row is
 ciphertext: `crypto.ts` derives an AES-GCM key from a passphrase with
 PBKDF2-SHA256 at 600k iterations and encrypts the same `Backup` object the
 export button writes. Sign-in decides *which row you may touch*; the
@@ -274,7 +432,7 @@ newer ones land with only REFERENCES/TRIGGER/TRUNCATE. RLS was enabled and the
 policy was correct, and every single request still failed — PostgREST answers
 `42501 permission denied for table vaults` *before* it consults a policy, so
 the failure looks like a broken table rather than a missing grant. The grants
-are now written out explicitly in `supabase/schema.sql`. Do not delete them on
+are now written out explicitly in every migration. Do not delete them on
 the grounds that Supabase "does that automatically"; it does not.
 
 **Emailed codes need custom SMTP, and that is not a preference.** On Supabase's

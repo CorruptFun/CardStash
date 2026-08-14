@@ -3,15 +3,15 @@
  *
  * Both values are **designed to be public**: the publishable key identifies
  * the project, and row-level security is the actual boundary — every request
- * is authorised by the signed-in user's JWT against the policy in
- * `supabase/schema.sql`, not by possession of this key. That is why they can
+ * is authorised by the signed-in user's JWT against the policies in
+ * `supabase/migrations/`, not by possession of this key. That is why they can
  * sit in a static bundle on gh-pages at all.
  *
  * Two consequences worth stating, because both are load-bearing:
  *
- * - **The RLS policy is the security model.** If `supabase/schema.sql` has not
- *   been applied, or its policy is dropped, this key is enough for anyone to
- *   read the table. The schema is not optional setup; it is the lock.
+ * - **The RLS policies are the security model.** If `supabase/migrations/` has
+ *   not been applied, or a policy is dropped, this key is enough for anyone to
+ *   read the tables. The schema is not optional setup; it is the lock.
  * - **The server still cannot read collections.** Vault rows hold ciphertext
  *   from `crypto.ts`, keyed by a passphrase that never leaves the device.
  *

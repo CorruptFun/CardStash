@@ -177,6 +177,38 @@ console must stay clean. It catches wiring the type checker can't — JSX
 structure, store subscriptions, dead imports — in the artifact users actually
 get.
 
+## Live Supabase harnesses (`test:cloud`, `test:social`)
+
+Two harnesses that can only fail in production, so neither is in CI and both
+need `SUPABASE_SECRET`:
+
+```sh
+SUPABASE_SECRET=sb_secret_… npm run test:cloud    # the encrypted vault transport
+SUPABASE_SECRET=sb_secret_… npm run test:social   # hosted-social RLS
+```
+
+Each creates its own throwaway users and deletes them on the way out, including
+after a failure — deleting an auth user cascades every row it wrote, so a green
+*or* red run leaves the project as it found it. Point them at a local stack
+with `SUPABASE_URL` / `SUPABASE_KEY`.
+
+**Why these exist rather than a schema review.** `psql` as `postgres` bypasses
+row-level security entirely, so it can only prove that tables and policies
+exist — never that they do what they say. Both harnesses drive the real REST
+surface with genuine user JWTs, which is the only way an RLS claim is testable
+at all.
+
+`test:social` is the regression guard on decision 16's visibility rule: 43
+assertions covering a stranger blocked from an `all` binder, a requester unable
+to accept their own friend request, the offers index refusing a direct dump,
+eviction from global matching on a scope flip, and `erase_social()` leaving the
+vault intact. It ends with control tests, so a refusal is provably a refusal
+and not a missing object.
+
+**Run `test:social` after any migration touching `binders`, `friendships`,
+`trade_offers` or `inbox`.** Those policies look correct in review whether or
+not they are.
+
 ## CI
 
 | Workflow | Trigger | Does |

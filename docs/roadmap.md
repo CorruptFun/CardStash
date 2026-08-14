@@ -475,6 +475,33 @@ README also lists three games; there are nine.
 | Round 0e — merge basis | Dexie v7 `updatedAt` + tombstones, verified against a hand-built v6 DB (cost basis and quantities survived). |
 | Round 5 — bundle | `chunkSizeWarningLimit: 800`, with the reasoning in `vite.config.ts`. |
 | Round 7 — partial | README no longer claims Gemini vision scanning; nine games listed; the no-server promise scoped rather than retired. |
+| Round 3 — social half, **schema only** | `supabase/migrations/0001`–`0004`: accounts + handles, mutual friendships, scope-driven binder visibility, trade inbox, global want-matching. Applied to the live project and proven by `npm run test:social` (43 assertions, real JWTs). Client not built. |
+
+**Round 3 update (2026-08-14).** Finding 2 said the "storage swap rather than a
+client rewrite" claim was true for the social overlay and false for collection
+sync. Both halves have now been settled, separately and correctly:
+
+- **Collection sync** went to the encrypted vault (decision 15) — a new
+  subsystem, as predicted, and deliberately E2E so the server holds ciphertext.
+- **The social overlay** ported as predicted: `binders` (whole-document write)
+  and `inbox` (append + cursor drain) became tables with policies almost
+  one-for-one.
+
+The decision that was *not* in the original plan: **hosted social is plaintext,
+and scope is the privacy control** (decision 16). Social cannot be encrypted
+like the vault, because a friend's app has to read the binder. Rather than
+weaken the vault, `binders` is a separate narrow table holding only what the
+user chose to publish — the same document that already travels in a share link.
+
+Also settled: **the self-hosted `server/` box is superseded.** The cost is real
+and is recorded in `docs/social.md` — a LAN playgroup loses the no-account live
+tier. Links still work, so the floor is unchanged. `sync.ts` stays until
+`socialcloud.ts` replaces it; removing it first would take the live tier away
+with nothing in its place.
+
+Still open from round 3's original text: the first-sync union-with-review for
+*collection* data. The vault does a union merge today with no user-visible
+review, and tombstones remain the known gap (decision 15).
 
 **The one gap in round 1:** nobody has completed a Google sign-in end to end, so
 consent → token → a file actually landing in Drive is unproven. Everything up to

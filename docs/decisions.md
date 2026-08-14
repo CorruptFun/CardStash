@@ -298,10 +298,59 @@ local-first existed to avoid.
 **Consequences.** A second device is two steps, not one — sign in, then enter
 the passphrase — and there is no reset, so the UI says so in as many words
 rather than discovering it for the user later. The key is never persisted; a
-reload asks again. `supabase/schema.sql` is not setup, it is the lock: the
+reload asks again. `supabase/migrations/` is not setup, it is the lock: the
 publishable key is public by design and RLS is the only thing standing between
 it and the table.
 
 **What this does not buy.** Entitlement. A Supabase login proves identity, not
 payment, so decision 13 is untouched — though the same auth would be the
 natural place to hang a real answer later.
+
+---
+
+### 16. Hosted social is plaintext, and scope is the privacy control
+
+**Decision (2026-08-14).** Social moves onto the same Supabase project as the
+vault — accounts, handles, mutual friends, a trade inbox, global want-matching
+(`supabase/migrations/0001`–`0004`). The self-hosted `server/` box is
+superseded. Links and files stay first-class, and decision 6 survives intact:
+signed out, nothing about the link path changes.
+
+**Why it cannot be encrypted like the vault.** Decision 15 is that the server
+holds ciphertext it cannot read, and for a user's own collection that is not
+negotiable. Social inverts the requirement: a friend's app has to *read* your
+binder, so the server has to serve something readable. The choice was to weaken
+the vault to reach social, or to give social its own narrow plaintext table.
+The second, obviously — `binders` holds only what the user chose to publish,
+which is the identical document that already travels in a share link today.
+The vault is untouched, either feature runs without the other, and
+`erase_social()` deliberately leaves `vaults` alone.
+
+**Why scope is the control.** Rather than adding a second privacy toggle beside
+the existing For trade / Everything switch, that switch *becomes* the
+visibility rule: a `trade` binder is readable by any signed-in user (you
+published cards you want to swap — being findable is the point, and it is what
+makes global matching possible at all), an `all` binder only by accepted
+friends (a full inventory is a valuation and theft target). One control, no
+chance of the two disagreeing.
+
+**Consequences.**
+
+- **Identity becomes recoverable**, which is the single biggest win. Today's
+  `profileId` is a localStorage uid: clearing storage destroys it permanently
+  and orphans every follower. Do not reintroduce trust-on-first-use.
+- **We now hold readable user content**, which the project did not before.
+  That makes retention, a deletion path and `privacy.md`'s egress table real
+  obligations rather than theoretical ones.
+- **A LAN playgroup loses the no-account live tier.** That was a genuine
+  property of `server/` and hosting does not replace it; links still work, so
+  the floor is unchanged, but this is a real cost and not a pure upgrade.
+- **`trade_offers` is never readable, only queryable.** An index of who owns
+  what must not be enumerable — it is reachable solely through a capped
+  `match_wants()` RPC. That is a lookup oracle, not perfection, and the
+  distinction is deliberate.
+
+**What would make this wrong.** Publishing anything the user did not choose to
+publish; letting a friends-only binder become globally matchable through the
+offers index; or gating the link path behind an account. The first two are
+covered by tests that must keep passing.

@@ -10,3 +10,4 @@ server/data/
 
 # Supabase CLI scratch
 supabase/.temp/
+supabase/.branches/
