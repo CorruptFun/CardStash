@@ -232,7 +232,8 @@ async function pokemon() {
       fail(`pokemon/universe/${name}`, err)
     }
   }
-  // The three photographed Pokémon cards (tests/harness/photos/manifest.json).
+  // The photographed / filmed Pokémon cards (tests/harness/photos/manifest.json).
+  await universe('krookodile', (c) => /krookodile\s*ex$/i.test(String(c.name)))
   await universe('blastoise', (c) => /blastoise[\s-]*ex$/i.test(String(c.name)))
   await universe('charizard', (c) => String(c.localId) === '11' && /xy12|evolutions/i.test(String(c?.set?.id ?? '')))
   await universe('machamp', (c) => /^machamp$/i.test(String(c.name)))
@@ -666,6 +667,9 @@ async function yugioh() {
     'Duel Tower',
     'Enigmaster Packbit',
     'I:P Masquerena',
+    // filmed, not photographed: a secret rare whose silver name text is
+    // legible in SOME frames of the clip and washed out in others
+    'Azure-Eyes Silver Dragon',
     // the nine-slot binder page
     'Imsety, Glory of Horus',
     'Qebehsenuef, Protection of Horus',
