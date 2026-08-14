@@ -26,6 +26,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # The OAuth client id for free-tier Drive backup (lib/drive.ts). Public
+          # by construction — a browser token flow has no client secret and this
+          # value ships inside the bundle either way, so hiding it in a secret
+          # would buy nothing and add a step that can be silently forgotten
+          # (a missing id makes backup vanish rather than fail loudly).
+          # What actually protects it is the Authorised JavaScript origins list
+          # on the client itself: a token can only be minted from
+          # localhost:5173 and corruptfun.github.io.
+          # The client SECRET is unused and must never appear in this repo.
+          # To rotate without a commit, replace the literal with
+          # ${{ vars.VITE_GOOGLE_CLIENT_ID }} and set the repo variable.
+          VITE_GOOGLE_CLIENT_ID: 522632498220-ak548mr1qgb0g0kg1q42nfmq99kfsaj2.apps.googleusercontent.com
       - name: Publish dist/ to gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
