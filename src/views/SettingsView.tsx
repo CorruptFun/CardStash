@@ -11,6 +11,7 @@ import { clearScanCache } from '../lib/identify'
 import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { APP_VERSION } from '../lib/version'
+import { CloudSync } from '../components/CloudSync'
 import { useUi } from '../store/ui'
 
 const INSIGHT_DAYS = 30
@@ -139,6 +140,7 @@ export function SettingsView() {
           engine downloads ~12 MB once and is cached for offline use.
         </p>
       </section>
+      <CloudSync />
       <section className="setsec">
         <h3>AI & API keys</h3>
         <p className="setsec__note">

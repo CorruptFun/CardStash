@@ -1518,6 +1518,32 @@ button {
   color: var(--paper);
   font-weight: 600;
 }
+.cloudrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.cloudrow .input {
+  flex: 1 1 190px;
+  min-width: 0;
+}
+.cloudrow .btn {
+  flex: 0 0 auto;
+}
+.setsec__warn {
+  margin-top: 6px;
+  padding: 9px 11px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--signal-rule);
+  background: var(--signal-fill);
+  color: var(--paper-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.setsec__warn b {
+  color: var(--paper);
+}
 .installtip__steps {
   padding: 7px 9px;
   border-radius: var(--r-2);
