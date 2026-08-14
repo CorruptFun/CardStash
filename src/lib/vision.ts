@@ -629,12 +629,6 @@ const CLIPPED_BORDER_MIN = 1.5
  * short of the point where a rectangle is mostly imaginary.
  */
 const OVERHANG_MAX = 0.4
-/**
- * How much better the turned frame must score before the cards are judged
- * sideways. Total border score, so a handful of hallucinated boxes cannot win
- * it on count alone.
- */
-
 /** Overlap above which two detections are the same card. */
 const NMS_IOU = 0.3
 /** A box this much swallowed by an already-taken one is a panel inside a card. */
