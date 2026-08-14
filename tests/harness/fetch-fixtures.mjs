@@ -218,9 +218,16 @@ async function pokemon() {
     try {
       const briefs = await searchAndHydrate(name)
       const cards = briefs.map((b) => fulls.get(b.id)).filter((c) => c && isPaper(c))
-      const pick = (match && cards.find(match)) ?? cards.slice(-1)[0]
+      // A `match` that finds nothing must FAIL rather than quietly capturing
+      // some other printing: `cards` is only the newest ~120 hydrated briefs,
+      // so the photographed card can drift out of that window as a species
+      // accumulates prints, and a silent fallback would leave the manifest
+      // looking healthy while the photo it exists for is still unanswerable.
+      // That is lesson 32's failure — absence read as a pipeline miss — put
+      // back with no signal.
+      const pick = match ? cards.find(match) : cards.slice(-1)[0]
       if (pick) picks.push({ key: `universe-${slug(name)}`, card: pick, universeOnly: true })
-      else fail(`pokemon/universe/${name}`, 'nothing hydrated')
+      else fail(`pokemon/universe/${name}`, match ? 'no hydrated card matched' : 'nothing hydrated')
     } catch (err) {
       fail(`pokemon/universe/${name}`, err)
     }

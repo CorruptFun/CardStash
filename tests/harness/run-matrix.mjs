@@ -110,6 +110,17 @@ function graded(expected, outcome) {
  *
  * Greedy best-first assignment against the remaining truth, at the same 0.9
  * name-similarity bar single cells are graded at.
+ *
+ * Known limit, and it matters most on exactly the page committed here: an
+ * unordered multiset cannot tell a correct read of a DUPLICATE from a wrong
+ * read that happens to name one. This page holds 3 copies of "Imsety, Glory of
+ * Horus" and 2 of "King's Sarcophagus"; if only 2 Imsety regions identify, a
+ * sibling misread as "Imsety" fills the spare slot, scores as identified, and
+ * the real card is reported missed — a wrong card re-attributed to the
+ * detector. Separating those needs PER-REGION ground truth (which slot holds
+ * which card), which is a different manifest shape. Until then, read `missed`
+ * on a page with duplicates as an upper bound on detection failures, and look
+ * at the boxes.
  */
 function gradePage(truth, found) {
   const remaining = truth.slice()
@@ -201,6 +212,13 @@ async function main() {
   const AUTO_GAMES = new Set(['mtg', 'pokemon', 'yugioh', 'lorcana'])
   const AUTO_DEGRADATIONS = new Set(['clean', 'soft-focus', 'glare'])
 
+  // --photos runs the photo cells IN ADDITION to the battery; --photos-only
+  // runs just them (the fast loop when new photos land). Declared HERE, above
+  // the first read of it: below the fixture filter it was a temporal-dead-zone
+  // crash for `--binders-only --keys=<a binder>`, which is the natural way to
+  // iterate on one page.
+  const photosOnly = !!args['photos-only'] || !!args['binders-only']
+
   const fixtures = manifest.fixtures.filter(
     (f) => (!gamesFilter || gamesFilter.includes(f.game)) && (!keysFilter || keysFilter.includes(f.key)),
   )
@@ -215,9 +233,6 @@ async function main() {
   // An explicit --degradations filter may also select the opt-in extras
   // (dim/dark); the default battery stays the standard, comparable set.
   const cells = []
-  // --photos runs the photo cells IN ADDITION to the battery; --photos-only
-  // runs just them (the fast loop when new photos land).
-  const photosOnly = !!args['photos-only'] || !!args['binders-only']
   const degradations = (all) =>
     degFilter ? [...all, ...EXTRA_DEGRADATION_KEYS].filter((d) => degFilter.includes(d)) : all
   for (const fixture of photosOnly ? [] : fixtures) {
@@ -419,7 +434,7 @@ async function main() {
       binderResults.push({ key: binder.key, game: binder.game, note: binder.note, ms: out.ms, error: out.error, ...score,
         found: (out.found ?? []).map((f) => ({ region: f.region, ok: !!f.outcome?.ok, name: f.outcome?.ok ? f.outcome.name : null, stage: f.outcome?.ok ? 'pass' : f.outcome?.reason, readName: f.outcome?.readName ?? null })) })
       console.log(
-        `  ▣ ${binder.game}/${binder.key} · detected ${score.detected}/${score.truth}` +
+        `  ▣ ${binder.game}/${binder.key} · boxes ${score.detected} (truth ${score.truth} cards)` +
           ` · identified ${score.identified}/${score.truth}` +
           ` · WRONG ${score.wrong.length}${out.error ? ` · ${out.error}` : ''} [${out.ms}ms]`,
       )
@@ -456,10 +471,12 @@ async function main() {
     mkdirSync(dirname(out), { recursive: true })
     writeFileSync(out, JSON.stringify(report, null, 1))
 
-    console.log(`\n=== ${overall.pass}/${overall.total} identified (${((overall.pass / overall.total) * 100).toFixed(0)}%) in ${(wallMs / 1000).toFixed(0)}s ===`)
+    if (overall.total) {
+      console.log(`\n=== ${overall.pass}/${overall.total} identified (${((overall.pass / overall.total) * 100).toFixed(0)}%) in ${(wallMs / 1000).toFixed(0)}s ===`)
+    }
     const degradationsSeen = [...new Set(results.map((r) => r.degradation))]
     const pad = (s, n) => String(s).padEnd(n)
-    console.log(pad('', 14) + degradationsSeen.map((d) => pad(d, 13)).join(''))
+    if (degradationsSeen.length) console.log(pad('', 14) + degradationsSeen.map((d) => pad(d, 13)).join(''))
     for (const [game, g] of Object.entries(byGame)) {
       const row = degradationsSeen
         .map((d) => {
@@ -478,7 +495,9 @@ async function main() {
         (a, b) => ({ truth: a.truth + b.truth, detected: a.detected + b.detected, identified: a.identified + b.identified, wrong: a.wrong + b.wrong.length }),
         { truth: 0, detected: 0, identified: 0, wrong: 0 },
       )
-      console.log(`\n=== binder pages: detected ${t.detected}/${t.truth} · identified ${t.identified}/${t.truth} · WRONG ${t.wrong} ===`)
+      console.log(
+        `\n=== binder pages: ${t.detected} boxes · identified ${t.identified}/${t.truth} · WRONG ${t.wrong} ===`,
+      )
     }
     if (report.unknownHosts.length) console.log(`  unstubbed hosts hit: ${report.unknownHosts.join(', ')}`)
     console.log(`  report: ${out}`)
@@ -495,7 +514,7 @@ async function main() {
         if (!baselineCells) return null
         const keysThen = new Set(baselineCells.filter((c) => c.game === game).map((c) => c.key))
         const nowCells = results.filter((r) => r.game === game && keysThen.has(r.key))
-        const thenCells = baselineCells.filter((c) => c.game === game && results.some((r) => r.key === c.key))
+        const thenCells = baselineCells.filter((c) => c.game === game && results.some((r) => r.game === game && r.key === c.key))
         if (!nowCells.length || !thenCells.length) return null
         return {
           now: nowCells.filter((r) => r.pass).length / nowCells.length,
@@ -512,6 +531,19 @@ async function main() {
           console.error(`REGRESSION: ${game} ${(then * 100).toFixed(0)}% → ${(now * 100).toFixed(0)}%${shared ? ' (shared keys)' : ''}`)
           bad = true
         }
+      }
+    }
+    // A wrong card on a page is the expensive failure class — it arrives inside
+    // a batch the user confirms once — so it fails the run outright rather than
+    // being a number in a summary nobody reads.
+    for (const b of binderResults) {
+      if (b.error) {
+        console.error(`BINDER ERROR: ${b.key} — ${b.error}`)
+        bad = true
+      }
+      if (b.wrong.length) {
+        console.error(`BINDER WRONG CARDS: ${b.key} — ${b.wrong.map((w) => `“${w.read}”`).join(', ')}`)
+        bad = true
       }
     }
     if (args['min-rate'] != null) {

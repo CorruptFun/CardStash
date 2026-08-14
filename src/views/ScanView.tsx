@@ -297,7 +297,6 @@ export function ScanView({ active }: { active: boolean }) {
     async (source: HTMLCanvasElement) => {
       const ctrl = new AbortController()
       pageAbortRef.current = ctrl
-      scanner.pauseSensing(true)
       setPageProgress({ done: 0, total: 0 })
       try {
         const cards = await scanPage(source, {
@@ -305,7 +304,12 @@ export function ScanView({ active }: { active: boolean }) {
           maxCards: MAX_PAGE_CARDS,
           onProgress: setPageProgress,
         })
-        if (ctrl.signal.aborted) return
+        if (ctrl.signal.aborted) {
+          // scanPage returns what it finished before the abort. Cancelling is
+          // "stop, I have enough", not "discard the seven you already read".
+          if (cards.length) setPageCards(cards)
+          return
+        }
         track('scan_attempt', {
           engine: 'ocr',
           outcome: cards.some((c) => c.outcome.ok) ? 'hit' : 'miss',
@@ -324,7 +328,6 @@ export function ScanView({ active }: { active: boolean }) {
         source.height = 0
         pageAbortRef.current = null
         setPageProgress(null)
-        scanner.pauseSensing(false)
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,6 +373,11 @@ export function ScanView({ active }: { active: boolean }) {
     async (file: File) => {
       if (!isEntitled('photo-upload')) return
       setUploadBusy(true)
+      // Park the live scanner for the read: otherwise it keeps auto-attempting
+      // on the camera while the user waits for their photo, contending for the
+      // same two OCR workers and — in Collect mode — filing a camera card the
+      // user never asked for.
+      scanner.pauseSensing(true)
       try {
         // A page needs more pixels than a card: a 3x3 grid cut out of a
         // single-card frame leaves each crop too small to read a collector
@@ -394,8 +402,10 @@ export function ScanView({ active }: { active: boolean }) {
         toast(err?.message?.slice(0, 90) ?? "Couldn't read that image", 'error')
       } finally {
         setUploadBusy(false)
+        scanner.pauseSensing(pageMode)
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [identifyOne, pageMode, runPageScan, toast],
   )
 
@@ -409,6 +419,24 @@ export function ScanView({ active }: { active: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runPageScan, scanner.grabFrame])
 
+  /**
+   * Page mode parks the automatic single-card scanner for as long as it is on.
+   *
+   * Not a tidiness question. The auto-attempt loop keeps identifying whatever
+   * sits in the reticle while the user is lining up a binder page, and with
+   * Collect mode on — a PERSISTED setting, easily left on from a previous
+   * session — every one of those hits files a card with no review at all.
+   * That is precisely the silent add the review screen exists to prevent,
+   * arriving through the side door. In page mode the shutter is the tap.
+   */
+  useEffect(() => {
+    scanner.pauseSensing(pageMode || pageProgress != null)
+    // `scanner.status` is load-bearing, not incidental: start() and
+    // resumeScanning() restart the rAF loop without pageMode or pageProgress
+    // changing, and this is the only thing that re-parks it afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageMode, pageProgress, scanner.status])
+
   // The review screen owns the screen while it is up: keeping a camera and a
   // Sobel loop alive behind it costs battery for a preview nobody can see.
   const reviewOpen = pageCards != null
@@ -417,6 +445,13 @@ export function ScanView({ active }: { active: boolean }) {
     if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, reviewOpen, started, scanner.status])
+
+  // Navigating away mid-scan stops it. The view is only hidden, not unmounted,
+  // so without this the remaining identifications keep running behind another
+  // screen and the review ambushes the user when they come back.
+  useEffect(() => {
+    if (!active && pageAbortRef.current) cancelPageScan()
+  }, [active, cancelPageScan])
 
   useEffect(() => {
     if (visible) warmOcr()
@@ -762,12 +797,21 @@ export function ScanView({ active }: { active: boolean }) {
           cards={pageCards}
           onClose={() => setPageCards(null)}
           onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
-          onAdded={(added) => {
+          onAdded={(added, itemIds) => {
             setPageCards(null)
-            if (added) {
-              haptic(config.haptics ? [14, 60, 14] : 0)
-              toast(`Added ${added} ${added === 1 ? 'card' : 'cards'} to your collection`, 'success')
-            }
+            if (!added) return
+            haptic(config.haptics ? [14, 60, 14] : 0)
+            // Undo, like every other add path here — and most of all here,
+            // where one tap files nine rows and a mistake is hardest to spot
+            // afterwards.
+            toast(`Added ${added} ${added === 1 ? 'card' : 'cards'} to your collection`, 'success', {
+              label: 'Undo',
+              fn: () => {
+                void guarded(async () => {
+                  for (const id of itemIds) await removeCopies(id, 1)
+                }, 'Undo')
+              },
+            })
           }}
         />
       )}

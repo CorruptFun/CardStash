@@ -1030,6 +1030,15 @@ button {
 .scan__top .seg {
   background: #0a0908b3;
   border-color: #f4efe824;
+  /* Shrink and scroll rather than clip a game name in half when a lot of
+   * games are enabled — a flex item's default min-width:auto refuses to
+   * shrink, which is what cut "MTG" down to "MT". */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.scan__top .seg::-webkit-scrollbar {
+  display: none;
 }
 .scan__top .seg__opt {
   color: #f4efe8b8;
@@ -3152,7 +3161,13 @@ button {
   letter-spacing: 0;
   margin-left: -0.16em;
 }
-@media (max-width: 379px) {
+/* The scan top bar carries the game filter plus every mode and action pill,
+ * and Page + upload made it one control too many: at 420px the filter was
+ * clipped mid-label ("Auto | MT"). 379px was never a real phone — modern
+ * handsets are 390-430 CSS px — so the icon-only collapse now covers them,
+ * which is where the row actually runs out of room. Each pill keeps its
+ * aria-label. */
+@media (max-width: 430px) {
   .collectpill__label {
     display: none;
   }
@@ -5202,9 +5217,14 @@ button {
  * somewhere you arrive at after scrolling past every row. */
 
 .pagescan {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 7;
+  /* Above the bottom nav (40) and the scan chip (8). `.scan` is
+   * position:absolute with z-index:auto, so it opens no stacking context and 7
+   * put this UNDER both — the nav painted over "Reading card 3 of 9", and a
+   * leftover chip from the live scanner sat on top showing an unrelated card,
+   * still tappable. */
+  z-index: 50;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -5227,18 +5247,33 @@ button {
 .binder {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  /* Above the bottom nav (40), below the card sheet (60) — a review row opens
+   * the sheet on top of this screen, which is where it belongs. At 40 the nav
+   * tied on stacking order, won on DOM order, and swallowed the taps on the
+   * "Add N cards" button in the corner it covers: the confirm was unclickable
+   * on a phone while looking perfectly fine in a screenshot. */
+  z-index: 50;
   display: flex;
   flex-direction: column;
   background: var(--bg);
 }
+/* Longhand, NOT the `padding` shorthand: these carry `safe-top`/`safe-bottom`,
+ * and a later shorthand at equal specificity silently wipes the inset the
+ * helper class just set — which is how screens end up under the clock and
+ * buttons end up in the home-indicator swipe zone. */
 .binder__head {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: var(--s3) var(--s4);
+  padding-top: var(--s3);
+  padding-right: var(--s4);
+  padding-bottom: var(--s3);
+  padding-left: var(--s4);
   border-bottom: 1px solid var(--line);
   background: var(--bg-elev);
+}
+.binder__head.safe-top {
+  padding-top: calc(var(--sat) + var(--s3));
 }
 .binder__title h2 {
   font-size: 15px;
@@ -5307,6 +5342,7 @@ button {
   align-items: center;
   gap: 3px;
   max-width: 100%;
+  overflow: hidden;
   font-size: 13.5px;
   font-weight: 550;
   color: var(--text);
@@ -5315,7 +5351,19 @@ button {
   border: 0;
   padding: 0;
 }
+.binderrow__name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.binderrow__name .icon {
+  flex: none;
+}
 .binderrow__name--miss {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--paper-2);
   font-weight: 450;
   font-style: italic;
@@ -5361,9 +5409,15 @@ button {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: var(--s3) var(--s4);
+  padding-top: var(--s3);
+  padding-right: var(--s4);
+  padding-bottom: var(--s3);
+  padding-left: var(--s4);
   border-top: 1px solid var(--line);
   background: var(--bg-elev);
+}
+.binder__foot.safe-bottom {
+  padding-bottom: calc(var(--sab) + var(--s3));
 }
 .binder__sum {
   flex: 1;
@@ -5381,4 +5435,11 @@ button {
 }
 .binder__foot .btn {
   min-width: 42%;
+}
+.binder__empty {
+  padding: var(--s5) var(--s4);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--paper-2);
+  text-align: center;
 }

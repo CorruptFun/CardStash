@@ -143,7 +143,7 @@ export const PAGE_SCAN_BUDGET: ScanBudget = { lookupMs: 7_000, slowLookups: 2, o
 export async function identifyFrame(
   capture: FrameCapture,
   hash: string,
-  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal; budget?: ScanBudget } = {},
+  opts: { ignoreMisses?: boolean; mode?: ScanMode; signal?: AbortSignal; budget?: ScanBudget; cache?: boolean } = {},
 ): Promise<IdentifyOutcome> {
   const mode = opts.mode ?? 'card'
   const config = settings()
@@ -173,7 +173,18 @@ export async function identifyFrame(
     )
     return outcome
   }
-  const cached = cacheLookup(hash, mode, gameHint)
+  // The frame cache answers "this is the same card still sitting under the
+  // camera". A multi-card scan is the opposite situation — a set of DIFFERENT
+  // physical cards, deliberately asked for — so it opts out of both halves.
+  // Reading would let one slot answer for another within HASH_TOLERANCE,
+  // inheriting its printing and its foil flag with neither the collector-line
+  // read nor the foil detector ever running; and it would make the review
+  // screen's re-read a no-op that returns the same card at cache confidence 1,
+  // promoting a row the pipeline was NOT sure about to ticked-and-unflagged on
+  // no new evidence. Writing would evict the live scanner's entries and then
+  // serve a page's answer back to it.
+  const useCache = opts.cache ?? true
+  const cached = useCache ? cacheLookup(hash, mode, gameHint) : null
   // A hit must still fit the current filter AND the enabled games — a card
   // scanned just before its game was turned off shouldn't resurface from here.
   const cacheUsable =
@@ -208,12 +219,12 @@ export async function identifyFrame(
     // Cache only well-evidenced hits: a collector-line-only identification
     // (confidence 0.7) must be re-derived per attempt, not re-served at
     // cache confidence.
-    if (outcome.identification.confidence >= 0.75)
+    if (useCache && outcome.identification.confidence >= 0.75)
       cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
   }
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
-  else if (outcome.reason === 'ocr-miss') cacheStore(hash, mode, gameHint, null)
+  else if (useCache && outcome.reason === 'ocr-miss') cacheStore(hash, mode, gameHint, null)
   return finish(outcome)
 }
 

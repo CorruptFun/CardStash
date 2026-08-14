@@ -414,3 +414,37 @@ result seems absurd, check this list before writing code.
     downscale to 1600, which is right for a single card and wrong for a page):
     its cards arrive ~370px wide, so its identification numbers are a floor set
     by the fixture, not by the pipeline. Shoot pages at full resolution.
+44. **`ignoreMisses` does not mean "ignore the cache".** It gates only the
+    cached-MISS branch; the cached-HIT branch returns before any OCR runs, at
+    `confidence: 1, via:'cache'`. The multi-card path inherited that, and the
+    consequence was invisible until someone asked what the review screen's
+    per-row Retry actually does: it re-decodes the SAME kept JPEG, whose
+    perceptual hash is 0-5 bits from the page scan's (measured on the real
+    binder photo — `keepAsJpeg` doesn't even resample below CAPTURE_MAX_EDGE),
+    so the "re-read at full budget" returned the identical card at cache
+    confidence. Worse, the review recomputes its pre-tick from that confidence,
+    so a row flagged at 0.80 was promoted to ticked-and-unflagged on no new
+    evidence — laundering, in exactly the [0.75, 0.90) band where the flag
+    exists. The matrix structurally cannot catch this: `page.html` calls
+    `clearScanCache()` between cells. Multi-card scanning now opts out of both
+    halves (`cache: false`), and the WRITE half matters too — a page was
+    pushing 12 entries into the 60-entry cache the live scanner shares.
+45. **Check whether a hash can actually collide before believing a bleed
+    story.** The companion claim — that two slots of one binder page would hash
+    within `HASH_TOLERANCE` and inherit each other's printing and foil flag —
+    sounded worse and was FALSE. Measured over all 36 slot pairs of the
+    committed page (which really does hold 3 copies of one card): minimum
+    Hamming distance **35** of 128, median 60, against a tolerance of 10. Even
+    the same slot re-cropped 2% off measures 26-30. `frameHash` collides only
+    on a near pixel-identical image, which is the round trip in 44 and nothing
+    else. Two adjacent findings, same subsystem, same reviewer: one real, one
+    not — measure, don't rank by how alarming it sounds.
+46. **A mode that changes what the shutter means must also stop the automatic
+    one.** Page mode left the single-card auto-attempt loop running while the
+    user lined up a binder page, and with Collect mode on — a PERSISTED setting
+    — every one of those hits filed a card with no review: the exact silent add
+    the review screen exists to prevent, arriving through the side door. The
+    scanner hook knows nothing about page mode by design, so the parking has to
+    be done from the view, and the effect that does it must depend on
+    `scanner.status`: `start()` and `resumeScanning()` restart the rAF loop
+    without the mode changing, and nothing else re-parks it.

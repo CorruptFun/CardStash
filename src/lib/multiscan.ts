@@ -21,6 +21,12 @@ import { detectCardRegions, frameHash, type CardDetection } from './vision'
  * rescue that identifies foils and non-English cards could never fire.
  * Scaling by the grid instead lands each crop at single-card resolution.
  * 3200x2400 is 7.7M pixels, inside Safari's 16.7M canvas ceiling.
+ *
+ * This is an UPLOAD ceiling. `captureFrame` only ever downscales, and the
+ * stream is requested at 1440p, so a LIVE page scan gets at most ~2560px however
+ * high this is set — roughly 340px per card on a 3x3 page. That is the honest
+ * reason to shoot a binder page as a photo rather than through the viewfinder,
+ * and the reason the review screen offers a full-budget re-read per row.
  */
 export const PAGE_MAX_EDGE = 3200
 
@@ -153,6 +159,8 @@ export async function scanPage(
         // The user asked for THIS page: a stale miss on a similar-looking
         // crop must not answer for a card they can see in front of them.
         ignoreMisses: true,
+        // Nor may one slot answer for another — see identifyFrame.
+        cache: false,
         mode: 'card',
         signal: opts.signal,
         budget: PAGE_SCAN_BUDGET,
@@ -183,7 +191,10 @@ export async function scanPage(
 export async function rescanPageCard(card: PageCard, signal?: AbortSignal): Promise<IdentifyOutcome> {
   const canvas = await decodeImage(card.image, CAPTURE_MAX_EDGE)
   try {
-    return await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card', signal })
+    // cache:false is what makes this a real re-read: the page scan just looked
+    // at this exact crop, so a cached hit would return its answer unchanged and
+    // at cache confidence, which is the opposite of what the user asked for.
+    return await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card', signal, cache: false })
   } catch (err: any) {
     return { ok: false, reason: 'ocr-miss', message: String(err?.message ?? err).slice(0, 120) }
   } finally {
