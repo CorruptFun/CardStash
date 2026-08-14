@@ -334,11 +334,19 @@ async function main() {
   )
 
   // --- dev server -----------------------------------------------------------
-  const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
-    cwd: REPO,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-  })
+  // `--host 127.0.0.1` is not decoration: vite's default binds the loopback
+  // NAME, so on a machine where `localhost` resolves to ::1 nothing listens on
+  // 127.0.0.1 — and every URL below is written against that literal. Without
+  // it the run dies on the readiness probe's timeout, blaming the dev server.
+  const vite = spawn(
+    'node',
+    [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'],
+    {
+      cwd: REPO,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    },
+  )
   let viteLog = ''
   vite.stdout.on('data', (d) => (viteLog += d))
   vite.stderr.on('data', (d) => (viteLog += d))
