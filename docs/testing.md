@@ -37,6 +37,19 @@ only configuration where `releaseCamera()` parks a live stream at all. Run it
 in both modes or it proves nothing; the bug it was written for was invisible in
 the first.
 
+`test:install` reads the built bundle in `dist/`, and two different bundles
+ship from this tree. With `VITE_GOOGLE_CLIENT_ID` set — CI's deploy build, and
+what a local `.env.local` gives you — the iOS banner makes a Drive backup the
+primary action and tells the user to restore from Drive after installing;
+without it the downloaded file is the only backup and the last step is
+`Collection → Import`. The harness detects which build it is from the banner's
+own buttons and asserts the matching copy either way, so **build whichever
+configuration you changed and run it against that** — a green run on the
+file-only build says nothing about the deploy build's copy. Buttons are
+addressed by their label, not their class: Drive demotes the file backup from
+`.installtip__go` to `.installtip__dismiss`, so a class selector silently
+points at the wrong button or matches two.
+
 ## Unit tests (`tests/unit/`)
 
 Plain `node --test`. App modules are TypeScript, so `bundle.mjs` bundles an
