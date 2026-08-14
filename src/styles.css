@@ -4160,8 +4160,15 @@ button {
 .diag__table--engines .diag__row {
   grid-template-columns: 1fr 42px 62px 62px;
 }
-.diag__table--misses .diag__row {
+.diag__table--misses .diag__row,
+.diag__table--stages .diag__row,
+.diag__table--screens .diag__row {
   grid-template-columns: 1fr 42px 56px;
+}
+/* Leading cell is an 8-character hash, so it gets the fixed width and the
+   label column gives way. */
+.diag__table--cards .diag__row {
+  grid-template-columns: 1fr 62px 42px;
 }
 .diag__row--head {
   font-family: var(--font-num);

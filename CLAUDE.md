@@ -88,7 +88,15 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - DB writes from UI go through `guarded()` (`src/store/ui.ts`) so quota errors
   surface as toasts.
 - Analytics events must stay content-free (no card names/queries/keys) — the
-  redaction lives in `analytics.ts`; event names are a fixed whitelist.
+  redaction lives in `analytics.ts` (`redact`, unit-tested); event names are a
+  fixed whitelist. A card that fails to scan is identified by
+  `hashToken(readName)`, never by its name — the hash groups repeat failures
+  and a maintainer resolves one by hashing catalog names. Who is using the app
+  comes from a random per-install id plus `app_open`/`session_end`/
+  `screen_view`, with collection size as a bucket and never an exact count;
+  `clearAnalytics()` drops that install record along with the events. The scan
+  trace ring (`scandebug.ts`) holds real card text and must never feed
+  analytics.
 - Prices: USD only (US/English market). `best` = non-foil headline, `bestFoil`
   = premium finish; per-item pricing multiplies by condition factor. Data
   stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
