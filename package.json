@@ -16,7 +16,8 @@
     "sync": "node server/sync-server.mjs",
     "test:foil": "node tests/harness/run-matrix.mjs --degradations=foil,foil-worst --mode=hinted",
     "test:foiltext": "node tests/harness/run-matrix.mjs --degradations=foil-text,foil-text-silver,foil-text-worst --mode=hinted",
-    "test:photos": "node tests/harness/run-matrix.mjs --photos-only"
+    "test:photos": "node tests/harness/run-matrix.mjs --photos-only",
+    "test:clips": "node tests/harness/run-matrix.mjs --clips-only --pages=1"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

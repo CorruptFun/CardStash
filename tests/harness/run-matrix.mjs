@@ -13,6 +13,8 @@
  *     --photos-only       run ONLY those
  *     --binders           also grade the binder pages (multi-card detect+ID)
  *     --binders-only      run ONLY those
+ *     --clips             also run the video-frame clips (the LIVE-scan path)
+ *     --clips-only        run ONLY those
  *     --keys=tauros-fa-secret     --mode=hinted|auto|both
  *     --pages=3                   # parallel browser pages
  *     --out=tests/harness/report/run.json
@@ -217,7 +219,7 @@ async function main() {
   // the first read of it: below the fixture filter it was a temporal-dead-zone
   // crash for `--binders-only --keys=<a binder>`, which is the natural way to
   // iterate on one page.
-  const photosOnly = !!args['photos-only'] || !!args['binders-only']
+  const photosOnly = !!args['photos-only'] || !!args['binders-only'] || !!args['clips-only']
 
   const fixtures = manifest.fixtures.filter(
     (f) => (!gamesFilter || gamesFilter.includes(f.game)) && (!keysFilter || keysFilter.includes(f.key)),
@@ -300,11 +302,36 @@ async function main() {
     if (!binderCells.length) console.log('No binder pages match the filters.')
   }
 
-  if (!cells.length && !binderCells.length) {
+  // Video clips: the LIVE-scan path, which nothing else here can reach.
+  // Every other input is a still — the fixtures are flat scans, the
+  // degradations compose onto a clean backdrop, and a photograph is one
+  // exposure through the phone's PHOTO pipeline. A clip is the only sample of
+  // what the scanner actually grabs, and the only place the specular pattern
+  // MOVES between one candidate capture and the next.
+  const clipCells = []
+  if (args.clips || args['clips-only']) {
+    const file = join(HERE, 'photos', 'manifest.json')
+    if (!existsSync(file)) {
+      console.error(`No photo manifest at ${file}`)
+      process.exit(2)
+    }
+    for (const clip of JSON.parse(readFileSync(file, 'utf8')).clips ?? []) {
+      if (gamesFilter && !gamesFilter.includes(clip.game)) continue
+      if (keysFilter && !keysFilter.includes(clip.key)) continue
+      clipCells.push(clip)
+    }
+    if (!clipCells.length) console.log('No clips match the filters.')
+  }
+
+  if (!cells.length && !binderCells.length && !clipCells.length) {
     console.error('Nothing matches the filters.')
     process.exit(2)
   }
-  console.log(`${cells.length} cells on ${pages} page(s)${binderCells.length ? ` + ${binderCells.length} binder page(s)` : ''}\n`)
+  console.log(
+    `${cells.length} cells on ${pages} page(s)` +
+      `${binderCells.length ? ` + ${binderCells.length} binder page(s)` : ''}` +
+      `${clipCells.length ? ` + ${clipCells.length} clip(s)` : ''}\n`,
+  )
 
   // --- dev server -----------------------------------------------------------
   const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
@@ -413,6 +440,63 @@ async function main() {
         }
       }),
     )
+    // Clips run after the battery. Each frame is a separate identification, so
+    // a clip is ~20 of them; they share one page for the same reason binder
+    // pages do.
+    const clipResults = []
+    for (const clip of clipCells) {
+      const page = workers[0]
+      const url = (f) => `/tests/harness/photos/${clip.dir}/${f.file}`
+      const one = async (urls) => {
+        try {
+          return await page.evaluate((c) => window.__harness.runFrames(c), { imageUrls: urls, hint: clip.game })
+        } catch (err) {
+          return { outcome: { ok: false, reason: 'exception', message: String(err).slice(0, 200) }, ms: 0 }
+        }
+      }
+      const singles = []
+      for (const f of clip.frames) {
+        const r = await one([url(f)])
+        singles.push({ ...f, pass: graded(clip, r.outcome), name: r.outcome.ok ? r.outcome.name : null,
+                       read: r.outcome.readName ?? null, ms: r.ms })
+      }
+      // One stacked capture per burst, from the same consecutive frames — the
+      // question is whether averaging beats the BEST frame in that burst, not
+      // whether it beats the average frame.
+      const stacks = []
+      for (let b = 0; b < (clip.bursts ?? 0); b++) {
+        const urls = clip.frames.filter((f) => f.burst === b).map(url)
+        if (urls.length < 2) continue
+        const r = await one(urls)
+        const bestSingle = singles.filter((s) => s.burst === b).some((s) => s.pass)
+        stacks.push({ burst: b, pass: graded(clip, r.outcome), bestSingle,
+                      name: r.outcome.ok ? r.outcome.name : null, read: r.outcome.readName ?? null, ms: r.ms })
+      }
+      // A frame that identified CONFIDENTLY but wrongly. This is the class the
+      // clips exist to expose: the standard battery reports zero wrong cards,
+      // and real video frames of an ordinary "ex" card produce them readily,
+      // because a dropped two-letter suffix leaves a name that matches a
+      // different, real, far cheaper card exactly.
+      const wrong = singles.filter((s) => !s.pass && s.name).map((s) => ({ at: `b${s.burst}-${s.within}`, got: s.name }))
+      const stackWrong = stacks.filter((s) => !s.pass && s.name).map((s) => ({ at: `stack-b${s.burst}`, got: s.name }))
+      const framePass = singles.filter((s) => s.pass).length
+      const burstAny = stacks.filter((s) => s.bestSingle).length
+      const stackPass = stacks.filter((s) => s.pass).length
+      clipResults.push({ key: clip.key, game: clip.game, name: clip.name, note: clip.note,
+                         frames: singles, stacks, framePass, frameTotal: singles.length, stackPass, burstAny,
+                         wrong: [...wrong, ...stackWrong] })
+      console.log(
+        `  ▶ ${clip.game}/${clip.key} · frames ${framePass}/${singles.length}` +
+          ` · bursts with a readable frame ${burstAny}/${stacks.length}` +
+          ` · stacked ${stackPass}/${stacks.length}`,
+      )
+      if (wrong.length || stackWrong.length) {
+        for (const w of [...wrong, ...stackWrong]) console.log(`      WRONG CARD @${w.at}: “${w.got}”`)
+      }
+      const reads = singles.filter((s) => !s.pass && !s.name && s.read).slice(0, 3).map((s) => `“${s.read}”`)
+      if (reads.length) console.log(`      misreads: ${reads.join(', ')}`)
+    }
+
     // Binder pages run after the battery, one at a time on a single page: each
     // is ~9 identifications sharing one OCR worker pool, so racing them would
     // contend rather than finish sooner — the same reason scanPage is
@@ -463,6 +547,7 @@ async function main() {
       overall,
       byGame,
       binders: binderResults,
+      clips: clipResults,
       stubCalls: stubs.stats.calls,
       unknownHosts: [...new Set(stubs.stats.unknown)],
       cells: results,
@@ -489,6 +574,22 @@ async function main() {
     for (const [game, g] of Object.entries(byGame)) {
       const stages = Object.entries(g.stages).sort((a, b) => b[1] - a[1])
       if (stages.length) console.log(`  ${game} failures: ${stages.map(([s, n]) => `${s}×${n}`).join(', ')}`)
+    }
+    if (clipResults.length) {
+      const t = clipResults.reduce(
+        (a, c) => ({ fp: a.fp + c.framePass, ft: a.ft + c.frameTotal, sp: a.sp + c.stackPass, ba: a.ba + c.burstAny,
+                     sn: a.sn + c.stacks.length }),
+        { fp: 0, ft: 0, sp: 0, ba: 0, sn: 0 },
+      )
+      const cw = clipResults.reduce((n, c) => n + c.wrong.length, 0)
+      console.log(
+        `\n=== clips: ${t.fp}/${t.ft} frames identify · ${t.ba}/${t.sn} bursts contain a readable frame` +
+          ` · stacking ${t.sp}/${t.sn} · WRONG ${cw} ===`,
+      )
+      // The gap between the middle number and the first is what frame
+      // SELECTION is worth; the gap between the last and the middle is what
+      // temporal STACKING is worth. Both are properties of the app, not of the
+      // OCR.
     }
     if (binderResults.length) {
       const t = binderResults.reduce(
@@ -536,6 +637,15 @@ async function main() {
     // A wrong card on a page is the expensive failure class — it arrives inside
     // a batch the user confirms once — so it fails the run outright rather than
     // being a number in a summary nobody reads.
+    // Clips gate on wrong cards only. The frame-identification RATE is
+    // expected to be partial — that is the finding, not a failure — but a
+    // confident wrong answer must never become normal.
+    for (const c of clipResults) {
+      for (const w of c.wrong) {
+        console.error(`CLIP WRONG CARD: ${c.key} @${w.at} — “${w.got}” for “${c.name}”`)
+      }
+      if (c.wrong.length > Number(args['clip-wrong-allowed'] ?? 0)) bad = true
+    }
     for (const b of binderResults) {
       if (b.error) {
         console.error(`BINDER ERROR: ${b.key} — ${b.error}`)

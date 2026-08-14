@@ -91,5 +91,215 @@
       "note": "9-slot binder page, 8 identifiable cards + 1 face-down/blank gold card in the top-right slot; sleeved, angled, ceiling-light glare across the top row",
       "source": "77954042-IMG_1265.jpeg"
     }
+  ],
+  "clips": [
+    {
+      "key": "ygo-azure-eyes-clip",
+      "game": "yugioh",
+      "name": "Azure-Eyes Silver Dragon",
+      "label": "clip-ygo-secret",
+      "dir": "clips/ygo-azure-eyes-clip",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.51,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.543,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.576,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.847,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.881,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.914,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 3.185,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 3.218,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 3.252,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 4.523,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 4.556,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 4.589,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 5.86,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 5.894,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 5.927,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "secret rare, silver foil name on a silver frame, sleeved, handheld under a ceiling light — the name is legible in some frames and washed out in others",
+      "source": "9f469bc0-IMG_0452.mov"
+    },
+    {
+      "key": "pkm-krookodile-clip",
+      "game": "pokemon",
+      "name": "Krookodile ex",
+      "label": "clip-pkm-ir",
+      "dir": "clips/pkm-krookodile-clip",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.384,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.417,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.451,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.392,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.425,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.459,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.4,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.433,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.467,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.408,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.441,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.475,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.416,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.449,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.483,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "illustration rare, holo glare sweeping the card, sleeved, handheld over a dark room",
+      "source": "4201cecd-IMG_0451.mov"
+    }
   ]
 }
