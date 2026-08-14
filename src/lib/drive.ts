@@ -159,39 +159,62 @@ function tokenIsFresh(): boolean {
  * `interactive: true`, and that MUST be called from a user gesture or the
  * browser will block the popup.
  */
+/**
+ * The resolver for the auth attempt currently in flight.
+ *
+ * GIS hands results to ONE callback fixed at `initTokenClient` time, so the
+ * client cannot be rebuilt per request with a fresh closure — and it must not
+ * be: an earlier attempt's callback would keep resolving an already-settled
+ * promise and every later call would hang forever. Instead the client is built
+ * once and dispatches here, to whichever request is waiting now.
+ */
+let pendingAuth: { resolve: (token: string) => void; reject: (err: Error) => void } | null = null
+
+function settleAuth(fn: (p: NonNullable<typeof pendingAuth>) => void): void {
+  const p = pendingAuth
+  if (!p) return
+  pendingAuth = null
+  fn(p)
+}
+
+function ensureTokenClient(oauth2: GoogleOAuth2): TokenClient {
+  tokenClient ??= oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: (response) => {
+      if (response.access_token) {
+        accessToken = response.access_token
+        expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000
+        settleAuth((p) => p.resolve(accessToken))
+      } else {
+        settleAuth((p) => p.reject(new DriveError(response.error ?? 'Google did not return access', true)))
+      }
+    },
+    error_callback: (error) => {
+      // A silent attempt that needs consent is not an error worth showing — it
+      // is the normal answer to "can you do this without asking?".
+      settleAuth((p) => p.reject(new DriveError(authMessage(error?.type), true)))
+    },
+  })
+  return tokenClient
+}
+
 async function getToken(interactive: boolean): Promise<string> {
   if (tokenIsFresh()) return accessToken
   if (authInFlight) return authInFlight
   const pending = (async () => {
     const oauth2 = await loadGis()
+    const client = ensureTokenClient(oauth2)
     return await new Promise<string>((resolve, reject) => {
-      let settled = false
-      const finish = (fn: () => void) => {
-        if (settled) return
-        settled = true
-        fn()
-      }
-      tokenClient ??= oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: SCOPE,
-        callback: (response) => {
-          if (response.access_token) {
-            accessToken = response.access_token
-            expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000
-            finish(() => resolve(accessToken))
-          } else {
-            finish(() => reject(new DriveError(response.error ?? 'Google did not return access', true)))
-          }
-        },
-        error_callback: (error) => {
-          // A silent attempt that needs consent is not an error worth showing —
-          // it is the normal answer to "can you do this without asking?".
-          finish(() => reject(new DriveError(authMessage(error?.type), true)))
-        },
-      })
-      // '' asks Google to skip the consent screen when the grant already
-      // exists; 'consent' forces it, which is what a first connection needs.
-      tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' })
+      pendingAuth = { resolve, reject }
+      /**
+       * 'none' is the only value that guarantees NO window. The silent path
+       * must use it: `''` is merely *allowed* to skip the consent screen, so
+       * the daily background backup could throw a Google popup at someone who
+       * never asked for one. Interactive uses `''` rather than 'consent' so a
+       * user who already granted the scope is not made to approve it again.
+       */
+      client.requestAccessToken({ prompt: interactive ? '' : 'none' })
     })
   })()
   authInFlight = pending
@@ -204,8 +227,41 @@ async function getToken(interactive: boolean): Promise<string> {
 
 function authMessage(type?: string): string {
   if (type === 'popup_closed') return 'Sign-in was closed before it finished'
-  if (type === 'popup_failed_to_open') return 'Your browser blocked the Google sign-in window'
+  /**
+   * Two different causes wear this one error, and the user cannot tell them
+   * apart — so the message has to cover both. Either the browser blocks
+   * pop-ups for this site, or the first tap arrived before Google's script had
+   * finished loading and the click's permission to open a window had lapsed.
+   * The second cause fixes itself on the next tap, because the script is then
+   * cached, so "tap again" comes first.
+   */
+  if (type === 'popup_failed_to_open') return "Sign-in didn't open — tap again, or allow pop-ups for this site"
   return 'Google Drive needs you to sign in again'
+}
+
+/**
+ * Load and initialise the sign-in machinery WITHOUT asking for anything.
+ *
+ * This exists because of how browsers grant popups. `requestAccessToken()` opens
+ * one, and a popup is only allowed while the click that caused it is still
+ * "transiently active" — a window of a few seconds in Chromium and effectively
+ * the same synchronous turn in Safari. Fetching an 11 kB script from Google
+ * inside that window is a race we lose often enough to matter.
+ *
+ * So the UI calls this on pointerdown/focus — the moment the user reaches for
+ * the button, before the click lands — and by the time the handler runs the
+ * script is already there and the popup opens instantly.
+ *
+ * It still honours the never-contact-Google-uninvited rule: reaching for the
+ * Connect button IS the opt-in. Merely opening Settings calls nothing.
+ */
+export function prewarmDrive(): void {
+  if (!isDriveConfigured()) return
+  loadGis()
+    .then(ensureTokenClient)
+    .catch(() => {
+      /* the click will surface it properly */
+    })
 }
 
 /** Forget the in-memory token. Does not revoke — see `disconnectDrive`. */
@@ -303,6 +359,18 @@ async function rotate(files: DriveBackupFile[]): Promise<void> {
 export async function backupToDrive(interactive = false): Promise<DriveBackupFile> {
   if (!isDriveConfigured()) throw new DriveError('Google Drive backup is not configured in this build')
   const started = Date.now()
+  /**
+   * Authorise FIRST, before reading a byte of the database.
+   *
+   * `requestAccessToken()` opens a popup, and a popup is only permitted while
+   * the click that caused it still holds transient activation — a few seconds
+   * in Chromium, effectively the same synchronous turn in Safari. `exportBackup`
+   * reads every Dexie table and stringifies the result, which on a real
+   * collection is easily long enough to spend that activation and get the
+   * window blocked. Reordering is the fix; it also means a refused sign-in
+   * costs nothing, instead of serialising a collection we then throw away.
+   */
+  await getToken(interactive)
   const backup = await exportBackup()
   const body = JSON.stringify(backup)
   const metadata = {

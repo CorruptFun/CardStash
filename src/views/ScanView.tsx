@@ -11,6 +11,7 @@ import {
   CAPTURE_MAX_EDGE,
   cameraPermissionState,
   decodeImage,
+  endParkedCamera,
   IS_STANDALONE,
 } from '../lib/camera'
 import { addToCollection, clearScans, db, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
@@ -43,8 +44,11 @@ function scanFinish(hit: Extract<IdentifyOutcome, { ok: true }>): Finish {
  *   Camera → Allow persists the grant for good.
  * - Home Screen app: asks again on each fresh launch, and there is NO
  *   setting anywhere to persist it — an Apple limitation. Cardstock softens
- *   it by keeping the camera session alive across quick switches
- *   (see releaseCamera in lib/camera.ts), but a cold launch always re-asks.
+ *   it only where the scan screen never went away (the card sheet — see
+ *   releaseCamera in lib/camera.ts); a cold launch, and returning from another
+ *   tab, always re-ask. Holding the camera through those to dodge the dialog
+ *   would mean a lit camera indicator on screens with no viewfinder, which is
+ *   the worse trade.
  */
 const IOS_BROWSER =
   typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent) && !IS_STANDALONE
@@ -437,14 +441,33 @@ export function ScanView({ active }: { active: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageMode, pageProgress, scanner.status])
 
-  // The review screen owns the screen while it is up: keeping a camera and a
-  // Sobel loop alive behind it costs battery for a preview nobody can see.
+  /**
+   * The camera runs while the scan screen is the screen, and not one moment
+   * longer — the view stays mounted across tab hops, so nothing else would
+   * ever end it.
+   *
+   * Only one interruption keeps the stream parked: the card sheet a scan opens
+   * over this very screen, which the user closes to scan the next card (and on
+   * iOS Home-Screen apps, re-acquiring costs a permission dialog every time).
+   * A tab hop and the page-review screen both give the camera up outright —
+   * the review screen owns the screen for a long confirm-every-row pass, and
+   * another tab has no viewfinder to justify a lit camera indicator.
+   */
   const reviewOpen = pageCards != null
   useEffect(() => {
     if (visible && !reviewOpen && started && scanner.status === 'idle') scanner.start()
-    if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop()
+    if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop({ park: active && !reviewOpen })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, reviewOpen, started, scanner.status])
+  }, [visible, active, reviewOpen, started, scanner.status])
+
+  // Leaving the tab while the sheet was open needs its own pass: that hop
+  // closes the sheet AND changes the route in one go, so the scanner is
+  // already idle and the effect above has no session left to stop — while a
+  // stream parked for the sheet is still live, and would hold the camera
+  // indicator on for the rest of its grace window from another tab.
+  useEffect(() => {
+    if (!active) endParkedCamera()
+  }, [active])
 
   // Navigating away mid-scan stops it. The view is only hidden, not unmounted,
   // so without this the remaining identifications keep running behind another

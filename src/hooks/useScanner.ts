@@ -3,6 +3,7 @@ import { hashToken, track } from '../lib/analytics'
 import {
   captureFrame,
   captureFrameStacked,
+  endParkedCamera,
   releaseCamera,
   startCamera,
   type CameraSession,
@@ -239,6 +240,9 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
         clearTimeout(hiddenProbeRef.current)
         hiddenProbeRef.current = null
       }
+      // A non-park release means "no camera": that has to cover a stream an
+      // earlier park left running, not just the session held right now.
+      if (!park) endParkedCamera()
       const session = sessionRef.current
       if (!session) return
       sessionRef.current = null
@@ -257,11 +261,24 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     [releaseSession, suspendWork],
   )
 
-  const stop = useCallback(() => {
-    wantsCameraRef.current = false
-    teardown(true)
-    patch({ status: 'idle', sensing: false, needsResume: false })
-  }, [patch, teardown])
+  /**
+   * Give the camera up. The default is an outright stop — indicator out, no
+   * hardware running behind a screen that isn't the viewfinder.
+   *
+   * `park: true` is the narrow exception, and only means anything on iOS
+   * Home-Screen apps: the scan screen is still the screen, something transient
+   * is covering it (the card sheet a scan just opened), and the user is coming
+   * straight back to a scanner that would otherwise re-prompt. See
+   * releaseCamera in lib/camera.ts.
+   */
+  const stop = useCallback(
+    (opts?: { park?: boolean }) => {
+      wantsCameraRef.current = false
+      teardown(opts?.park === true)
+      patch({ status: 'idle', sensing: false, needsResume: false })
+    },
+    [patch, teardown],
+  )
 
   const handleLost = useCallback(() => {
     if (!sessionRef.current) return

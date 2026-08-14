@@ -89,8 +89,9 @@ class CardstockDB extends Dexie {
      *
      * Tombstones exist because absence is ambiguous. Without them a device
      * that deleted a row and a device that never had it look identical, and a
-     * union merge — which is what first-sync must be, see the ManaBox footgun
-     * in the roadmap — silently resurrects everything the user threw away.
+     * union merge — which is what first-sync must be, see the first-sync
+     * footgun in the roadmap — silently resurrects everything the user threw
+     * away.
      */
     this.version(7)
       .stores({

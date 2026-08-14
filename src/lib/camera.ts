@@ -53,12 +53,17 @@ export interface CameraSession {
 
 /**
  * On platforms where re-acquiring the camera re-prompts (iOS Home-Screen
- * apps), a stopped scan session parks its live stream here for a short grace
- * window instead of ending it. Reopening the scanner inside the window —
- * closing a card sheet, hopping back from another tab — adopts the parked
- * stream: no getUserMedia, no permission dialog, no camera warm-up. iOS
- * interrupts the capture itself while the app is hidden (hardware off,
- * indicator cleared), so holding the track is cheap.
+ * apps), a scan session interrupted *within the scan screen* parks its live
+ * stream here for a short grace window instead of ending it. Reopening the
+ * scanner inside the window — closing the card sheet a scan just opened —
+ * adopts the parked stream: no getUserMedia, no permission dialog, no camera
+ * warm-up. iOS interrupts the capture itself while the app is hidden (hardware
+ * off, indicator cleared), so holding the track across that is cheap.
+ *
+ * Parking is deliberately NOT for leaving the scan screen. A camera left live
+ * behind the Collection tab is a lit indicator on a screen with no viewfinder,
+ * which is the one thing a park must never look like — callers pass park:false
+ * there, and `endParkedCamera()` collects anything already parked.
  */
 const PARK_MS = 25_000
 
@@ -86,6 +91,15 @@ function adoptParked(): MediaStream | null {
   const live = stream.getVideoTracks()[0]?.readyState === 'live'
   clearParked(!live)
   return live ? stream : null
+}
+
+/**
+ * End a parked stream now. The scan screen is no longer the screen, so the
+ * grace window has nothing left to save — and its whole premise (the user is
+ * coming straight back) is false.
+ */
+export function endParkedCamera(): void {
+  clearParked(true)
 }
 
 /**

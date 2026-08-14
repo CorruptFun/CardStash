@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   backupToDrive,
   disconnectDrive,
   isDriveConfigured,
   listDriveBackups,
+  prewarmDrive,
   restoreDriveBackup,
   type DriveBackupFile,
 } from '../lib/drive'
@@ -28,6 +29,16 @@ export function DriveBackup() {
   const toast = useUi((s) => s.toast)
   const [busy, setBusy] = useState<'connect' | 'backup' | 'list' | 'restore' | null>(null)
   const [files, setFiles] = useState<DriveBackupFile[] | null>(null)
+
+  /**
+   * Already connected? Then loading Google's script on mount is not an
+   * uninvited contact — the user opted in long ago — and it means Back up now
+   * and Restore never race the popup timer at all. First-time visitors get
+   * nothing until they reach for the button.
+   */
+  useEffect(() => {
+    if (config.driveBackup) prewarmDrive()
+  }, [config.driveBackup])
 
   const fail = useCallback(
     (err: unknown, fallback: string) => {
@@ -109,12 +120,12 @@ export function DriveBackup() {
             <span className="syncstate__text">
               {config.driveAt ? `Backed up ${relativeAge(config.driveAt)} ago` : 'No backup yet'}
             </span>
-            <button className="btn btn--ghost btn--sm" onClick={backupNow} disabled={busy != null}>
+            <button className="btn btn--ghost btn--sm" onClick={backupNow} onPointerDown={prewarmDrive} disabled={busy != null}>
               <Icon name="refresh" size={14} className={busy === 'backup' ? 'spin' : ''} /> Back up now
             </button>
           </div>
           <div className="drivepanel__row">
-            <button className="btn btn--ghost" onClick={openRestore} disabled={busy != null}>
+            <button className="btn btn--ghost" onClick={openRestore} onPointerDown={prewarmDrive} disabled={busy != null}>
               {busy === 'list' ? 'Reading…' : 'Restore from Drive'}
             </button>
             <button className="btn btn--ghost" onClick={disconnect} disabled={busy != null}>
@@ -129,7 +140,18 @@ export function DriveBackup() {
         </>
       ) : (
         <>
-          <button className="btn btn--primary" onClick={connect} disabled={busy != null}>
+          {/* Load Google's script the moment the user reaches for the button,
+              not when they land on it — a popup is only allowed while the
+              click still holds transient activation, and fetching a script
+              inside that window is a race we lose. Reaching for Connect IS the
+              opt-in, so this keeps the never-contact-Google-uninvited rule. */}
+          <button
+            className="btn btn--primary"
+            onClick={connect}
+            onPointerDown={prewarmDrive}
+            onFocus={prewarmDrive}
+            disabled={busy != null}
+          >
             {busy === 'connect' ? 'Connecting…' : 'Back up to Google Drive'}
           </button>
           <p className="setsec__note">

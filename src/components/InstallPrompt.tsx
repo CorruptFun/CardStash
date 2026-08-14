@@ -4,7 +4,7 @@ import { db, exportBackup } from '../lib/db'
 import { downloadFile } from '../lib/csv'
 import { ymd } from '../lib/util'
 import { IS_IOS, IS_STANDALONE } from '../lib/camera'
-import { backupToDrive, isDriveConfigured } from '../lib/drive'
+import { backupToDrive, isDriveConfigured, prewarmDrive } from '../lib/drive'
 import { useSettings } from '../lib/settings'
 import { guarded, useUi } from '../store/ui'
 
@@ -169,7 +169,12 @@ export function InstallPrompt() {
       </div>
       <div className="installtip__actions">
         {drive && (
-          <button className={IS_IOS ? 'installtip__go' : 'installtip__dismiss'} onClick={saveToDrive} disabled={driveBusy}>
+          <button
+            className={IS_IOS ? 'installtip__go' : 'installtip__dismiss'}
+            onClick={saveToDrive}
+            onPointerDown={prewarmDrive}
+            disabled={driveBusy}
+          >
             {driveBusy ? 'Backing up…' : saved ? 'Back up again' : 'Back up to Drive'}
           </button>
         )}

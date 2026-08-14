@@ -20,7 +20,7 @@ import {
   updateDeck,
 } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
-import { backupToDrive, isDriveConfigured } from '../lib/drive'
+import { backupToDrive, isDriveConfigured, prewarmDrive } from '../lib/drive'
 import { GAMES, GAME_SHORT, FINISH_LABEL } from '../lib/games'
 import { collectionToCsv, parseCollectionCsv, type CsvImportRow } from '../lib/importexport'
 import { valueWindow } from '../lib/portfolio'
@@ -757,7 +757,7 @@ function DataMenu({
         {/* Only when the build can actually do it — a button that cannot work
             is worse than no button (same rule as the upload control). */}
         {isDriveConfigured() && (
-          <button className="datamenu__opt" onClick={onDrive}>
+          <button className="datamenu__opt" onClick={onDrive} onPointerDown={prewarmDrive}>
             <Icon name="refresh" size={18} />
             <span>
               {driveOn ? 'Back up to Drive now' : 'Back up to Google Drive'}{' '}

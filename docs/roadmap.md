@@ -295,9 +295,9 @@ defeat the scanner" gets answered without ever storing a card name.
 Add **`updatedAt` to `CollectionItem`** and a **tombstone table** (Dexie v7).
 
 ~20 lines now, **unbackfillable later**. Every row written between now and round
-3 otherwise has no merge basis, and merging without one is exactly the ManaBox
-footgun. This is the cheapest possible insurance against the round-3 failure mode
-that costs other apps their support queue.
+3 otherwise has no merge basis, and merging without one is exactly the first-sync
+footgun described in round 3. This is the cheapest possible insurance against the
+round-3 failure mode that costs other apps their support queue.
 
 ---
 
@@ -370,9 +370,9 @@ claim holds). Collection sync is new: per-row natural key (reuse the
 condition + set + number), `updatedAt`, tombstones, RLS as the trust boundary,
 and a device-count limit.
 
-**First-sync merge — the ManaBox footgun, designed away.** Their documented
-failure is that enabling sync takes data from whichever device you enabled it on,
-and support has to rescue users who got it wrong.
+**First-sync merge — the classic footgun, designed away.** The documented failure
+mode in other collection trackers is that enabling sync takes data from whichever
+device you enabled it on, and support has to rescue users who got it wrong.
 
 - **First sync is a union, never a replace**, with an explicit user-visible
   review when both sides hold the same key at different quantities.

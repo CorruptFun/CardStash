@@ -220,7 +220,7 @@ Everything is reconstructed from per-card price history; USD points only.
 
 ## CSV import / export (`lib/importexport.ts`, `lib/csv.ts`)
 
-Import is header-flexible, aimed at ManaBox / Dragon Shield-style exports.
+Import is header-flexible, aimed at Dragon Shield-style tracker exports.
 Recognized columns (first match wins): name/card name, game/tcg,
 set code/set/edition, collector number/card number/number, api id/scryfall id,
 quantity/qty/count, finish/foil/printing, condition, language/lang,

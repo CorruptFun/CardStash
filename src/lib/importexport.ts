@@ -4,7 +4,7 @@ import { FINISH_LABEL, GAMES } from './games'
 import { itemUnitPrice, parseMoney } from './prices'
 import type { CollectionItem, Condition, Finish, Game } from './types'
 
-/** Header-flexible collection CSV import (ManaBox/Dragon Shield-ish exports). */
+/** Header-flexible collection CSV import (Dragon Shield-ish tracker exports). */
 
 const CONDITION_ALIASES: Record<string, Condition> = {
   mint: 'M',
