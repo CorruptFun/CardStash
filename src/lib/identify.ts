@@ -3,7 +3,7 @@
 import { isSignedIn } from './authsession'
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
-import { isAbort } from './fetchJson'
+import { isAbort, linkAbort } from './fetchJson'
 import {
   collectorLineAllows,
   CORNER_REGION,
@@ -37,7 +37,15 @@ import {
 } from './ocr'
 import { matchPokemon, pokemonByCollector } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
-import { mtgBySetNumber, mtgMatchTraits, mtgPrintings } from './scryfall'
+import {
+  mtgBySetNumber,
+  mtgCardFromRaw,
+  mtgMatchTraits,
+  mtgPrintings,
+  pickByTraits,
+  rawPrintings as mtgRawPrintings,
+  treatmentOf,
+} from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv'
@@ -148,6 +156,13 @@ export interface ScanBudget {
   ocrMs: number
   /** Collector-line rescue passes (hinted mode only). */
   cornerPasses: number
+  /**
+   * May an identified card whose EDITION nothing pinned spend one cloud read
+   * on which printing it is? Off inside a page scan: nine cards would be nine
+   * uploads and nine metered credits for a refinement the review screen can
+   * ask for per row, at full budget, once a human is looking at it.
+   */
+  printingTiebreak?: boolean
 }
 
 /**
@@ -158,7 +173,7 @@ export interface ScanBudget {
  * (`rescanPageCard`), which is where the depth belongs once there is a human
  * looking at one row.
  */
-export const PAGE_SCAN_BUDGET: ScanBudget = { lookupMs: 7_000, slowLookups: 2, ocrMs: 6_500, cornerPasses: 2 }
+export const PAGE_SCAN_BUDGET: ScanBudget = { lookupMs: 7_000, slowLookups: 2, ocrMs: 6_500, cornerPasses: 2, printingTiebreak: false }
 
 export async function identifyFrame(
   capture: FrameCapture,
@@ -577,13 +592,25 @@ const CLOUD_MATCH_THRESHOLD = 0.9
  */
 const CLOUD_CONFIDENCE = 0.85
 
+/**
+ * How long the printing tie-break may hold a scan that already has an answer.
+ * Half the rescue's leash on purpose — see `printingTiebreak`.
+ */
+const PRINTING_TIEBREAK_TIMEOUT_MS = 6_000
+
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
  * keep it tight enough that an unreadable card doesn't cook the phone. */
 const SOLE_EVIDENCE_PASS_BUDGET = 5
 
 /** The single-card budget: what an attempt spends when one card is in frame. */
-const DEFAULT_BUDGET: ScanBudget = { lookupMs: 20_000, slowLookups: 4, ocrMs: 18_000, cornerPasses: SOLE_EVIDENCE_PASS_BUDGET }
+const DEFAULT_BUDGET: ScanBudget = {
+  lookupMs: 20_000,
+  slowLookups: 4,
+  ocrMs: 18_000,
+  cornerPasses: SOLE_EVIDENCE_PASS_BUDGET,
+  printingTiebreak: true,
+}
 
 /** Card-relative → frame-relative rect mapping for one crop refinement. */
 function mapThrough(refined: CropRefinement): (rect: OcrRect) => OcrRect {
@@ -760,6 +787,120 @@ async function identifyViaOcr(
     return fresh
   }
 
+  /**
+   * The printing tie-break — the cloud read used as PRECISION rather than as
+   * rescue.
+   *
+   * `cloudIdentify` below only runs when every local pass failed, which means
+   * a frame the device DID identify can never reach a model however wrong it
+   * is about which printing is in the hand. That gap has one shape and it is
+   * the common one: the name band reads perfectly while the collector line —
+   * printed over artwork, at the very edge, on a card whose full-bleed frame
+   * gave the crop detector nothing to hold — reads not at all. With nothing
+   * pinning the edition, `matchMtg` answers by fuzzy name, and Scryfall's
+   * answer to a bare name is one default printing: the ordinary frame. So a
+   * borderless card in the hand is reported as the base print, confidently,
+   * with the base print's art and the base print's price.
+   *
+   * Two guards make this cheap to be wrong about:
+   *
+   * - Every candidate comes from `mtgRawPrintings(card.name)`, an EXACT-name
+   *   search. The tie-break can therefore only ever swap one printing of this
+   *   card for another; there is no reachable answer that is a different card,
+   *   which is the failure class the whole pipeline is built to refuse.
+   * - It runs only where there is something to win — more than one treatment
+   *   among the printings — and the frame it re-picks on must actually exist.
+   *   A model that says "borderless" about a card with no borderless printing
+   *   changes nothing.
+   *
+   * And it asks the model the question on-device OCR structurally cannot
+   * answer. Reading small type off artwork is where Tesseract is weakest;
+   * "does this frame have a border?" is a glance.
+   */
+  const printingTiebreak = async (card: Card, canvas: HTMLCanvasElement, foil: boolean): Promise<Card | null> => {
+    // MTG only for now, and that is about evidence rather than scope: `game:paper`
+    // exact-name search plus `treatmentOf` gives a free, complete list of this
+    // card's frames to check the answer against, and no other game's catalog
+    // offers one. The seam itself is game-agnostic.
+    if (card.game !== 'mtg' || !budget.printingTiebreak) return null
+    // The same switch, and the same reason, as the rescue: sending the frame
+    // anywhere is something the user turned on. A subscription is not consent.
+    if (!config.cloudScanRescue || !isSignedIn()) return null
+    bail()
+    const raws = await mtgRawPrintings(card.name).catch(() => [] as any[])
+    const treatments = new Set(raws.map(treatmentOf))
+    // One frame in existence: nothing a model could say would move the answer,
+    // so neither the upload nor the credit is spent.
+    if (raws.length < 2 || treatments.size < 2) {
+      traceEvent('tiebreak-skip', { prints: raws.length, treatments: treatments.size })
+      return null
+    }
+    bail()
+    // A SHORTER leash than the rescue's 12s. The rescue's alternative is
+    // telling the user "no"; this one already has a usable answer on screen,
+    // and a correct printing is not worth another twelve seconds of
+    // "Identifying…" over a card the user is holding.
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), PRINTING_TIEBREAK_TIMEOUT_MS)
+    const unlink = linkAbort(signal, controller)
+    let read: Awaited<ReturnType<typeof import('./gemini').readCardHosted>> = null
+    try {
+      const { readCardHosted } = await import('./gemini')
+      read = await readCardHosted(canvas, controller.signal).catch(() => null)
+    } finally {
+      clearTimeout(timer)
+      unlink()
+    }
+    if (!read) {
+      traceEvent('tiebreak-read', { name: null })
+      return null
+    }
+    traceEvent('tiebreak-read', {
+      name: read.name,
+      number: read.number ?? null,
+      setCode: read.setCode ?? null,
+      treatment: read.treatment ?? null,
+      foil: read.foil ?? null,
+    })
+    // The model has to agree about WHICH card before it may speak to which
+    // printing. `relatedNames` is the same bar `refineFromCorner` applies to a
+    // collector-line swap, for the same reason.
+    if (!relatedNames(read.name, card.name)) {
+      traceEvent('tiebreak-reject', { read: read.name, card: card.name, why: 'name' })
+      return null
+    }
+    const sameSet = (raw: any) => !read.setCode || String(raw.set ?? '').toUpperCase() === read.setCode.toUpperCase()
+    // A printed number pins it outright — matched against the printings we
+    // already hold, so this costs no second lookup and cannot wander off the
+    // card the way a fuzzy re-match would.
+    if (read.number) {
+      const pinned = raws.find((raw) => collectorEq(raw.collector_number, read!.number) && sameSet(raw))
+      if (pinned && pinned.id !== card.apiId) {
+        traceEvent('tiebreak-pin', { number: read.number, edition: pinned.set?.toUpperCase() ?? null })
+        return mtgCardFromRaw(pinned)
+      }
+      if (pinned) return null
+    }
+    // No number, so the frame answers instead. Only a NON-regular treatment
+    // may re-pick: "regular" is what the fuzzy match already assumed, and
+    // acting on it would let a model's shrug move a correct answer to some
+    // other set's ordinary printing.
+    const wanted = read.treatment && read.treatment !== 'regular' ? read.treatment : null
+    if (!wanted) return null
+    // Stay in the set the name match already believes when that set has the
+    // frame; only a set with no such printing at all sends this wider.
+    const inSet = raws.filter(sameSet).filter((raw) => treatmentOf(raw) === wanted)
+    const picked = pickByTraits(inSet.length ? inSet : raws, { treatment: wanted, foil: read.foil ?? foil })
+    // Strictly narrowing: the swap happens only when a printing with the frame
+    // the model actually saw exists.
+    if (!picked || treatmentOf(picked) !== wanted || picked.id === card.apiId) {
+      traceEvent('tiebreak-reject', { treatment: wanted, why: 'no-print' })
+      return null
+    }
+    traceEvent('tiebreak-frame', { treatment: wanted, number: picked.collector_number ?? null })
+    return mtgCardFromRaw(picked)
+  }
+
   /** Look the candidates up; a confident hit is refined to the exact edition. */
   const tryCandidates = async (fresh: string[], reading: Reading): Promise<IdentifyOutcome | null> => {
     if (!fresh.length) return null
@@ -881,6 +1022,18 @@ async function identifyViaOcr(
       if (foil && !refined && card.game === 'mtg' && !!card.finishes?.length && !card.finishes.some((f) => f !== 'nonfoil')) {
         const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
         if (better) card = better
+      }
+      // Nothing printed pinned the EDITION — the collector line was never read,
+      // or read without a number — so the card on screen is whatever a fuzzy
+      // name match defaulted to. On a card with more than one frame that is a
+      // coin toss the user pays for, in the wrong art and the wrong price. Ask
+      // the cloud read which printing this is, if the user switched it on.
+      if (!refined?.read.number) {
+        const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
+        if (settled) {
+          traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
+          card = settled
+        }
       }
       return {
         ok: true,

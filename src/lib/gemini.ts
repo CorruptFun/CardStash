@@ -1,4 +1,5 @@
 import { linkAbort } from './fetchJson'
+import { asTreatment, type Treatment } from './scryfall'
 import type { Card, Game } from './types'
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -91,6 +92,18 @@ export interface CloudCardRead {
   printedTotal?: string
   setCode?: string
   game?: string
+  /**
+   * What the FRAME looks like — borderless, showcase, extended, retro. This is
+   * the one field here that is not a transcription, and it is the reason the
+   * cloud read is worth asking about a card the device already named: on-device
+   * OCR can read a collector line but has no way to answer "is this the
+   * full-art printing?", while a vision model answers it from the picture. It
+   * feeds `pickByTraits`, and it may only ever choose BETWEEN printings of a
+   * card that was identified some other way.
+   */
+  treatment?: Treatment
+  /** The model saw holographic shine. Corroborates the on-device detector. */
+  foil?: boolean
 }
 
 /**
@@ -108,6 +121,12 @@ const CARD_SCHEMA = {
     printedTotal: { type: 'STRING' },
     setCode: { type: 'STRING' },
     game: { type: 'STRING' },
+    // Deliberately a plain STRING rather than a schema `enum`: the vocabulary
+    // is enforced by `asTreatment` on the way in, where an unrecognised answer
+    // costs nothing, instead of by a schema field whose rejection would take
+    // the whole call — name and collector line included — down with it.
+    treatment: { type: 'STRING' },
+    foil: { type: 'BOOLEAN' },
   },
   required: ['name'],
 }
@@ -118,6 +137,18 @@ const CARD_PROMPT =
   '(ex, GX, V, VMAX, VSTAR) and any possessive prefix ("Iono\'s", "Team Rocket\'s"). ' +
   'Also return the collector number and printed set total from the small collector line ' +
   '(for "055/086": number "055", printedTotal "086"), and the printed set code if visible. ' +
+  'Magic cards print that line as two rows in a bottom corner — "0321 U" over "MSH★EN" — ' +
+  'giving number "0321" and setCode "MSH", with no printed total to return. Its separator ' +
+  'is sometimes a star (★) rather than a dot (•), and its number is sometimes higher than the set ' +
+  'actually holds; both mark a special printing, so transcribe the digits exactly as they ' +
+  'appear and do not normalise them. On full-art and borderless cards this line is printed ' +
+  'over the artwork in small light or dark type close to the card edge — look for it there too. ' +
+  'Then judge the FRAME and return treatment: "borderless" when the artwork runs to the card ' +
+  'edges with no border at all, "extended" when a thin border remains but the art reaches the ' +
+  'sides, "showcase" for an alternate stylised frame, "retro" for an old-style frame, ' +
+  '"regular" for the ordinary modern frame; and foil: true only when the surface clearly ' +
+  'shows holographic shine. Those two describe the printing rather than transcribe it, so ' +
+  'answer them only when the card is clearly enough visible to judge. ' +
   'CRITICAL: omit any field you cannot actually read on the card. Never guess a number. ' +
   'An omitted field is correct; an invented one is not.'
 
@@ -141,6 +172,31 @@ const CLOUD_SCAN_TIMEOUT_MS = 12_000
  * costs 5x. Re-measure with `modelcmp` before changing this on vibes.
  */
 export const CLOUD_SCAN_MODEL = 'gemini-3.1-flash-lite'
+
+/** A model's string field, or nothing — "unknown"/"null" are the model saying no. */
+function text(value: unknown): string | undefined {
+  const s = typeof value === 'string' ? value.trim() : ''
+  return s && s.toLowerCase() !== 'unknown' && s.toLowerCase() !== 'null' ? s : undefined
+}
+
+/**
+ * Coerce a model's JSON to `CloudCardRead`. One coercion for both routes, so
+ * the hosted and direct paths cannot drift into disagreeing about what an
+ * unreadable field means — the answer is always "the field is absent".
+ */
+function cloudRead(parsed: any): CloudCardRead | null {
+  const name = text(parsed?.name)
+  if (!name) return null
+  return {
+    name,
+    number: text(parsed?.number),
+    printedTotal: text(parsed?.printedTotal),
+    setCode: text(parsed?.setCode),
+    game: text(parsed?.game),
+    treatment: asTreatment(parsed?.treatment),
+    foil: typeof parsed?.foil === 'boolean' ? parsed.foil : undefined,
+  }
+}
 
 /**
  * The HOSTED rescue: our own edge function reads the card, using a key that
@@ -173,8 +229,10 @@ export async function readCardHosted(canvas: HTMLCanvasElement, signal?: AbortSi
       signal: controller.signal,
     })
     if (!res.ok) return null
+    // Our own server, but the answer inside it is a language model's — coerce
+    // it to the contract rather than casting, exactly as a pasted link would be.
     const parsed = await res.json()
-    return parsed?.name ? (parsed as CloudCardRead) : null
+    return parsed?.name ? cloudRead(parsed) : null
   } catch {
     return null
   } finally {
@@ -224,19 +282,8 @@ export async function readCardViaGemini(
       signal,
     )
     const parsed = JSON.parse(responseText(res))
-    const text = (value: unknown): string | undefined => {
-      const s = typeof value === 'string' ? value.trim() : ''
-      return s && s.toLowerCase() !== 'unknown' && s.toLowerCase() !== 'null' ? s : undefined
-    }
-    const name = text(parsed?.name)
-    if (!name) return null
-    return {
-      name,
-      number: text(parsed?.number),
-      printedTotal: text(parsed?.printedTotal),
-      setCode: text(parsed?.setCode),
-      game: text(parsed?.game),
-    }
+    if (!text(parsed?.name)) return null
+    return cloudRead(parsed)
   } catch {
     // A rescue that throws is just a miss — never surface it as a scan error.
     return null

@@ -194,6 +194,38 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    equal to today rather than trading wrong cards for misses, which would be
    the same mistake in the other direction.
 
+13. **The right card at the wrong PRINTING is its own failure class, and the
+   matrix is blind to it.** `graded()` in run-matrix.mjs compares game + name
+   similarity only, so a borderless fixture answered with the base printing
+   scores a PASS. There is a `borderless-any` MTG fixture and it cannot fail
+   this way. Do not read the matrix as evidence about printings; it has none.
+   Measured off a real photo instead: Human Torch, Johnny Storm `MSH #0321`
+   (borderless, foil, quarter-turned) came back as `MSH #136` — right name,
+   right set, ordinary frame, wrong art, wrong price.
+   The mechanism is structural rather than unlucky. On a full-art card the
+   collector line is small type over artwork at the very edge, and the
+   full-bleed frame gives `refineCardCrop` no border to lock onto — while the
+   refine path uses the WEAKEST corner read in the pipeline (3× upscale,
+   single-block, one polarity, ≤3 passes). The 5×/sparse/mixed-polarity ladder
+   and the raw-frame bottom-band rescue are sole-evidence only, i.e. reached
+   only when no name was readable. The card that most needs the strong reader
+   is exactly the one that never gets it, and with no number pinned `matchMtg`
+   answers by fuzzy name — which Scryfall resolves to one default printing.
+   `printingTiebreak` (identify.ts) is invariant 12's principle applied to that
+   class: a confident answer that settled the card but not the edition is
+   SUSPECT, and the cloud read is asked `treatment` — the one question
+   on-device OCR structurally cannot answer. Its guards are in
+   `docs/scanning.md`; the two that must not erode are that every candidate
+   comes from an exact-name `rawPrintings` search (so a different card is not a
+   reachable answer) and that only a NON-regular treatment may re-pick (so a
+   model shrugging "regular" cannot move a correct answer to another set).
+   Two collaborators, both still missing: nothing on-device detects a
+   borderless frame (`pickByTraits` has taken a `treatment` since v0.7 and had
+   no producer until the cloud read became one), and `looksLikeCollectorLine`
+   still recognises no modern MTG line at all — a fraction, a set-dash code or
+   an 8-digit passcode only — so MTG sideways frames can never settle
+   orientation from the line. Both are free wins for whoever picks this up.
+
 ## Scanner loop (hooks/useScanner.ts)
 
 Auto-attempts fire on: still (motion < 7.5) held long enough + retry gap +
