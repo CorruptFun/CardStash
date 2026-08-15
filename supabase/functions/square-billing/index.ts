@@ -21,6 +21,8 @@
  * signature failure is a 401, because that one is not Square talking.
  */
 
+import { entitlementWindow, isUserId, safeEqual, squareSignature, subscriptionFromEvent } from './logic.ts'
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
@@ -47,26 +49,6 @@ const SQUARE_API = Deno.env.get('SQUARE_API_BASE') ?? 'https://connect.squareup.
  */
 const NOTIFICATION_URL = Deno.env.get('SQUARE_NOTIFICATION_URL') ?? ''
 
-/** Constant-time compare: a fast-exit compare on a signature leaks it byte by byte. */
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let diff = 0
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  return diff === 0
-}
-
-async function signatureFor(payload: string, key: string): Promise<string> {
-  const mac = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(key),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
-  const sig = await crypto.subtle.sign('HMAC', mac, new TextEncoder().encode(payload))
-  return btoa(String.fromCharCode(...new Uint8Array(sig)))
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
 
@@ -82,7 +64,7 @@ Deno.serve(async (req: Request) => {
   // trip — and parsing first means running the parser on unverified input.
   const raw = await req.text()
   const given = req.headers.get('x-square-hmacsha256-signature') ?? ''
-  const expected = await signatureFor(NOTIFICATION_URL + raw, SIGNATURE_KEY)
+  const expected = await squareSignature(NOTIFICATION_URL + raw, SIGNATURE_KEY)
   if (!given || !safeEqual(given, expected)) return json({ error: 'bad signature' }, 401)
 
   let event: any = null
@@ -92,18 +74,10 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, ignored: 'unparseable' })
   }
 
-  // Subscription lifecycle only. An invoice or payment event is a fact about
-  // money, not about access: `charged_through_date` on the subscription is the
-  // single field that says how long this user has paid for, and taking access
-  // from exactly one field means the two can never disagree.
-  const type = String(event?.type ?? '')
-  if (type !== 'subscription.created' && type !== 'subscription.updated') {
-    return json({ ok: true, ignored: type })
-  }
-
-  const sub = event?.data?.object?.subscription
-  const customerId = sub?.customer_id ? String(sub.customer_id) : ''
-  if (!customerId) return json({ ok: true, ignored: 'no customer' })
+  // Subscription lifecycle only — see subscriptionFromEvent in logic.ts for why
+  // access is taken from `charged_through_date` and nothing else.
+  const sub = subscriptionFromEvent(event)
+  if (!sub) return json({ ok: true, ignored: String(event?.type ?? 'unknown') })
 
   // --- which of OUR users is this ------------------------------------------
   // Square's `reference_id` on the customer is the join. It is set when the
@@ -112,25 +86,15 @@ Deno.serve(async (req: Request) => {
   // party that actually knows both ids. Deriving it from the billing email
   // instead would let anyone with a Square account claim any Cardstock account
   // whose address they can guess.
-  const customer = await fetch(`${SQUARE_API}/v2/customers/${customerId}`, {
+  const customer = await fetch(`${SQUARE_API}/v2/customers/${sub.customerId}`, {
     headers: { Authorization: `Bearer ${SQUARE_TOKEN}`, 'Square-Version': '2025-01-23' },
   }).catch(() => null)
   if (!customer?.ok) return json({ error: 'customer lookup failed' }, 503)
   const userId = String((await customer.json())?.customer?.reference_id ?? '')
-  if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ ok: true, ignored: 'no reference_id' })
+  if (!isUserId(userId)) return json({ ok: true, ignored: 'no reference_id' })
 
-  // --- how long have they paid for -----------------------------------------
-  // ACTIVE with a paid-through date grants; anything else (CANCELED, PAUSED,
-  // DEACTIVATED, or an active subscription whose date has not been set yet)
-  // writes an entitlement that has already expired. Writing the expired row
-  // rather than deleting it is deliberate: the row is the audit trail of why
-  // someone lost access, and `consume_scan_credit` already treats "expired" and
-  // "absent" identically.
-  const paidThrough = sub?.charged_through_date ? String(sub.charged_through_date) : ''
-  const active = String(sub?.status ?? '').toUpperCase() === 'ACTIVE' && !!paidThrough
-  const expiresAt = active
-    ? new Date(new Date(`${paidThrough}T00:00:00Z`).getTime() + GRACE_DAYS * 86_400_000).toISOString()
-    : new Date(0).toISOString()
+  // --- how long have they paid for (entitlementWindow, logic.ts) -----------
+  const { active, expiresAt } = entitlementWindow(sub, GRACE_DAYS)
 
   // Service role, so RLS is bypassed — which is the ONLY way this table is ever
   // written (migration 0005: nobody may write it through PostgREST, because a
