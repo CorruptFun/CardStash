@@ -427,3 +427,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # fails as "payments silently never arrive" rather than as an error anyone sees.
 [functions.stripe-escrow]
 verify_jwt = false
+
+# The timer sweep is called by Supabase Cron over pg_net, which has no user JWT
+# to present -- so the platform gate is off and the function checks a shared
+# `x-sweep-key` header itself. Without that check, anyone who guessed the URL
+# could force every pending payout in the system to release early.
+[functions.stripe-escrow-sweep]
+verify_jwt = false

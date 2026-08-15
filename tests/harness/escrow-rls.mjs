@@ -514,7 +514,45 @@ try {
   check('...but it can be refunded', refundedRow?.status === 'refunded', JSON.stringify(refunded.body).slice(0, 120))
 
   // ---------------------------------------------------------------------- 8
-  section(8, 'Controls — a refusal must mean refusal, not absence')
+  section(8, 'The auto-release path, which no user can walk')
+
+  // What the sweep does to a shipped order whose buyer went silent. It asserts
+  // delivery on their behalf, so the row passes THROUGH delivered rather than
+  // jumping to released -- otherwise delivered_at is null and the record of why
+  // the money moved is gone.
+  const silent = await openOrder(buyer, seller)
+  await adminRpc('advance_order', { p_order: silent.row.id, p_to: 'paid' })
+  await rpc(seller.token, 'mark_shipped', { p_order: silent.row.id })
+
+  const buyerSelfDeliver = await rpc(buyer.token, 'advance_order', {
+    p_order: silent.row.id,
+    p_to: 'delivered',
+  })
+  check(
+    'a buyer cannot reach the timer edge directly',
+    buyerSelfDeliver.status >= 400,
+    `${buyerSelfDeliver.status}`,
+  )
+
+  const swept = await adminRpc('advance_order', { p_order: silent.row.id, p_to: 'delivered' })
+  const sweptRow = Array.isArray(swept.body) ? swept.body[0] : swept.body
+  check(
+    'the sweep advances shipped -> delivered',
+    sweptRow?.status === 'delivered',
+    JSON.stringify(swept.body).slice(0, 140),
+  )
+  check('...and stamps delivered_at, so the release is explicable', !!sweptRow?.delivered_at, `${sweptRow?.delivered_at}`)
+
+  const sweptRelease = await adminRpc('advance_order', { p_order: silent.row.id, p_to: 'released' })
+  const sweptReleaseRow = Array.isArray(sweptRelease.body) ? sweptRelease.body[0] : sweptRelease.body
+  check(
+    '...and can then release',
+    sweptReleaseRow?.status === 'released',
+    JSON.stringify(sweptRelease.body).slice(0, 140),
+  )
+
+  // ---------------------------------------------------------------------- 9
+  section(9, 'Controls — a refusal must mean refusal, not absence')
 
   const ghost = await adminRpc('definitely_not_a_function', {})
   check('a nonexistent RPC 404s', ghost.status === 404, `${ghost.status}`)

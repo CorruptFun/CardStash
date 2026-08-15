@@ -372,6 +372,12 @@ begin
     when v_from = 'disputed'  and p_to = 'refunded'  then true
     -- ...or resolved for the seller, which puts it back on the release path.
     when v_from = 'disputed'  and p_to = 'delivered' then true
+    -- The auto-release timer asserting delivery on a silent buyer's behalf.
+    -- A user cannot reach this edge -- `confirm_receipt` is how a buyer says it
+    -- arrived, and this function is service_role only. It exists so the sweep
+    -- does not have to jump straight to 'released', which would leave
+    -- `delivered_at` null and lose the record of why the money moved.
+    when v_from = 'shipped'   and p_to = 'delivered' then true
     -- The only door money leaves by.
     when v_from = 'delivered' and p_to = 'released'  then true
     else false
