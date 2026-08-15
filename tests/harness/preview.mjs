@@ -53,7 +53,11 @@ const degradations = list(args.degradations) ?? ['clean']
 const fixtures = manifest.fixtures.filter((f) => !keys || keys.includes(f.key))
 mkdirSync(OUT, { recursive: true })
 
-const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort'], {
+// `--host 127.0.0.1` for the same reason run-matrix.mjs passes it: vite binds
+// the loopback NAME by default, so on a machine where `localhost` resolves to
+// ::1 nothing listens on 127.0.0.1 — the literal every URL below is written
+// against — and the run dies on waitFor()'s timeout on a healthy checkout.
+const vite = spawn('node', [join(REPO, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
   cwd: REPO,
   stdio: ['ignore', 'pipe', 'pipe'],
 })

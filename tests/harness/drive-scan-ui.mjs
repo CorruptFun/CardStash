@@ -55,7 +55,12 @@ const check = (ok, what, detail = '') => {
   if (!ok) failures.push(what)
 }
 
-const vite = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), '--port', String(PORT), '--strictPort'], {
+// `--host 127.0.0.1` for the same reason run-matrix.mjs passes it: vite binds
+// the loopback NAME by default, so on a machine where `localhost` resolves to
+// ::1 nothing listens on 127.0.0.1 — the literal the readiness probe and the
+// route filter below are both written against — and the run dies blaming the
+// dev server on a perfectly healthy checkout.
+const vite = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
   cwd: REPO,
   stdio: ['ignore', 'pipe', 'pipe'],
 })
