@@ -9,11 +9,18 @@
 
 ## The stance
 
-Identification is **fully on-device**. Tesseract reads the name band and the
-collector line; canvas pixel analysis finds the card, removes roll, reads foil
-sheen and hashes the frame. The card APIs are consulted only by *name*, *set*
-and *number* — no image ever leaves the device. The Gemini key, if the user has
-one, powers the AI deck builder and nothing else.
+Identification is **on-device by default**. Tesseract reads the name band and
+the collector line; canvas pixel analysis finds the card, removes roll, reads
+foil sheen and hashes the frame. The card APIs are consulted only by *name*,
+*set* and *number*.
+
+An image leaves the device in exactly one circumstance: the user switched on
+`cloudScanRescue`, and this frame is one the local pipeline could not settle —
+either nothing identified it, or it identified the card but nothing pinned
+*which printing* it is (see the printing tie-break below). Our Gemini key is
+server-side and scoped to that rescue and the AI deck builder. With the switch
+off — the default — no frame is ever uploaded and the pipeline is the one
+described above, instruction for instruction.
 
 ## Module chain
 
@@ -176,6 +183,8 @@ re-identifying the same card sitting on the table. Rules that matter:
    and upgrades to the exact edition. `relatedNames` guards the swap: the
    corner-pinned card must be similar (≥ 0.7) or a normalized prefix relation, so
    "Tauros" → "Tauros ex" is allowed but an unrelated card is not.
+9. **Printing tie-break** (MTG, opt-in) — see below. Only when step 8 pinned no
+   collector number, so the edition is still a fuzzy match's default guess.
 
 ### Budgets
 
@@ -242,6 +251,50 @@ of near-specular highlights in multiple quadrants at once. Deliberately
 conservative: it answers "definitely foil" or "don't know", never "definitely
 not" — a foil held flat shows no sheen. A sheen on an MTG printing that never
 came foil triggers a re-pick of the newest foil-capable printing.
+
+### The printing tie-break (`printingTiebreak`, MTG, opt-in)
+
+The failure this exists for: a full-art or borderless card whose **name reads
+perfectly and whose collector line does not**. The line is small type printed
+over artwork at the very edge, and a full-bleed frame gives `refineCardCrop`
+no border to lock onto, so the refine pass at step 8 comes back with nothing.
+With no number pinning the edition, `matchMtg` falls through to a fuzzy
+name lookup, and Scryfall's answer to a bare name is *one default printing* —
+the ordinary frame. The borderless card in the hand is then reported as the
+base print, confidently, with the base print's art and the base print's price.
+Measured on a real photo: Human Torch, Johnny Storm `MSH #0321` (borderless)
+answered as `MSH #136`.
+
+The refine path is also the *weakest* corner read in the pipeline — 3× upscale,
+single-block segmentation, one polarity, ≤3 passes. The 5×/sparse/mixed-polarity
+ladder and the raw-frame bottom-band rescue only run on the sole-evidence path,
+which is reached only when no name was readable. So the card that most needs the
+strong reader is exactly the card that never gets it.
+
+So when the edition was never pinned, the frame is offered to the cloud read —
+not as a rescue (the card is already identified) but as **precision**. What the
+model is asked for is the thing on-device OCR structurally cannot supply:
+`treatment` — is this frame borderless, extended, showcase, retro or ordinary?
+Reading small type off artwork is where Tesseract is weakest; judging whether a
+frame has a border is a glance.
+
+Guards, all narrowing:
+
+| Guard | Why |
+| --- | --- |
+| MTG only | `rawPrintings` (exact-name, `game:paper`) + `treatmentOf` give a free, complete list of this card's frames to check the answer against. No other game's catalog offers one. The seam itself is game-agnostic. |
+| Candidates come from `mtgRawPrintings(card.name)` | An exact-name search, so the tie-break can only swap one printing of **this card** for another. A different card is not a reachable answer. |
+| >1 printing **and** >1 treatment, checked first | Nothing a model could say would move a single-frame card, so neither the upload nor the metered credit is spent. |
+| `relatedNames(read.name, card.name)` | The model must agree about *which card* before it may speak to which printing — the same bar `refineFromCorner` applies. |
+| A read number is matched inside the printings already held | No second lookup, and it cannot wander off the card the way a fuzzy re-match would. |
+| Only a **non-regular** treatment may re-pick | "regular" is what the fuzzy match already assumed; acting on it would let a model's shrug move a correct answer to some other set's ordinary printing. |
+| The picked print must actually carry the seen frame | A model that says "borderless" about a card with no borderless printing changes nothing. |
+| 6s leash (`PRINTING_TIEBREAK_TIMEOUT_MS`), half the rescue's | The rescue's alternative is telling the user "no". This one already has a usable answer on screen. |
+| `budget.printingTiebreak`, false in `PAGE_SCAN_BUDGET` | Nine cards on a page would be nine uploads and nine credits. The review screen re-reads a row at full budget once a human is looking at it. |
+| `cloudScanRescue` + signed in | Same switch, same reason, as the rescue. Being signed in is not consent; paying is not consent. |
+
+Any refusal — off, unreachable, timed out, rejected — leaves the local answer
+standing. The worst case is what the app does today.
 
 ## 4. OCR (`lib/ocr.ts`)
 

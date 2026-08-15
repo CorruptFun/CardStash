@@ -35,10 +35,23 @@ lazily fetched and runtime-cached, so devices that never scan never pay for it.
 shaped so the sentence above survives it. It runs only when the user has
 switched `cloudScanRescue` on, and only on a frame the local pipeline could not
 settle — a full miss, or an answer of a shape measured to be confidently wrong
-(guard invariant 12). A scan that succeeds locally never touches the network,
-and a user who never opts in cannot tell the feature exists. Signing in is not
-consent and neither is paying: the upload is its own switch, because sending a
-camera frame somewhere is a different act from subscribing to a tier.
+(guard invariants 12 and 13). A user who never opts in cannot tell the feature
+exists. Signing in is not consent and neither is paying: the upload is its own
+switch, because sending a camera frame somewhere is a different act from
+subscribing to a tier.
+
+"Could not settle" is the load-bearing phrase, and it is deliberately about the
+ANSWER rather than about failure. A frame that produced a card can still have
+settled nothing about which *printing* is in the hand: an MTG card whose
+collector line never read is matched by fuzzy name, and a fuzzy name resolves to
+one default printing — the ordinary frame, never the borderless one. So the
+printing tie-break (invariant 13) uploads a frame the pipeline *did* identify.
+That is a real widening of the boundary and it is written down here rather than
+buried: the compensation is that it asks a strictly smaller question — which of
+this card's printings, chosen from a list the client already holds, never which
+card — it is checked first that there is more than one frame to choose between,
+and it is off inside page scans. A tie-break that refuses leaves the local
+answer exactly as it was.
 
 The Gemini boundary moved with it and is now stated precisely rather than
 absolutely: the key is scoped to the AI deck builder **and** the scan rescue,

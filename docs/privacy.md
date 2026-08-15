@@ -53,7 +53,7 @@ The copy says so.
 | `api.psacard.com` | a slab scan whose label carried a cert number | the cert number, and **our** token as a bearer header — no user data of any kind | not opt-in, but only ever fires on a deliberate slab scan; dormant entirely if the build ships no token, and slab scanning still works without it |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | the Cardstock `build-deck` function | AI deck builder run | the STRUCTURED request — game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"** — plus the session token. The prompt is assembled server-side and our key never reaches the browser | needs an account and a subscription |
-| the Cardstock `scan-card` function | the same rescue, for a signed-in subscriber with no key of their own | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default |
+| the Cardstock `scan-card` function | the same rescue, and the MTG printing tie-break, for a signed-in subscriber | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default |
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
@@ -94,11 +94,17 @@ The rescue is the one exception, and it is narrow by construction:
   bring-your-own-key route alike, because sending a camera frame somewhere is a
   different act from subscribing to a tier.
 - **It uploads one frame, and only a frame the local pipeline could not settle.**
-  Either every local pass failed, or the local answer is one of the specific
-  shapes known to be confidently wrong (a bare Pokémon species that has a
-  suffixed sibling in the catalog — the "Krookodile" that is really a
-  Krookodile ex). Scans that succeed locally never reach it, so opting in does
-  not put ordinary scanning on the network.
+  Three shapes qualify. Either every local pass failed; or the local answer is
+  one of the specific shapes known to be confidently wrong (a bare Pokémon
+  species that has a suffixed sibling in the catalog — the "Krookodile" that is
+  really a Krookodile ex); or the card was identified but **nothing pinned which
+  printing it is** — an MTG card whose collector line never read, whose name has
+  printings in more than one frame, so the edition on screen is a fuzzy match's
+  default guess (the printing tie-break, `docs/scanning.md`). That third case is
+  the only one where a frame with a usable local answer is uploaded, and it is
+  narrow by construction: it asks which *printing*, never which card, it is
+  checked before the upload that there is more than one frame to choose between,
+  and a page scan never does it.
 - **The frame is sent, read, and not kept.** The hosted route holds the model key
   server-side so it never ships to a client; it records that a scan was spent
   against the month's allowance, not the picture or what was in it.

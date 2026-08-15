@@ -158,8 +158,15 @@ export async function mtgById(id: string): Promise<Card | null> {
   }
 }
 
-/** Raw prints list (newest first), shared by the variants picker and trait matching. */
-async function rawPrintings(name: string, setCode?: string | null, signal?: AbortSignal): Promise<any[]> {
+/**
+ * Raw prints list (newest first), shared by the variants picker, trait
+ * matching and the scan's printing tie-break. Exported because a caller
+ * holding every printing of a name can pin one WITHOUT a second lookup — and,
+ * more importantly, cannot answer with a different card: the query is an
+ * exact-name search, so every row here is a printing of the same card by
+ * construction.
+ */
+export async function rawPrintings(name: string, setCode?: string | null, signal?: AbortSignal): Promise<any[]> {
   const query = [`!"${name.replace(/"/g, '')}"`, 'game:paper', setCode ? `set:${setCode.toLowerCase()}` : '']
     .filter(Boolean)
     .join(' ')
@@ -180,12 +187,39 @@ export async function mtgPrintings(name: string, signal?: AbortSignal): Promise<
 
 /** What the scanner could see about the physical copy. */
 export interface ScanTraits {
-  treatment?: string | null
+  treatment?: Treatment | null
   foil?: boolean | null
 }
 
+/**
+ * The frame treatments the scanner can tell apart by eye. This is the shared
+ * vocabulary: `treatmentOf` derives it from a Scryfall print, the cloud read
+ * asks the model for it in these exact words, and `pickByTraits` matches the
+ * two against each other.
+ */
+export type Treatment = 'regular' | 'borderless' | 'extended' | 'showcase' | 'retro'
+
+export const TREATMENTS: readonly Treatment[] = ['regular', 'borderless', 'extended', 'showcase', 'retro']
+
+/**
+ * Coerce an untrusted string (a model's answer, relayed by our own server) to
+ * the vocabulary, or to nothing. Anything unrecognised is dropped rather than
+ * passed through: `pickByTraits` reads an unknown treatment as "matches no
+ * print", which would quietly turn a fresh model vocabulary into a silent
+ * refusal to ever re-pick.
+ */
+export function asTreatment(value: unknown): Treatment | undefined {
+  const lower = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return (TREATMENTS as readonly string[]).includes(lower) ? (lower as Treatment) : undefined
+}
+
+/** A Card built from a raw Scryfall print — for callers holding `rawPrintings`. */
+export function mtgCardFromRaw(raw: any): Card {
+  return toCard(raw)
+}
+
 /** The frame treatment a Scryfall print actually carries. */
-export function treatmentOf(raw: any): string {
+export function treatmentOf(raw: any): Treatment {
   if (raw.border_color === 'borderless' || raw.full_art) return 'borderless'
   const effects: string[] = Array.isArray(raw.frame_effects) ? raw.frame_effects : []
   if (effects.includes('extendedart')) return 'extended'

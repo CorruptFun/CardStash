@@ -762,7 +762,7 @@ export function ScanView({ active }: { active: boolean }) {
           <UploadButton busy={uploadBusy} onPick={() => fileRef.current?.click()} wide />
           <p className="scan__gatehint">
             {config.cloudScanRescue
-              ? 'Reading a card — its name, collector number, even foil sheen — runs on this device. Cloud rescue is on, so a card this phone can’t settle on its own is sent as one photo to be read; everything it does settle stays here.'
+              ? 'Reading a card — its name, collector number, even foil sheen — runs on this device. Cloud rescue is on, so a card this phone can’t settle on its own — or can’t tell the borderless printing of from the ordinary one — is sent as one photo to be read; everything it does settle stays here.'
               : 'Everything runs on this device — the card name, its collector number, even foil sheen. No account, no API.'}
           </p>
           <p className="scan__gatehint">

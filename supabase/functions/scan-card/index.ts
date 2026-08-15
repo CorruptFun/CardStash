@@ -9,7 +9,7 @@
  *
  * Contract (matches CloudCardRead in src/lib/gemini.ts):
  *   POST { image: "<base64 jpeg>", model?: string }
- *   200  { name, number?, printedTotal?, setCode?, game?, remaining }
+ *   200  { name, number?, printedTotal?, setCode?, game?, treatment?, foil?, remaining }
  *   401  not signed in            403  not entitled
  *   429  allowance exhausted      502  upstream Gemini failure
  *
@@ -37,12 +37,27 @@ const MODEL = Deno.env.get('GEMINI_SCAN_MODEL') ?? 'gemini-3.1-flash-lite'
 /** A card photo at capture size is ~250KB of base64; this is a sanity ceiling. */
 const MAX_IMAGE_BYTES = 6_000_000
 
+// Kept WORD FOR WORD in step with CARD_PROMPT in src/lib/gemini.ts. The client
+// parses what this returns against that contract, so a prompt that drifts here
+// is a field the client quietly stops getting.
 const PROMPT =
   'You are reading a trading card photograph for a collection app. ' +
   'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
   "(ex, GX, V, VMAX, VSTAR) and any possessive prefix (\"Iono's\", \"Team Rocket's\"). " +
   'Also return the collector number and printed set total from the small collector line ' +
   '(for "055/086": number "055", printedTotal "086"), and the printed set code if visible. ' +
+  'Magic cards print that line as two rows in a bottom corner — "0321 U" over "MSH★EN" — ' +
+  'giving number "0321" and setCode "MSH", with no printed total to return. Its separator ' +
+  'is sometimes a star (★) rather than a dot (•), and its number is sometimes higher than the set ' +
+  'actually holds; both mark a special printing, so transcribe the digits exactly as they ' +
+  'appear and do not normalise them. On full-art and borderless cards this line is printed ' +
+  'over the artwork in small light or dark type close to the card edge — look for it there too. ' +
+  'Then judge the FRAME and return treatment: "borderless" when the artwork runs to the card ' +
+  'edges with no border at all, "extended" when a thin border remains but the art reaches the ' +
+  'sides, "showcase" for an alternate stylised frame, "retro" for an old-style frame, ' +
+  '"regular" for the ordinary modern frame; and foil: true only when the surface clearly ' +
+  'shows holographic shine. Those two describe the printing rather than transcribe it, so ' +
+  'answer them only when the card is clearly enough visible to judge. ' +
   'CRITICAL: omit any field you cannot actually read on the card. Never guess a number. ' +
   'An omitted field is correct; an invented one is not.'
 
@@ -54,6 +69,11 @@ const SCHEMA = {
     printedTotal: { type: 'STRING' },
     setCode: { type: 'STRING' },
     game: { type: 'STRING' },
+    // A plain STRING, not a schema `enum`: the client's `asTreatment` is the
+    // vocabulary check, and it costs nothing when the answer is unrecognised.
+    // A schema rejection here would lose the whole read, name included.
+    treatment: { type: 'STRING' },
+    foil: { type: 'BOOLEAN' },
   },
   required: ['name'],
 }
@@ -139,6 +159,8 @@ Deno.serve(async (req: Request) => {
     printedTotal: parsed.printedTotal ? String(parsed.printedTotal) : undefined,
     setCode: parsed.setCode ? String(parsed.setCode) : undefined,
     game: parsed.game ? String(parsed.game) : undefined,
+    treatment: parsed.treatment ? String(parsed.treatment) : undefined,
+    foil: typeof parsed.foil === 'boolean' ? parsed.foil : undefined,
     remaining,
   })
 })
