@@ -3,7 +3,7 @@
 import { isSignedIn } from './authsession'
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
-import { isAbort } from './fetchJson'
+import { isAbort, linkAbort } from './fetchJson'
 import {
   collectorLineAllows,
   CORNER_REGION,
@@ -43,7 +43,7 @@ import { settings } from './settings'
 import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv'
 import type { Card, Game, GradeInfo } from './types'
 import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
-import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity } from './util'
+import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity, sleep } from './util'
 import { ygoById, ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed' | 'slab'
@@ -598,6 +598,48 @@ const CLOUD_MATCH_THRESHOLD = 0.9
  */
 const CLOUD_CONFIDENCE = 0.85
 
+/**
+ * How long the local pipeline gets to itself before the cloud rescue starts
+ * ALONGSIDE it rather than after it.
+ *
+ * The rescue used to be strictly last: every band, every candidate lookup and
+ * the whole magnified collector sweep first, which on a hard frame is the
+ * best part of twenty seconds (`DEFAULT_BUDGET.ocrMs`). For someone paying
+ * for it that is the wrong shape — the thing they bought should be racing the
+ * local passes, not queueing behind them. So on a scan that has not settled
+ * in this long, the frame goes up and whichever answer lands first wins.
+ *
+ * 2.5s is where a scan stops feeling like a scan and starts feeling stuck,
+ * and it is comfortably past the ordinary case: on the harness matrix the
+ * median identified cell answers in well under a second and the p90 is around
+ * 2s, so the frames that trip this are the ones genuinely in trouble.
+ *
+ * The cost of being wrong is real and worth stating: a card the local passes
+ * would have got at 4s now also spends one cloud call, and — the part that
+ * matters more — its frame leaves the device (see docs/privacy.md, which says
+ * so). A local answer aborts the request in flight, so the window is only as
+ * wide as the call itself.
+ */
+const CLOUD_HEADSTART_MS = 2_500
+
+/**
+ * Floor between two RACED cloud calls, across attempts.
+ *
+ * The live scanner re-attempts on its own every couple of seconds while a card
+ * is held still, and a hand-held card jitters into a new frame hash each time,
+ * so the miss cache doesn't cover it. Without a floor, one stubborn card in
+ * front of the lens is a call every retry — the month's allowance spent on a
+ * single card the user is about to give up on anyway.
+ *
+ * The LAST-RESORT call is deliberately not gated by this: when every local
+ * pass has failed the alternative is telling the user "no", which is what the
+ * rescue exists to avoid. Only the speculative early race is rationed. A
+ * manual rescan tap goes through the normal path and is not special-cased —
+ * it will usually be past the floor by the time the user reaches for it.
+ */
+const CLOUD_RACE_COOLDOWN_MS = 8_000
+let lastRacedCloudAt = 0
+
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
  * keep it tight enough that an unreadable card doesn't cook the phone. */
@@ -705,6 +747,11 @@ async function identifyViaOcr(
   const bail = () => {
     if (signal?.aborted) throw new DOMException('Scan attempt aborted', 'AbortError')
   }
+  // Wall clock for the cloud head start. Taken HERE rather than beside the
+  // OCR budget below, because a sideways frame spends real seconds working
+  // out which way is up before the first band is read, and the user is
+  // watching "Identifying…" through all of it.
+  const startedAt = Date.now()
   // The reticle crop is a fixed window; the card in it is regularly smaller,
   // off-center or slightly rolled. Tighten to the detected card and deskew
   // before any OCR — every band below assumes card-relative geometry.
@@ -1134,7 +1181,7 @@ async function identifyViaOcr(
    * a corner-only ID this answer is stable for the same frame and re-deriving
    * it would mean paying for the same API call twice.
    */
-  const cloudIdentify = async (reading: Reading): Promise<IdentifyOutcome | null> => {
+  const cloudIdentify = async (reading: Reading, raceSignal?: AbortSignal): Promise<IdentifyOutcome | null> => {
     // Two routes to the same answer, tried in this order:
     //   1. HOSTED — a subscriber's scan, read by our own edge function with a
     //      key that never ships to the client. Entitlement and the monthly
@@ -1164,7 +1211,7 @@ async function identifyViaOcr(
     // code-split. What it does buy is keeping authsession/cloudconfig out of
     // the scan path until a rescue actually runs.
     const { readCardHosted } = await import('./gemini')
-    const read = await readCardHosted(reading.canvas, signal).catch(() => null)
+    const read = await readCardHosted(reading.canvas, raceSignal ?? signal).catch(() => null)
     if (!read) {
       traceEvent('cloud-read', { name: null })
       return null
@@ -1238,13 +1285,56 @@ async function identifyViaOcr(
     }
   }
 
+  // The cloud rescue, started on a timer and raced against the passes below
+  // rather than queued behind all of them (see CLOUD_HEADSTART_MS). One call
+  // per attempt either way: this promise IS the last-resort call, awaited at
+  // the bottom if nothing local answered first.
+  //
+  // A local answer aborts it — `settle()` on every way out of here — so the
+  // frame only travels when the scan was genuinely still stuck at the
+  // deadline. That is a narrower window than "every slow scan" but a wider
+  // one than "only scans that failed", which is what docs/privacy.md used to
+  // be able to promise.
+  const cloudCtl = new AbortController()
+  const unlinkCloud = linkAbort(signal, cloudCtl)
+  let cloudHit: IdentifyOutcome | null = null
+  const settle = <T>(outcome: T): T => {
+    cloudCtl.abort()
+    unlinkCloud()
+    return outcome
+  }
+  /** Whether the raced call actually went out — the bottom must not pay twice. */
+  let cloudCalled = false
+  const raceCloud = () => {
+    if (cloudCtl.signal.aborted || cloudCalled) return null
+    if (Date.now() - lastRacedCloudAt < CLOUD_RACE_COOLDOWN_MS) {
+      traceEvent('cloud-race', { skipped: true })
+      return null
+    }
+    lastRacedCloudAt = Date.now()
+    cloudCalled = true
+    traceEvent('cloud-race', { skipped: false })
+    return cloudIdentify(readings[0], cloudCtl.signal)
+  }
+  const cloudRace = config.cloudScanRescue
+    ? sleep(Math.max(0, CLOUD_HEADSTART_MS - (Date.now() - startedAt)))
+        .then(raceCloud)
+        .then((outcome) => (cloudHit = outcome))
+        .catch(() => null)
+    : null
+
   // When the frame looked sideways and the collector line couldn't settle
   // which way up it is, the alternatives are read in turn — names across all
   // of them first, because a band read on the right way up beats a magnified
   // corner sweep on the wrong one, and the corner path is the expensive one.
   for (const reading of readings) {
     const hit = await namePasses(reading)
-    if (hit) return hit
+    if (hit) return settle(hit)
+    // A cloud answer that landed mid-sweep ends it. The local passes still
+    // outrank it when they answer FIRST — they carry corroborating evidence
+    // the model's single reading doesn't — but there is nothing to be gained
+    // by grinding the remaining escalation once the answer is in hand.
+    if (cloudHit) return settle(cloudHit)
   }
   if (gameHint) {
     for (const reading of readings) {
@@ -1253,18 +1343,31 @@ async function identifyViaOcr(
       // and would only spend magnified passes on the card's side edge.
       if (reading.sweepOnly) continue
       const hit = await cornerIdentify(reading, gameHint)
-      if (hit) return hit
+      if (hit) return settle(hit)
+      if (cloudHit) return settle(cloudHit)
     }
   }
 
-  // Every local pass has failed. If — and only if — the user supplied their own
-  // Gemini key AND opted in, read the frame in the cloud as a last resort.
+  // Every local pass has failed. If — and only if — the user opted in, the
+  // frame is read in the cloud: either the raced call above is still in
+  // flight (wait for it) or the deadline never mattered because everything
+  // local finished first.
   //
   // This is the one place a camera frame may leave the device, and it is
-  // deliberately the place where the alternative is telling the user "no". The
-  // frames that succeed locally never reach here, so opting in does not put
-  // ordinary scanning on the network.
-  const cloud = await cloudIdentify(readings[0])
+  // deliberately the place where the alternative is telling the user "no".
+  // Local work is finished, so there is nothing left to race: a call already
+  // in flight is simply awaited, and if the timer hasn't fired (or the
+  // cooldown rationed it) the last resort starts NOW rather than waiting the
+  // deadline out — a frame that failed everything in 800ms shouldn't sit
+  // watching a clock. `cloudCalled` is what keeps the two from both firing.
+  const lastResort = () => {
+    if (cloudCalled) return cloudRace
+    cloudCalled = true
+    lastRacedCloudAt = Date.now()
+    return cloudIdentify(readings[0], cloudCtl.signal)
+  }
+  const cloud = cloudHit ?? ((await lastResort()) ?? null)
+  unlinkCloud()
   if (cloud) return cloud
 
   // Auto mode never sweeps the catalog-backed games — each would pull a whole

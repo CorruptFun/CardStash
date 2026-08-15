@@ -91,12 +91,17 @@ The rescue is the one exception, and it is narrow by construction:
   neither is paying: `cloudScanRescue` gates the hosted route and the
   bring-your-own-key route alike, because sending a camera frame somewhere is a
   different act from subscribing to a tier.
-- **It uploads one frame, and only a frame the local pipeline could not settle.**
-  Either every local pass failed, or the local answer is one of the specific
-  shapes known to be confidently wrong (a bare Pokémon species that has a
-  suffixed sibling in the catalog — the "Krookodile" that is really a
-  Krookodile ex). Scans that succeed locally never reach it, so opting in does
-  not put ordinary scanning on the network.
+- **It uploads one frame, and only from a scan that is already in trouble.**
+  Every local pass failed, or the local answer is one of the specific shapes
+  known to be confidently wrong (a bare Pokémon species that has a suffixed
+  sibling in the catalog — the "Krookodile" that is really a Krookodile ex),
+  **or the scan was still unsettled 2.5 seconds in** (`CLOUD_HEADSTART_MS`).
+  That last case is newer and wider than the others, and it is the honest
+  reading of it: a card the local passes would have got at four seconds now
+  also sends its frame. A local answer aborts the request in flight, and a
+  raced call is rationed to one per `CLOUD_RACE_COOLDOWN_MS` so a stubborn
+  card cannot upload a frame per retry. What has not changed: with
+  `cloudScanRescue` off, nothing is uploaded at all, ever.
 - **The frame is sent, read, and not kept.** The hosted route holds the model key
   server-side so it never ships to a client; it records that a scan was spent
   against the month's allowance, not the picture or what was in it.
