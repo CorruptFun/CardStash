@@ -54,14 +54,46 @@ const LOOKUP_BATCH = 100
 const MISS_TTL_MS = 3 * 24 * 3_600_000
 const MISS_KEY = 'cardsource:misses'
 
+/**
+ * Consecutive lookup failures before the index is stood down for the session.
+ *
+ * Without this, "the index is unreachable" costs one failed request per
+ * imageless card, on every screen, forever — a collection of uncatalogued
+ * promos would quietly hammer a server that is down, or one that has not been
+ * migrated yet. `psa.ts` stands down on a 429 for the same reason.
+ *
+ * Two failures rather than one, because a single request can lose a race with
+ * a phone changing networks; two in a row is a server, not a tunnel.
+ */
+const FAILURES_BEFORE_STANDDOWN = 2
+let lookupFailures = 0
+let stoodDown = false
+
+/**
+ * A stand-down lasts the session and is never persisted.
+ *
+ * The recovery story is "open the app again", which is the honest one for a
+ * feature nobody is waiting on: the alternative — a timer that retries — spends
+ * a user's battery re-asking a question whose answer changes on our schedule,
+ * not theirs.
+ */
+function noteLookupFailure(fatal: boolean): void {
+  lookupFailures++
+  if (fatal || lookupFailures >= FAILURES_BEFORE_STANDDOWN) stoodDown = true
+}
+
+function noteLookupSuccess(): void {
+  lookupFailures = 0
+}
+
 /** A build with no Supabase project never contacts anything. */
 export function cardSourceAvailable(): boolean {
   return CLOUD_AVAILABLE
 }
 
-/** Are we allowed to ask the index about cards? */
+/** Are we allowed to ask the index about cards, and is it worth asking? */
 export function cardSourceLookupOn(): boolean {
-  return CLOUD_AVAILABLE && settings().cardSourceLookup
+  return CLOUD_AVAILABLE && settings().cardSourceLookup && !stoodDown
 }
 
 /** Is this device set up to contribute — opted in, and signed in to attribute it? */
@@ -77,13 +109,23 @@ export function cardSourceSharing(): boolean {
  * The missing header is the point — see rule 1. Do not "fix" this by reusing
  * `authHeaders()` because a signed-in user happens to have a token handy.
  */
+class MissingFunction extends CloudError {}
+
 async function anonRpc<T>(fn: string, body: unknown): Promise<T> {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
     method: 'POST',
     headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new CloudError(await readError(res, 'The card index did not answer'))
+  if (!res.ok) {
+    const message = await readError(res, 'The card index did not answer')
+    // 404 from PostgREST means the RPC is not in the schema — a project that
+    // has not had `0013_card_source.sql` applied, which is the state every
+    // client is in on the day this ships. That is not a transient failure and
+    // must not be retried card after card, so it stands the index down at once.
+    if (res.status === 404) throw new MissingFunction(message)
+    throw new CloudError(message)
+  }
   return (await res.json()) as T
 }
 
@@ -158,9 +200,12 @@ export async function fillMissingImages(cards: Card[]): Promise<Card[]> {
   let rows: RemoteRow[]
   try {
     rows = await anonRpc<RemoteRow[]>('lookup_card_data', { p_ids: wanted.map((card) => card.id) })
-  } catch {
+    noteLookupSuccess()
+  } catch (err) {
     // A card index that is down is not an error the user needs to hear about:
-    // the card still shows, just without the picture it never had.
+    // the card still shows, just without the picture it never had. It IS a
+    // reason to stop asking — see noteLookupFailure.
+    noteLookupFailure(err instanceof MissingFunction)
     return []
   }
 
@@ -238,6 +283,7 @@ export async function searchSharedCards(game: Game, query: string): Promise<Card
   if (!cardSourceLookupOn() || query.trim().length < 2) return []
   try {
     const rows = await anonRpc<RemoteRow[]>('search_card_data', { p_game: game, p_query: query.trim() })
+    noteLookupSuccess()
     const cards: Card[] = []
     for (const row of Array.isArray(rows) ? rows : []) {
       const patch = rowToPatch(row)
@@ -245,7 +291,8 @@ export async function searchSharedCards(game: Game, query: string): Promise<Card
       cards.push(customCard(patch.game, patch.fields, patch.image))
     }
     return cards
-  } catch {
+  } catch (err) {
+    noteLookupFailure(err instanceof MissingFunction)
     return []
   }
 }
@@ -297,7 +344,16 @@ export async function flagCardData(cardId: string): Promise<void> {
   }
 }
 
-/** Forget every "nobody has this" answer — used when the user turns lookup on. */
+/**
+ * Forget every "nobody has this" answer — used when the user turns lookup on.
+ *
+ * Also clears a stand-down: flipping the switch is someone deliberately asking
+ * for the feature, which is the one signal worth more than our own last
+ * failure.
+ */
 export async function clearCardSourceMisses(): Promise<void> {
+  stoodDown = false
+  lookupFailures = 0
+  asked.clear()
   await db.cache.delete(MISS_KEY)
 }
