@@ -8,10 +8,49 @@ export type Game =
   | 'starwars'
   | 'digimon'
   | 'gundam'
+  | 'sports'
 
 export type Finish = 'nonfoil' | 'foil' | 'etched' | 'holo' | 'reverse' | 'firstEd'
 
 export type Condition = 'M' | 'NM' | 'LP' | 'MP' | 'HP' | 'DMG'
+
+/**
+ * Which sport a `sports` card belongs to. This is a field rather than nine
+ * more `Game` literals on purpose: sports collectors organize by player, set
+ * and year, not by sport, and every `Record<Game, …>` table in the app would
+ * otherwise multiply. Splitting later is a data migration, not a redesign.
+ */
+export type Sport =
+  | 'baseball'
+  | 'basketball'
+  | 'football'
+  | 'hockey'
+  | 'soccer'
+  | 'racing'
+  | 'wrestling'
+  | 'multi'
+  | 'other'
+
+/** Grading companies whose slabs the scanner recognizes. */
+export type GradeCompany = 'PSA' | 'BGS' | 'SGC' | 'CGC' | 'HGA' | 'TAG'
+
+/**
+ * A grade on one physical copy. This lives on the collection row, never on
+ * `Card`: the slab and the raw copy are the same printing, so folding a grade
+ * into the card id would fork the catalog and break every price lookup. What
+ * differs is the item in the box, which is exactly what `CollectionItem` is.
+ */
+export interface GradeInfo {
+  company: GradeCompany
+  /** 1..10, in halves for BGS/CGC subgrades (9.5). */
+  grade: number
+  /** The label's own words — "GEM MT", "MINT", "AUTHENTIC". */
+  label?: string
+  /** Certification number, as printed. Resolves to the exact card via PSA. */
+  cert?: string
+  /** PSA qualifier suffix: OC, ST, MK, MC, PD, OF. */
+  qualifier?: string
+}
 
 export type PriceSource =
   | 'tcgplayer'
@@ -73,7 +112,32 @@ export interface SealedInfo {
   kind?: string
 }
 
-/** A card as normalized from any of the three game APIs. */
+/**
+ * Present on `sports` cards: the attributes a sports card is actually
+ * identified by. Unlike every other game here, these do not come from a
+ * catalog — no free sports card API exists — they are read off the card
+ * itself and the card is synthesized from them. See docs/card-data.md.
+ */
+export interface SportsInfo {
+  sport: Sport
+  /** Print year from the copyright line, e.g. 1989. */
+  year?: number
+  /** Manufacturer: Topps, Panini, Upper Deck, Bowman, Fleer, Donruss… */
+  brand?: string
+  /** Product line within the brand: Chrome, Prizm, Stadium Club, Select. */
+  product?: string
+  player?: string
+  team?: string
+  /** Parallel/insert treatment: "Silver Prizm", "Refractor", "Gold". */
+  parallel?: string
+  /** Serial numbering off the card face: 23/99. */
+  serial?: { num: number; of: number }
+  rookie?: boolean
+  auto?: boolean
+  relic?: boolean
+}
+
+/** A card as normalized from any of the game APIs. */
 export interface Card {
   /** `${game}:${apiId}` — stable across sessions. */
   id: string
@@ -100,6 +164,8 @@ export interface Card {
   printings?: Printing[]
   /** Present when this is a sealed product (booster pack/box/bundle), not a single. */
   sealed?: SealedInfo
+  /** Present when this is a sports card, carrying what it was identified by. */
+  sports?: SportsInfo
   prices: Prices
   links: CardLinks
 }
@@ -123,6 +189,17 @@ export interface CollectionItem {
    * scanned in as singles instead.
    */
   opened?: boolean
+  /**
+   * This copy is slabbed. Part of the row's identity — a PSA 10 never merges
+   * into the raw row, because they are not the same thing to sell or trade.
+   */
+  grade?: GradeInfo
+  /**
+   * User-set market value per copy, USD. Sports cards have no free price API,
+   * so a collector's own number off eBay comps is the honest valuation — and
+   * it wins over `card.prices` in portfolio maths when set, for any game.
+   */
+  marketValue?: number
   /** Cost basis per copy, USD. */
   purchasePrice?: number
   /** Copies of this row offered for trade (0..qty); absent = none. */
@@ -226,6 +303,8 @@ export interface SharedCard {
   finish: Finish
   condition: Condition
   qty: number
+  /** Slab details, when this copy is graded. */
+  grade?: GradeInfo
   /** Copies of this row offered for trade (≤ qty). */
   forTrade: number
   image?: string

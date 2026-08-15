@@ -693,6 +693,52 @@ export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string
   return lines.slice(0, 14)
 }
 
+/**
+ * Read every scattered line in a region, keeping the punctuation a sports
+ * card is identified BY.
+ *
+ * `readSealedLines` strips `#` along with the rest of the OCR noise, which is
+ * right for a pack front and exactly wrong here: `#147` is the card number
+ * and `23/99` is the print run — the two most identifying marks on the card.
+ * Sports also has no fixed layout to aim a band at (the number is top-left on
+ * one brand and bottom-right on the next), so this reads the whole region in
+ * full page-segmentation mode and lets `sportsparse.ts` sort out what is what.
+ */
+export async function readSportsLines(
+  canvas: HTMLCanvasElement,
+  rect: OcrRect = { x: 0, y: 0, w: 1, h: 1 },
+  variant: PrepVariant = 'normal',
+): Promise<string[]> {
+  const worker = await getWorker()
+  const region = prepRegion(canvas, rect, 900, variant)
+  const started = Date.now()
+  await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
+  let text = ''
+  try {
+    text = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+  }
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const raw of text.split('\n')) {
+    const cleaned = raw
+      // Everything a sports identity can live in survives: # / © . - & '
+      .replace(/[|_~`^*=<>{}[\]\\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (cleaned.length < 2) continue
+    if (((cleaned.match(/[A-Za-z0-9]/g) ?? []).length) / cleaned.length < 0.4) continue
+    const key = cleaned.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      lines.push(cleaned)
+    }
+  }
+  traceEvent('ocr-sports', { ...rect, variant, ms: Date.now() - started, lines: lines.slice(0, 20) })
+  return lines.slice(0, 24)
+}
+
 /** Tiny collector-line type needs upscaling before Tesseract can read it. */
 const CORNER_OCR_WIDTH = 1200
 

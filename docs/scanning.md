@@ -298,6 +298,51 @@ and plain numbers — and it always ranks *below* a readable set name.
 `sealedmatch.ts` is deliberately free of catalog/DB imports so node unit tests
 can exercise the scoring rules directly.
 
+## 5b. Sports and graded slabs
+
+Two more modes, both of which only run when the user has asked for them.
+
+**Sports cards** (`gameHint === 'sports'`). No catalog exists, so the read *is*
+the identification: `readSportsLines` (PSM 3 over the whole frame, keeping the
+`#`, `/` and `©` that `readSealedLines` strips) → `parseSportsText` → a
+synthesized `Card`. Card backs are the good side — number, copyright year and
+brand are all printed there — but the parser takes whichever side it is given.
+A weak read retries with a different **binarization**, never a lower bar.
+
+**Sports never joins the auto sweep.** `sweepable` filters it out of every
+place the fan-out picks games for itself. This is not a performance choice: in
+auto mode a card that matched nothing would be *synthesized* into a sports card
+that does not exist — a confident wrong answer, the failure class this pipeline
+works hardest to avoid. Sports requires picking the game, the same way the
+collector-line rescue does.
+
+**Graded slabs** (`mode: 'slab'`). The best input the app ever gets: a
+manufactured label in clean printed type, with a fixed grade vocabulary and a
+cert number. `parseSlabLabel` (pure, in `slab.ts`) reads the top 30% band, and
+falls back to the whole frame if the label is not where it guessed.
+
+The bar for "this is a slab" is a **company marker plus either a grade or a
+cert**. A card can easily mention a number; only a slab says PSA and 10 in the
+same breath. A company name with no grade at all is refused outright — that is
+a sleeve or a shop logo. The company is never inferred from cert length.
+
+When the label carries a cert and the user has supplied a PSA token, `psa.ts`
+resolves it to the exact card and that answer replaces the OCR read
+(confidence 1). Without a token, nothing is sent anywhere and the label's own
+text is parsed like any other sports read. The grade survives either way.
+
+**A slab is not always a sports card.** With a TCG selected, the label's text is
+treated as an ordinary name read and matched against that game's real catalog
+(top 3 candidates, threshold 0.8 — clean printed type earns a higher bar than a
+photographed card face). The identity comes from the catalog, so this branch
+carries none of the synthesis risk the sports path guards against. With **no**
+game picked, a slab falls through to the sports reader, which is the only one
+that can work without a catalog; a graded Charizard will honestly miss there and
+the message says to pick the game.
+
+The sports path also recognizes a slab handed to it, so a user scanning their
+collection never has to know there was a mode.
+
 ## 6. Multi-card / binder scanning (`lib/multiscan.ts`)
 
 A binder page, a fanned stack, a row of cards in one photo. `detectCardRegions`

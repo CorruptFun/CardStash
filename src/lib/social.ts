@@ -1,5 +1,6 @@
 import { CONDITIONS, FINISH_LABEL, GAMES } from './games'
 import { conditionFactor, itemUnitPrice, mergePrices } from './prices'
+import { sanitizeGrade } from './slab'
 import { settings } from './settings'
 import type {
   Card,
@@ -342,6 +343,7 @@ export function sanitizeSharedCard(raw: unknown): SharedCard | null {
     finish: FINISHES.includes(raw.finish as Finish) ? (raw.finish as Finish) : 'nonfoil',
     condition: CONDITIONS.includes(raw.condition as Condition) ? (raw.condition as Condition) : 'NM',
     qty,
+    grade: sanitizeGrade(raw.grade),
     forTrade: Math.min(qty, clampInt(raw.forTrade, 0, 9_999) ?? 0),
     image: httpsImage(asStr(raw.image, 500)),
     price: Number.isFinite(price) && price > 0 && price < 1_000_000 ? Math.round(price * 100) / 100 : undefined,

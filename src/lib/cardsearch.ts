@@ -1,6 +1,7 @@
 import { lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
 import { matchMtg, mtgById, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
 import { matchPokemon, pokemonById, pokemonPrintings, searchPokemon } from './pokemon'
+import { matchSports, searchSports, sportsById, sportsPrintings } from './sports'
 import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
 import { sealedVariants } from './sealed'
 import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
@@ -28,6 +29,8 @@ export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal
       return searchYgo(query, signal)
     case 'lorcana':
       return searchLorcana(query, signal)
+    case 'sports':
+      return searchSports(query, signal)
     default:
       // Riftbound, One Piece, Star Wars: Unlimited, Digimon, Gundam — TCGCSV.
       return searchCatalog(game, query, signal)
@@ -50,6 +53,8 @@ export function matchGame(
       return matchYgo(name, keys.thorough)
     case 'lorcana':
       return matchLorcana(name, setCode, number)
+    case 'sports':
+      return matchSports(name, setCode, number)
     default:
       return matchCatalog(game, name, setCode, number)
   }
@@ -68,6 +73,8 @@ export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise
       return ygoById(apiId)
     case 'lorcana':
       return lorcanaById(apiId)
+    case 'sports':
+      return sportsById(apiId)
     default:
       return catalogById(game, apiId)
   }
@@ -77,6 +84,15 @@ export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise
 export function refreshCard(card: Card, keys: ApiKeys = {}): Promise<Card | null> {
   if (card.sealed) return sealedRefresh(card)
   return cardById(card.game, card.apiId, keys)
+}
+
+/**
+ * Sports cards have no price feed on the free path (see lib/sports.ts), so a
+ * bulk refresh leaves them alone entirely rather than counting every one of
+ * them as a failure. They surface as "skipped", which is what they are.
+ */
+function refreshable(card: Card): boolean {
+  return card.game !== 'sports'
 }
 
 const MTG_BATCH = 75
@@ -98,8 +114,9 @@ export async function refreshCards(
   const stats: RefreshStats = { ok: 0, failed: 0 }
   // Sealed products refresh one-by-one via their TCGplayer group, never
   // through the Scryfall batch endpoint.
-  const mtg = cards.filter((c) => c.game === 'mtg' && c.apiId && !c.sealed)
-  const rest = cards.filter((c) => !(c.game === 'mtg' && c.apiId && !c.sealed))
+  const live = cards.filter(refreshable)
+  const mtg = live.filter((c) => c.game === 'mtg' && c.apiId && !c.sealed)
+  const rest = live.filter((c) => !(c.game === 'mtg' && c.apiId && !c.sealed))
   let calls = 0
   for (let i = 0; i < mtg.length; i += MTG_BATCH) {
     if (opts.signal?.aborted) return stats
@@ -262,6 +279,9 @@ export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: 
     }
     case 'lorcana':
       cards = await lorcanaPrintings(card.name, signal)
+      break
+    case 'sports':
+      cards = await sportsPrintings(card.name, signal)
       break
     default:
       cards = await catalogPrintings(card.game, card.name, signal)

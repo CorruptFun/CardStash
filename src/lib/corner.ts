@@ -25,6 +25,12 @@ export const CORNER_REGION: Record<Game, CornerRect> = {
   starwars: { x: 0, y: 0.85, w: 1, h: 0.15 },
   digimon: { x: 0, y: 0.85, w: 1, h: 0.15 },
   gundam: { x: 0, y: 0.85, w: 1, h: 0.15 },
+  // Sports print the card number on the BACK, top or bottom depending on the
+  // brand, and the copyright line always at the very bottom. The wide bottom
+  // strip catches the copyright year plus a bottom-printed number; the top
+  // band is a retry region rather than the default because a front-facing
+  // scan would otherwise read the player name as a collector number.
+  sports: { x: 0, y: 0.8, w: 1, h: 0.2 },
 }
 
 /**
@@ -43,6 +49,13 @@ export const CORNER_RETRY_REGIONS: Partial<Record<Game, CornerRect[]>> = {
   lorcana: [{ x: 0, y: 0.92, w: 0.55, h: 0.08 }],
   onepiece: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
   starwars: [{ x: 0, y: 0.92, w: 0.6, h: 0.08 }],
+  sports: [
+    // Card backs put the number in a corner box, top-left or top-right.
+    { x: 0, y: 0, w: 0.35, h: 0.12 },
+    { x: 0.65, y: 0, w: 0.35, h: 0.12 },
+    // The copyright/licensing line, which carries the year and the brand.
+    { x: 0, y: 0.9, w: 1, h: 0.1 },
+  ],
 }
 
 /**

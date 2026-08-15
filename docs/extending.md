@@ -70,6 +70,28 @@ these for you — but not the CSS, the aliases or the regexes.
 
 ---
 
+## Add a sport, a brand, or a parallel
+
+None of these is a new game — they are vocabulary in `src/lib/sportsparse.ts`:
+
+- **A brand or product line** — add to `BRANDS` / `PRODUCTS`. Products are
+  matched longest-first, so compounds ("Bowman Chrome") already beat their
+  suffixes. If the line only ever covers one sport, add it to `PRODUCT_SPORT`.
+- **A parallel** — add to `PARALLELS`. A bare colour never qualifies; colours
+  only count next to a treatment word, via `PARALLEL_COLORS`.
+- **A team** — `registerTeams(sport, [...])`. If the nickname is shared across
+  leagues (Cardinals, Giants, Rangers, Kings, Panthers, Jets), add it to
+  `AMBIGUOUS_TEAMS` with its cities instead, so it stays unresolved until
+  something settles it.
+- **A whole sport** — add the literal to `Sport` in `types.ts`, a label in
+  `SPORT_LABEL` and an entry in `SPORTS` (`sports.ts`), plus league marks in
+  `LEAGUE_SPORT` and positions in `POSITION_SPORT`.
+
+Add a case to `tests/unit/sportsparse.test.mjs` for anything you add here — it
+is pure, so the test is three lines. Do **not** loosen
+`MIN_SPORTS_CONFIDENCE` or let sports into the auto sweep to make a card
+scan; see decision 17.
+
 ## Add a data source for an existing game
 
 Follow `pokemon.ts` — it already runs a primary with a fallback. The shape that

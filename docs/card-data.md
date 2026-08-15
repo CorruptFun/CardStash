@@ -1,6 +1,6 @@
 # Card data, pricing and math
 
-## The nine games
+## The ten categories
 
 `Game` and the `GAMES` array live in `src/lib/games.ts`; that list plus the
 per-game tables beside it is what a new game must extend.
@@ -16,12 +16,135 @@ per-game tables beside it is what a new game must extend.
 | `starwars` | Star Wars: Unlimited | TCGCSV | no — catalog | main, side | ≥50, ≤10 side, 3× | foil |
 | `digimon` | Digimon | TCGCSV | no — catalog | main, extra | exactly 50, ≤5 egg, 4× | foil |
 | `gundam` | Gundam | TCGCSV | no — catalog | main, side | exactly 50, ≤10 side, 4× | foil |
+| `sports` | Sports | **none — the card itself** | local recall | — none | — not a deck game | foil |
+
+`sports` is the one entry that is not a card *game*, and it breaks the adapter
+pattern in the one way that matters — see [Sports cards](#sports-cards) below.
 
 `LIGHT_MATCH_GAMES` (`mtg, pokemon, yugioh, lorcana`) are the games with a cheap
 by-name query. The no-hint OCR sweep only fans out across the *enabled* subset
 of those, because a catalog-backed game would pull a whole catalog per lookup —
 unless the user has turned every light game off, in which case their catalogs
 are exactly what was opted into and they become the sweep.
+
+
+## Sports cards
+
+Sports is the only category here with **no catalog**. There is no free API that
+publishes the set of printed sports cards: TCGplayer carries no sports singles,
+so the TCGCSV path gives nothing, and the real sources (SportsCardsPro /
+PriceCharting, CardHedge, Beckett) are paid products. So the usual flow inverts.
+
+```
+every other game:  OCR → name → catalog lookup → the catalog's Card
+sports:            OCR → attribute parse → SYNTHESIZED Card
+```
+
+`sportsparse.ts` reads the identity off the card (pure, unit-tested);
+`sports.ts` turns it into a `Card`. That single difference is behind almost
+every rule below.
+
+### The id is the contract
+
+With no server to agree with, the only thing making two devices call the same
+card the same card is that they compute the same slug from the same printed
+facts:
+
+```
+sports:2023-panini-prizm-136-silver-prizm-basketball
+        year  brand  product number parallel  sport
+```
+
+`sportsSlug` deliberately excludes two things people expect to see:
+
+- **The player.** A card is a slot in a set. Two people reading the same slot
+  must agree even if one of them misread the name.
+- **The serial number.** Every copy of a `/99` parallel is the same card;
+  99 separate ids would be 99 separate collection rows.
+
+Changing `sportsSlug` renames every sports card anyone owns. Treat it as a
+wire format, not an implementation detail.
+
+### Refusing to invent
+
+A TCG misread lands on the wrong *real* card. A sports misread invents a card
+that does not exist, and nothing downstream can tell. Three guards exist for
+exactly this:
+
+1. **`MIN_SPORTS_CONFIDENCE` (0.5).** `parseSportsText` weights what it read —
+   player .34, number .24, year .18, brand .14, sport .10 — and below the floor
+   the scan is an honest miss. A year and a brand alone describe a whole set.
+2. **Sports never joins the auto sweep.** `identifyFrame` only takes the sports
+   path when the game is explicitly chosen (or is the only one enabled). In
+   auto mode a card that matched nothing would otherwise be synthesized into a
+   sports card, which is a confident wrong answer — the worst failure class the
+   scan pipeline has.
+3. **Vocabularies, not guesses.** A word becomes a brand, a team or a parallel
+   only because it is on a list in `sportsparse.ts`. Wrong answers stay rare
+   and missing answers stay obvious.
+
+### Pricing: there isn't a feed, and that is the honest answer
+
+A sports `Card` carries **no prices at all** — `prices.entries` is empty by
+construction. Value comes from two places:
+
+- **`CollectionItem.marketValue`** — the collector's own per-copy figure. It
+  overrides every computed price for any game, and is deliberately **not**
+  scaled by the condition factor: they priced the copy in front of them, so its
+  condition and grade are already in the number.
+- **eBay sold comps** — `sportsCompLink` builds the query a collector would
+  type (year, brand, product, player, `#number`, parallel, `/run`, and the
+  grade when there is one). This is what the hobby actually prices on.
+
+A bulk price refresh **skips** sports rather than counting every row as a
+failure; `refreshCards` filters them and they surface as "skipped".
+
+Do not add a paid price API on the free path. If one is ever wired up it
+belongs behind a user-supplied key (like `pokemonKey`) or the entitlement seam
+in `entitlement.ts`, and scanning must keep working without it.
+
+### Local recall is the catalog
+
+`searchSports` / `matchSports` / `sportsById` read the cards this device has
+already identified, out of the collection and scan tables — no new Dexie table,
+because the full `Card` is already stored on both. `sportsById` can return null
+and that is a real answer: the slug is lossy (brands slug to hyphenated words,
+so it does not split back apart) and there is no service to ask.
+
+## Grading
+
+`CollectionItem.grade?: GradeInfo` is a **new axis on every game**, not a sports
+feature — a PSA 10 Charizard is not an NM Charizard either.
+
+It lives on the collection row and never on `Card`, because a grade describes
+the copy in the holder rather than the printing. Folding it into the card id
+would fork the catalog and break every price lookup.
+
+- **Grade is part of the row's merge key** (`sameGrade` in `db.ts`): a PSA 10
+  never merges into the raw row. The **cert is not** — two PSA 10s of the same
+  card are interchangeable, and a row per cert would fragment the collection.
+- `slab.ts` parses labels (pure, unit-tested) and owns `sanitizeGrade`, which
+  both the backup path and `social.ts` reuse. One validation implementation.
+- Grades travel on `SharedCard`, so a trade shows what it really is.
+- CSV round-trips through a `Grade` column ("PSA 10", "BGS 9.5", "SGC 8 OC").
+
+### PSA cert lookup
+
+`psa.ts` calls PSA's free public API (`GetByCertNumber`, bearer token, ~100
+calls/day) to resolve a scanned cert to the exact card. It is an enhancement
+and never a dependency:
+
+- The token is the user's own, entered in Settings like `pokemonKey`. **With no
+  token the app never contacts PSA at all.**
+- Every failure is non-fatal — the label alone already yields the grade, the
+  cert and usually the whole card, so a refused, rate-limited or unreachable
+  API downgrades the scan instead of breaking it.
+- Slab scanning is **not** sports-only: with a TCG selected, the label is
+  matched against that game's catalog and the grade is attached to the result.
+- **CORS is the known risk.** PSA does not document the endpoint as
+  CORS-enabled for browser origins; if the header is absent the call fails in
+  the page regardless of the token. That is why `PsaOutcome` makes every
+  failure mode a first-class value rather than a thrown error.
 
 ## The adapter contract
 

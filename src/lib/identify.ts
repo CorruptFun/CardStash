@@ -16,6 +16,10 @@ import {
   type CornerRead,
 } from './corner'
 import { GAME_LABEL, LIGHT_MATCH_GAMES } from './games'
+import { psaLookup, psaToParsed } from './psa'
+import { parseSlabLabel } from './slab'
+import { sportsCard, sportsCompLink, MIN_SPORTS_CONFIDENCE } from './sports'
+import { parseSportsText } from './sportsparse'
 import {
   latinWordCount,
   nameBands,
@@ -23,7 +27,9 @@ import {
   readCardNames,
   readCardNamesAnywhere,
   readRegionText,
+  nameCandidates,
   readSealedLines,
+  readSportsLines,
   type OcrRect,
 } from './ocr'
 import { matchPokemon, pokemonByCollector } from './pokemon'
@@ -32,12 +38,12 @@ import { mtgBySetNumber, mtgMatchTraits, mtgPrintings } from './scryfall'
 import { identifySealedText } from './sealed'
 import { settings } from './settings'
 import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv'
-import type { Card, Game } from './types'
+import type { Card, Game, GradeInfo } from './types'
 import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
-import { isLeadOnlyMatch, nameLead, normalizeName, similarity } from './util'
+import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity } from './util'
 import { ygoById, ygoPrintingVariants } from './ygo'
 
-export type ScanMode = 'card' | 'sealed'
+export type ScanMode = 'card' | 'sealed' | 'slab'
 
 /*
  * Identification is fully on-device: Tesseract reads the name band and the
@@ -107,6 +113,12 @@ export interface IdentificationMeta {
   via: 'ocr' | 'cache'
   /** The physical copy showed a foil/holo sheen (on-device detector). */
   foil?: boolean
+  /**
+   * Read off a graded slab's label. Lives on the identification rather than
+   * the card because a grade describes the copy in the holder, not the
+   * printing — see the comment on `GradeInfo`.
+   */
+  grade?: GradeInfo
 }
 
 /**
@@ -212,9 +224,18 @@ export async function identifyFrame(
   }
 
   const outcome =
-    mode === 'sealed'
-      ? await identifySealedFrame(capture.canvas, gameHint)
-      : await identifyViaOcr(capture.canvas, gameHint, opts.signal, opts.budget ?? DEFAULT_BUDGET)
+    mode === 'slab'
+      ? await identifySlabFrame(capture.canvas, gameHint, opts.signal)
+      : mode === 'sealed'
+        ? await identifySealedFrame(capture.canvas, gameHint)
+        : // Sports has no catalog to check an answer against, so it only runs
+          // when the user has actually asked for it. In auto mode a card that
+          // matched nothing would otherwise be SYNTHESIZED into a sports card
+          // that does not exist — a confident wrong answer, the worst class of
+          // failure this pipeline has (see the scan-harness skill).
+          gameHint === 'sports'
+          ? await identifySportsFrame(capture.canvas, opts.signal)
+          : await identifyViaOcr(capture.canvas, gameHint, opts.signal, opts.budget ?? DEFAULT_BUDGET)
   if (outcome.ok) {
     // Cache only well-evidenced hits: a collector-line-only identification
     // (confidence 0.7) must be re-derived per attempt, not re-served at
@@ -267,6 +288,209 @@ async function identifySealedFrame(canvas: HTMLCanvasElement, gameHint: Game | u
     },
   }
 }
+
+/**
+ * A sports card. No catalog, so the read IS the identification: OCR whatever
+ * text the card carries, parse an identity out of it, synthesize the card.
+ *
+ * Card backs are the good side — the number, the copyright year and the brand
+ * all live there in printed type — but people photograph fronts, so this does
+ * not care which side it got and lets the parser take what is present. The
+ * confidence floor in `sports.ts` is the only thing standing between a bad
+ * read and an invented card, which is why the retry loosens the IMAGE
+ * (a different binarization) and never the bar.
+ */
+async function identifySportsFrame(canvas: HTMLCanvasElement, signal?: AbortSignal): Promise<IdentifyOutcome> {
+  let lines: string[]
+  try {
+    lines = await readSportsLines(canvas)
+  } catch {
+    return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
+  }
+  if (signal?.aborted) return { ok: false, reason: 'ocr-miss', message: 'Scan cancelled' }
+  if (!lines.length) {
+    return { ok: false, reason: 'ocr-miss', message: 'Couldn’t read the card — fill the frame, and try the back' }
+  }
+
+  // Someone scanning their sports cards will hand this path a slab sooner or
+  // later. Recognizing it here means they never have to know there was a mode.
+  const slab = parseSlabLabel(lines)
+  if (slab) return identifyFromSlabText(lines, slab, 'sports', signal)
+
+  let parsed = parseSportsText(lines)
+  if (parsed.confidence < MIN_SPORTS_CONFIDENCE) {
+    // One more look at the same card with the ink separated differently —
+    // sports backs are dense small type on tinted stock, which is exactly
+    // what a plain luma read loses.
+    const retry = await readSportsLines(canvas, { x: 0, y: 0, w: 1, h: 1 }, 'binary').catch(() => [] as string[])
+    if (retry.length) {
+      const second = parseSportsText([...lines, ...retry])
+      if (second.confidence > parsed.confidence) parsed = second
+    }
+  }
+
+  if (parsed.confidence < MIN_SPORTS_CONFIDENCE) {
+    const read = parsed.player ?? lines[0]
+    return {
+      ok: false,
+      reason: 'ocr-miss',
+      message: `Read “${read}” but not enough to identify the card — try the back, where the number and year are printed`,
+      readName: read,
+      readGame: 'sports',
+    }
+  }
+
+  const card = sportsCard(parsed)
+  return {
+    ok: true,
+    card,
+    identification: {
+      game: 'sports',
+      name: card.name,
+      number: card.number,
+      confidence: parsed.confidence,
+      via: 'ocr',
+      foil: detectFoil(canvas) || undefined,
+    },
+  }
+}
+
+/**
+ * A graded slab. The label is the best input this app ever gets — printed
+ * type in a fixed vocabulary — and its cert number resolves to the exact card
+ * through PSA's free API when the user has supplied a token.
+ */
+async function identifySlabFrame(
+  canvas: HTMLCanvasElement,
+  gameHint: Game | undefined,
+  signal?: AbortSignal,
+): Promise<IdentifyOutcome> {
+  let lines: string[]
+  try {
+    // The label sits across the top of the holder. Read that band first: it
+    // is where every identifying word is, and excluding the card underneath
+    // keeps the player's photo and the team logo out of the text.
+    lines = await readSportsLines(canvas, { x: 0, y: 0, w: 1, h: 0.3 })
+    if (!parseSlabLabel(lines)) {
+      // Framed loosely, or a holder whose label is not where we guessed.
+      const whole = await readSportsLines(canvas)
+      if (whole.length) lines = [...lines, ...whole]
+    }
+  } catch {
+    return { ok: false, reason: 'api', message: 'OCR engine failed to load — check connection' }
+  }
+  if (signal?.aborted) return { ok: false, reason: 'ocr-miss', message: 'Scan cancelled' }
+
+  const slab = parseSlabLabel(lines)
+  if (!slab) {
+    return {
+      ok: false,
+      reason: 'ocr-miss',
+      message: lines.length
+        ? 'Couldn’t find a grading label — get the whole label in frame, straight on'
+        : 'Couldn’t read the slab — reduce glare on the holder',
+      readName: lines[0],
+      readGame: 'sports',
+    }
+  }
+  return identifyFromSlabText(lines, slab, gameHint, signal)
+}
+
+/**
+ * Turn a confirmed slab read into a card. PSA's answer is authoritative and
+ * replaces the OCR read outright; without it (no token, no cert, or the
+ * lookup failed) the label's own text is parsed like any other sports read.
+ *
+ * The grade survives either way. That matters: even when the printing cannot
+ * be pinned down, "this is a PSA 10" is true, useful and worth reporting.
+ */
+async function identifyFromSlabText(
+  lines: string[],
+  slab: NonNullable<ReturnType<typeof parseSlabLabel>>,
+  gameHint: Game | undefined,
+  signal?: AbortSignal,
+): Promise<IdentifyOutcome> {
+  const grade = slab.grade
+  traceEvent('slab', { company: grade.company, grade: grade.grade, cert: grade.cert })
+
+  // A graded card is not always a sports card — people slab Charizards and
+  // Black Lotuses too. When a TCG is selected, the label's own text is just a
+  // name read, matched against that game's real catalog: the identity comes
+  // from the catalog rather than from us, so this branch carries none of the
+  // synthesis risk the sports path has to guard against.
+  if (gameHint && gameHint !== 'sports') {
+    for (const candidate of nameCandidates(lines).slice(0, SLAB_NAME_CANDIDATES)) {
+      if (signal?.aborted) break
+      const card = await matchGame(gameHint, candidate, null, null, { thorough: true }).catch(() => null)
+      const score = card ? nameScore(candidate, card.name) : 0
+      if (card && score >= SLAB_NAME_THRESHOLD) {
+        traceEvent('slab-tcg', { game: gameHint, candidate, card: card.name, score })
+        return {
+          ok: true,
+          card,
+          identification: { game: gameHint, name: card.name, setCode: card.setCode, confidence: score, via: 'ocr', grade },
+        }
+      }
+    }
+    return {
+      ok: false,
+      reason: 'ocr-miss',
+      message: `Read a ${grade.company}${grade.grade > 0 ? ` ${grade.grade}` : ''} label but couldn’t match the card in ${GAME_LABEL[gameHint]}`,
+      readName: lines[0],
+      readGame: gameHint,
+    }
+  }
+
+  let parsed = parseSportsText(lines)
+  let via: 'psa' | 'ocr' = 'ocr'
+  const token = settings().psaToken
+  if (grade.cert && grade.company === 'PSA' && token.trim()) {
+    const outcome = await psaLookup(grade.cert, token, signal)
+    traceEvent('psa', outcome.ok ? { ok: true, subject: outcome.cert.subject } : { ok: false, reason: outcome.reason })
+    if (outcome.ok) {
+      parsed = psaToParsed(outcome.cert)
+      via = 'psa'
+      // PSA states the grade too; prefer it over a read of the same label.
+      if (outcome.cert.grade != null) grade.grade = outcome.cert.grade
+    }
+  }
+
+  if (parsed.confidence < MIN_SPORTS_CONFIDENCE) {
+    return {
+      ok: false,
+      reason: 'ocr-miss',
+      // With no game picked this fell through to the sports reader, which is
+      // the only one that can work without a catalog. For a graded Charizard
+      // the fix is not a better photo, it is telling us the game — so say so.
+      message: `Read a ${grade.company}${grade.grade > 0 ? ` ${grade.grade}` : ''} label but couldn’t make out the card — get the label sharp and level, or pick the game first`,
+      readName: parsed.player ?? lines[0],
+      readGame: 'sports',
+    }
+  }
+
+  const card = sportsCard(parsed)
+  card.links = { ...card.links, ebaySold: sportsCompLink(card, grade) }
+  return {
+    ok: true,
+    card,
+    identification: {
+      game: 'sports',
+      name: card.name,
+      number: card.number,
+      // A cert lookup is a statement of fact; a label read is still a read.
+      confidence: via === 'psa' ? 1 : Math.min(0.95, parsed.confidence),
+      via: 'ocr',
+      grade,
+    },
+  }
+}
+
+/** Label candidates worth a lookup. The name is printed plainly, so the right
+ * one is near the front — spending more is paying for noise. */
+const SLAB_NAME_CANDIDATES = 3
+/** A slab label is clean printed type, so it is held to a higher bar than a
+ * photographed card face: a weak match here means it is not that card. */
+const SLAB_NAME_THRESHOLD = 0.8
 
 const OCR_MATCH_THRESHOLD = 0.66
 /** Short reads need a higher bar: one edit on 4 letters already scores 0.75,
@@ -474,7 +698,12 @@ async function identifyViaOcr(
   // filter — unless they're all the user keeps on, in which case their
   // catalogs are exactly what was opted into and become the sweep.
   const light = LIGHT_MATCH_GAMES.filter((game) => config.enabledGames.includes(game))
-  const games = gameHint ? [gameHint] : light.length ? light : config.enabledGames
+  // `sweepable` excludes sports everywhere the fan-out picks games for itself.
+  // Its "matcher" is local recall over cards this device has already seen, so
+  // in a sweep it would answer plausibly for any name it half-recognized,
+  // outside the catalog cross-checks that keep the other games honest.
+  const sweepable = config.enabledGames.filter((game) => game !== 'sports')
+  const games = gameHint ? [gameHint] : light.length ? light : sweepable
   const timeoutMs = games.length === 1 ? OCR_MATCH_TIMEOUT_HINTED_MS : OCR_MATCH_TIMEOUT_MS
   const tried = new Set<string>()
   let firstRead: string | undefined
@@ -849,7 +1078,7 @@ async function identifyViaOcr(
   // light for it. Say which games need picking, and only while they are
   // actually enabled and actually excluded.
   const needsPicking = !gameHint
-    ? config.enabledGames.filter((game) => isCatalogGame(game) && !games.includes(game))
+    ? sweepable.filter((game) => isCatalogGame(game) && !games.includes(game))
     : []
   // Kept short: this lands in the no-match chip, not a dialog. Naming the
   // first few is what makes it recognisable ("that's my game") — the count

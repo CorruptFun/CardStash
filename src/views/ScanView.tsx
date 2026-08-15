@@ -16,6 +16,8 @@ import {
   IS_STANDALONE,
 } from '../lib/camera'
 import { addToCollection, clearScans, db, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
+import { gradeShort } from '../lib/slab'
+import { clearSportsRecall } from '../lib/sports'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
 import { isEntitled } from '../lib/entitlement'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
@@ -25,7 +27,7 @@ import { itemUnitPrice, scannedFinish } from '../lib/prices'
 import { warmSealedIndex } from '../lib/sealed'
 import { settings, useSettings } from '../lib/settings'
 import { warmCatalog } from '../lib/tcgcsv'
-import type { Card, Finish, ScanRecord } from '../lib/types'
+import type { Card, Finish, GradeInfo, ScanRecord } from '../lib/types'
 import { haptic, money } from '../lib/util'
 import { frameHash } from '../lib/vision'
 import { guarded, uiStore, useUi } from '../store/ui'
@@ -61,22 +63,22 @@ const REPEAT_WINDOW_MS = 2500
 class CollectQueue {
   private recent: { cardId: string; at: number } | null = null
 
-  async hit(card: Card, finish: Finish): Promise<void> {
+  async hit(card: Card, finish: Finish, grade?: GradeInfo): Promise<void> {
     const last = this.recent
     if (last?.cardId === card.id && Date.now() - last.at < REPEAT_WINDOW_MS) {
       uiStore.getState().toast(`Skipped a repeat of ${card.name}`, 'info', {
         label: 'Add anyway',
         fn: () => {
-          this.add(card, finish)
+          this.add(card, finish, grade)
         },
       })
       return
     }
-    await this.add(card, finish)
+    await this.add(card, finish, grade)
   }
 
-  private async add(card: Card, finish: Finish): Promise<void> {
-    const item = await guarded(() => addToCollection(card, { finish }), 'Add')
+  private async add(card: Card, finish: Finish, grade?: GradeInfo): Promise<void> {
+    const item = await guarded(() => addToCollection(card, { finish, grade }), 'Add')
     if (!item) return
     // Marked only AFTER the write lands — a quota failure must not make the
     // retry read as "repeat" and get skipped.
@@ -84,7 +86,9 @@ class CollectQueue {
     track('card_added', { game: card.game, source: 'scan' })
     // Price the copy that was actually filed (finish-specific).
     const probe = { finish, condition: 'NM' as const, qty: 1, card }
-    const label = finish === 'nonfoil' ? '' : ` ${FINISH_LABEL[finish].toLowerCase()}`
+    // A slab's grade is the headline fact about the copy — it belongs in the
+    // confirmation more than the finish does.
+    const label = grade ? ` ${gradeShort(grade)}` : finish === 'nonfoil' ? '' : ` ${FINISH_LABEL[finish].toLowerCase()}`
     uiStore.getState().toast(`+1 ${card.name}${label} · ${money(itemUnitPrice(probe))}`, 'success', {
       label: 'Undo',
       fn: () => {
@@ -245,8 +249,12 @@ export function ScanView({ active }: { active: boolean }) {
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
       guarded(() => recordScan(hit.card), 'Save scan')
+      // Sports "search" is recall over cards this device has seen, and the
+      // one just scanned should be findable now rather than when the memo
+      // happens to expire.
+      if (hit.card.game === 'sports') clearSportsRecall()
       haptic(config.haptics ? [14, 60, 14] : 0)
-      if (config.collectMode) collectRef.current!.hit(hit.card, scanFinish(hit))
+      if (config.collectMode) collectRef.current!.hit(hit.card, scanFinish(hit), hit.identification.grade)
     },
     [config.collectMode, config.haptics],
   )
@@ -349,7 +357,7 @@ export function ScanView({ active }: { active: boolean }) {
       const outcome = await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card' })
       if (outcome.ok) {
         onHit(outcome)
-        openSheet({ card: outcome.card, origin: 'scan', finish: scanFinish(outcome) })
+        openSheet({ card: outcome.card, origin: 'scan', finish: scanFinish(outcome), grade: outcome.identification.grade })
         return
       }
       toast(
@@ -569,7 +577,11 @@ export function ScanView({ active }: { active: boolean }) {
         ? 'Fit the whole page in frame, then tap'
         : scanMode === 'sealed'
           ? 'Fill the frame with the pack or box front'
-          : 'Fill the frame with a card'
+          : scanMode === 'slab'
+            ? 'Get the whole grading label in frame'
+            : config.gameFilter === 'sports'
+              ? 'Fill the frame with a card — the back reads best'
+              : 'Fill the frame with a card'
   const tapRescan = () => {
     if (scanner.busy || !scanning || pageProgress) return
     if (pageMode) {
@@ -620,8 +632,26 @@ export function ScanView({ active }: { active: boolean }) {
                   on: scanMode === 'sealed',
                   onChange: (on) => {
                     setScanMode(on ? 'sealed' : 'card')
+                    if (on) setPageMode(false)
                     scanner.rescan()
                     toast(on ? 'Pack mode: scan boosters, boxes and bundles' : 'Card mode', 'info')
+                  },
+                },
+                {
+                  key: 'slab',
+                  // A slab IS its label — and 'tag' is the closest thing the
+                  // icon set has. (PATHS is Record<string, …>, so a name that
+                  // does not exist type-checks and renders nothing; check the
+                  // set before adding an icon here.)
+                  icon: 'tag',
+                  label: 'Slab',
+                  description: 'Read a graded holder’s label — grade, cert and the card itself',
+                  on: scanMode === 'slab',
+                  onChange: (on) => {
+                    setScanMode(on ? 'slab' : 'card')
+                    if (on) setPageMode(false)
+                    scanner.rescan()
+                    toast(on ? 'Slab mode: get the whole grading label in frame' : 'Card mode', 'info')
                   },
                 },
                 {
@@ -636,7 +666,7 @@ export function ScanView({ active }: { active: boolean }) {
                   // frame.
                   onChange: (on) => {
                     setPageMode(on)
-                    if (on && scanMode === 'sealed') setScanMode('card')
+                    if (on && scanMode !== 'card') setScanMode('card')
                     scanner.rescan()
                     toast(on ? 'Page mode: tap to read every card in frame' : 'Single card mode', 'info')
                   },
@@ -769,7 +799,9 @@ export function ScanView({ active }: { active: boolean }) {
                 finish={hitFinish}
                 foilAuto={foilAuto}
                 onCycleFinish={cycleFinish}
-                onOpen={() => hit && hitFinish && openSheet({ card: hit.card, origin: 'scan', finish: hitFinish })}
+                onOpen={() =>
+                  hit && hitFinish && openSheet({ card: hit.card, origin: 'scan', finish: hitFinish, grade: hit.identification.grade })
+                }
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}
                 onRetry={tapRescan}

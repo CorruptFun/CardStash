@@ -606,6 +606,11 @@ const GAME_CATEGORY: Record<Game, RegExp> = {
   starwars: /star\s*wars:?\s*unlimited/i,
   digimon: /digimon/i,
   gundam: /gundam/i,
+  // TCGplayer carries no sports singles or wax, so there is nothing to match.
+  // A never-matching pattern makes `categoryId` throw its own clear "not in
+  // the TCGplayer catalog" error rather than silently binding to some
+  // unrelated category.
+  sports: /(?!)/,
 }
 
 /**

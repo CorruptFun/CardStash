@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SPORT_LABEL, SPORTS } from '../lib/sports'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatedNumber, CardImg, Empty, Modal } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
@@ -33,7 +34,7 @@ import {
   FEE_PCT,
 } from '../lib/prices'
 import { useSettings } from '../lib/settings'
-import type { CollectionItem, Deck, Game, PricePoint } from '../lib/types'
+import type { CollectionItem, Deck, Game, PricePoint, Sport } from '../lib/types'
 import { money, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 import { InsightsPanel } from './InsightsPanel'
@@ -120,6 +121,7 @@ export function CollectionView() {
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const driveOn = useSettings((s) => s.driveBackup)
   const [gameFilter, setGameFilter] = useState<Game | 'all'>('all')
+  const [sportFilter, setSportFilter] = useState<Sport | 'all'>('all')
   const [filterText, setFilterText] = useState('')
   const [filter, setFilter] = useState('')
   const [sort, setSort] = useState<SortMode>('value')
@@ -145,6 +147,7 @@ export function CollectionView() {
   const shown = useMemo(() => {
     let rows = all
     if (gameFilter !== 'all') rows = rows.filter((item) => item.game === gameFilter)
+    if (sportFilter !== 'all') rows = rows.filter((item) => item.card.sports?.sport === sportFilter)
     const needle = filter.trim().toLowerCase()
     if (needle)
       rows = rows.filter(
@@ -161,7 +164,7 @@ export function CollectionView() {
     else if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     else sorted.sort((a, b) => b.addedAt - a.addedAt)
     return sorted
-  }, [all, gameFilter, filter, sort, unitOf])
+  }, [all, gameFilter, sportFilter, filter, sort, unitOf])
 
   const total = useMemo(() => collectionValue(all), [all])
   const count = useMemo(() => totalQty(all), [all])
@@ -191,6 +194,23 @@ export function CollectionView() {
     },
     [editMode, toggleSelected, openSheet],
   )
+
+  /**
+   * Sports collapses nine sports into one game chip, so the second row is how
+   * a baseball collector gets to their baseball. It only appears once sports
+   * are actually being filtered — one more row of chips over everyone else's
+   * collection would be clutter they can do nothing with.
+   */
+  const ownedSports = useMemo(() => {
+    if (gameFilter !== 'sports') return []
+    const seen = new Set<Sport>()
+    for (const item of all) if (item.card.sports) seen.add(item.card.sports.sport)
+    return SPORTS.filter((sport) => seen.has(sport))
+  }, [all, gameFilter])
+
+  useEffect(() => {
+    if (sportFilter !== 'all' && !ownedSports.includes(sportFilter)) setSportFilter('all')
+  }, [ownedSports, sportFilter])
 
   const selectedItems = useMemo(() => all.filter((item) => selected.has(item.id)), [all, selected])
 
@@ -515,6 +535,19 @@ export function CollectionView() {
             )
           })}
         </div>
+        {ownedSports.length > 1 && (
+          <div className="collhead__games">
+            {(['all' as const, ...ownedSports]).map((key) => (
+              <button
+                key={key}
+                className={`gamefilter ${sportFilter === key ? 'gamefilter--on' : ''}`}
+                onClick={() => setSportFilter(key)}
+              >
+                <span>{key === 'all' ? 'All sports' : SPORT_LABEL[key]}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </header>
       <InsightsPanel items={all} points={points} window={window} />
       <div className="colltools">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { hasDecks } from '../lib/deckstats'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Empty, Modal, Seg, Stepper } from '../components/basics'
 import { Icon } from '../components/Icon'
@@ -145,9 +146,12 @@ function NewDeckModal({
   onClose: () => void
   onCreated: (deck: Deck) => void
 }) {
-  const games = useSettings((s) => s.enabledGames)
+  // Sports cards are collected, not played — a game with no boards can hold
+  // no deck, so it never reaches the picker.
+  const enabled = useSettings((s) => s.enabledGames)
+  const games = useMemo(() => enabled.filter(hasDecks), [enabled])
   const [name, setName] = useState('')
-  const [game, setGame] = useState<Game>(() => (games.includes('mtg') ? 'mtg' : games[0]))
+  const [game, setGame] = useState<Game>(() => (games.includes('mtg') ? 'mtg' : (games[0] ?? 'mtg')))
   const [format, setFormat] = useState('')
   const create = async () => {
     if (!name.trim()) return

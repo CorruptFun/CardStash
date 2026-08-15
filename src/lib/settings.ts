@@ -53,6 +53,13 @@ export interface Settings {
   geminiKey: string
   geminiModel: string
   pokemonKey: string
+  /**
+   * The user's own PSA public-API token, used only to resolve a scanned slab's
+   * cert number to the exact card it belongs to. Empty is the default and the
+   * normal case: with no token the app never contacts PSA at all, and slab
+   * scanning still works off the printed label. See lib/psa.ts.
+   */
+  psaToken: string
   diagShare: boolean
   diagEndpoint: string
   diagToken: string
@@ -117,6 +124,7 @@ export const useSettings = create<Settings>()(
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
       pokemonKey: '',
+      psaToken: '',
       diagShare: false,
       diagEndpoint: DEFAULT_DIAG_ENDPOINT,
       diagToken: '',

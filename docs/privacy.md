@@ -42,6 +42,7 @@ The copy says so.
 | `db.ygoprodeck.com` | Yu-Gi-Oh | a name or passcode | as above |
 | `api.lorcast.com` | Lorcana | a query | as above |
 | `tcgcsv.com` | catalog games, sealed products | nothing but the path (static files) | as above |
+| `api.psacard.com` | a slab scan whose label carried a cert number, **and** a PSA token is set | the cert number, and the user's token as a bearer header | fully opt-in (needs a token) — with no token this is never contacted, and slab scanning still works |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | `generativelanguage.googleapis.com` | AI deck builder run | the prompt: game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"**; the user's key in a header | fully opt-in (needs a key) |
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
@@ -49,6 +50,11 @@ The copy says so.
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
 | the user's sync server | while `syncOn` | binder payload, trade/reply payloads, the device token | off by default |
 | the diagnostics endpoint | while `diagShare` **and** a token are set | redacted event batches + a random device id + app version | off by default |
+
+**Sports cards contact nothing at all.** They have no catalog and no price
+feed, so identification is entirely on-device OCR and the value is whatever the
+collector typed. The only sports-related egress in this table is the optional
+PSA cert lookup above.
 
 **No image ever leaves the device.** Card identification is Tesseract and canvas
 maths locally; the APIs are only queried by name, set and number. Keep it that
@@ -60,6 +66,7 @@ way — this is why the OCR engine is self-hosted rather than CDN-loaded.
 | --- | ------ | ------- | -------- |
 | Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, nothing else |
 | pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
+| PSA API token | `settings.psaToken` | psacard.com only, as a bearer token | resolving a scanned slab's cert to the exact card |
 | Diagnostics token | `settings.diagToken` | the user's configured endpoint only, as a bearer token | authorizing telemetry upload |
 | Sync device token | `settings.syncToken` (minted locally) | the user's configured sync server only | proving ownership of the profile id |
 | Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |

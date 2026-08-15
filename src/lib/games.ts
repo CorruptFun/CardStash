@@ -10,6 +10,7 @@ export const GAMES: Game[] = [
   'starwars',
   'digimon',
   'gundam',
+  'sports',
 ]
 
 export const GAME_LABEL: Record<Game, string> = {
@@ -22,6 +23,7 @@ export const GAME_LABEL: Record<Game, string> = {
   starwars: 'Star Wars',
   digimon: 'Digimon',
   gundam: 'Gundam',
+  sports: 'Sports',
 }
 
 export const GAME_SHORT: Record<Game, string> = {
@@ -34,6 +36,7 @@ export const GAME_SHORT: Record<Game, string> = {
   starwars: 'SWU',
   digimon: 'DIGI',
   gundam: 'GCG',
+  sports: 'SPT',
 }
 
 /** Full names for prompts and copy (vision hints, AI builder). */
@@ -47,6 +50,7 @@ export const GAME_FULL_NAME: Record<Game, string> = {
   starwars: 'Star Wars: Unlimited',
   digimon: 'Digimon Card Game',
   gundam: 'Gundam Card Game',
+  sports: 'sports trading cards',
 }
 
 /**
@@ -114,4 +118,8 @@ export const GAME_FINISHES: Record<Game, Finish[]> = {
   starwars: ['nonfoil', 'foil'],
   digimon: ['nonfoil', 'foil'],
   gundam: ['nonfoil', 'foil'],
+  // Sports parallels (Refractor, Prizm, Gold) are separate printings, not
+  // finishes — they live in `rarity`/`sports.parallel`. What is left is
+  // whether this particular card stock shines.
+  sports: ['nonfoil', 'foil'],
 }

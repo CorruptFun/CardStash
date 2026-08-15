@@ -1,9 +1,9 @@
 # Cardstock
 
-Camera-first TCG scanner & collection portfolio PWA — Magic, Pokémon, Yu-Gi-Oh!,
-Riftbound, Lorcana, One Piece, Star Wars: Unlimited, Digimon and Gundam. Point
-your camera at a card, see what it's worth, track your collection like a
-portfolio, build decks — by hand, or with the AI deck builder.
+Camera-first card scanner & collection portfolio PWA — Magic, Pokémon, Yu-Gi-Oh!,
+Riftbound, Lorcana, One Piece, Star Wars: Unlimited, Digimon, Gundam **and sports
+cards**. Point your camera at a card, see what it's worth, track your collection
+like a portfolio, build decks — by hand, or with the AI deck builder.
 
 **Live: https://corruptfun.github.io/CardStash/** — open it on your phone and add
 it to your home screen; camera scanning, the offline shell and local-first
@@ -18,6 +18,15 @@ storage all work from there.
 - **Search** — Scryfall (Magic), pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!),
   Lorcast (Lorcana) and TCGplayer data via TCGCSV (Riftbound, One Piece, Star
   Wars: Unlimited, Digimon, Gundam) — with prices, comps, printings and history.
+- **Sports cards** — baseball, basketball, football, hockey and more. There is no
+  free sports card catalog, so nothing is looked up: the scanner reads the year,
+  brand, set, card number, player, parallel and serial numbering off the card
+  and builds the card from that, entirely on-device. Value is your own figure,
+  next to a one-tap eBay sold-comps link built from every attribute it read.
+- **Graded slabs** — scan a PSA, BGS, SGC or CGC holder and it reads the label:
+  company, grade, qualifier and cert number. Add a free PSA API token and the
+  cert resolves to the exact card. Grades work on every game, not just sports —
+  a PSA 10 is tracked as its own copy and never merges with your raw one.
 - **Collection** — portfolio value, 30-day insights, cost basis / P&L, movers,
   CSV import/export, JSON backups.
 - **Decks** — build by hand from search or your collection, assign cards you own

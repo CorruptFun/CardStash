@@ -123,6 +123,9 @@ const EBAY_GAME_WORD: Record<Game, string> = {
   starwars: 'star wars unlimited',
   digimon: 'digimon tcg',
   gundam: 'gundam card game',
+  // Sports comps are built from year/brand/player/number/grade instead — a
+  // bare category word would only dilute the query. See `ebaySoldLink`.
+  sports: '',
 }
 
 export function ebaySoldLink(card: { name: string; setName?: string; game: Game }): string {

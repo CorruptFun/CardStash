@@ -354,3 +354,87 @@ chance of the two disagreeing.
 publish; letting a friends-only binder become globally matchable through the
 offers index; or gating the link path behind an account. The first two are
 covered by tests that must keep passing.
+
+
+---
+
+## 17. Sports cards are synthesized from the card, not looked up
+
+**Context.** Every game in the app resolves against a catalog. Sports has none
+that is free: TCGplayer carries no sports singles (so the TCGCSV path is
+empty), and SportsCardsPro/PriceCharting, CardHedge and Beckett are all paid
+products. The choice was between making sports depend on a paid API, shipping
+nothing, or identifying cards from the cards themselves.
+
+**Decision.** Identify from the card. `sportsparse.ts` reads year, brand,
+product, card number, player, team, parallel, serial and RC/auto/relic out of
+OCR text; `sports.ts` synthesizes a `Card` with a deterministic slug id. There
+is no sports price feed on the free path — value is the collector's own
+`marketValue`, informed by an eBay sold-comps link built from the full
+attribute set.
+
+**Why this way.** It is the only option that keeps the promise the rest of the
+app is built on: signed out and offline, everything works. A paid API would
+have made sports the first feature in the product that stops working when a
+subscription lapses or a vendor changes terms, in an app whose entire premise
+is that your collection is yours and local.
+
+It also inverts the failure mode, which is the part to keep in mind. A TCG
+misread picks the wrong *real* card; a sports misread invents one, and nothing
+downstream can tell it is fictional. Three guards answer that, and they are
+load-bearing rather than decorative: a confidence floor
+(`MIN_SPORTS_CONFIDENCE`), closed vocabularies instead of open guessing, and —
+most importantly — **sports never joins the auto-mode sweep**. Auto mode
+synthesizing a card for anything it failed to match would manufacture
+confident wrong answers at scale.
+
+**Consequences.**
+
+- **Sports requires picking the game.** Same shape as collector-line rescue.
+  This is a real UX cost and the right trade.
+- **`sportsSlug` is a wire format.** Devices agree on a card only by computing
+  the same slug from the same facts. Changing it renames every sports card
+  anyone owns.
+- **The collection is the catalog.** Search is local recall over cards this
+  device has already seen, so it starts empty and grows. No new Dexie table —
+  the full `Card` is already stored on collection rows and scans.
+- **Portfolio totals for sports are user-authored.** The app reports what the
+  collector entered and nothing else. That is honest, and quietly inventing
+  numbers about someone's money would not be.
+
+**What would make this wrong.** A genuinely free, openly licensed sports
+catalog appearing — then this becomes an adapter like any other and the
+synthesis path should retire to a fallback. Short of that, the failure mode to
+watch for is guard erosion: lowering the confidence floor, letting sports into
+the sweep, or widening the vocabularies into open-ended guessing. Any of those
+turns honest misses into invented cards.
+
+---
+
+## 18. A grade belongs to the copy, not to the card
+
+**Context.** Slabbed cards needed representing, and a PSA 10 is worth a
+multiple of the same card raw. The tempting shortcut is to treat a graded card
+as a different card.
+
+**Decision.** `GradeInfo` lives on `CollectionItem`, never on `Card`. The card
+is the printing; the grade describes the object in the holder. Grade joins the
+row merge key so a PSA 10 never merges into the raw row — but the **cert does
+not**, because two PSA 10s of the same card are interchangeable.
+
+**Why this way.** Folding a grade into the card id would fork the catalog: the
+same printing would exist eleven times, each with its own price history and
+none of them matching what the price APIs return. Keying rows by cert would
+fragment a collection into one row per physical object, which is a spreadsheet,
+not a collection.
+
+**Consequences.** Grading is available to **every** game, not just sports,
+which is right — graded Charizards are a larger market than most of the TCGs
+here. Grades travel on `SharedCard` so a trade shows what it really is, and
+`sanitizeGrade` in `slab.ts` is the single validator both the backup path and
+`social.ts` use.
+
+**What would make this wrong.** Wanting per-cert provenance (which slab, bought
+when, sold to whom). That is a different feature — an item-history log — and it
+should not be built by turning the cert into an identity.
+

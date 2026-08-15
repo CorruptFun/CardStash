@@ -64,7 +64,7 @@ readers can filter those rows out instead of mislabelling them as dollars.
 One row = *N copies of one printing in one finish and one condition*.
 
 Row identity for merging is **cardId + finish + condition + setCode + number
-+ opened**. `addToCollection` and `updateItem` both merge into an existing row
++ opened + grade**. `addToCollection` and `updateItem` both merge into an existing row
 on that identity; `updateItem` additionally merges when an edit collides with
 another row, summing quantities and quantity-weighting the cost basis.
 
@@ -72,6 +72,8 @@ another row, summing quantities and quantity-weighting the cost basis.
 | ----- | ----- |
 | `qty` | Copies owned. `setItemQty(0)` deletes the row. |
 | `opened` | Sealed products only. `false` = still sealed, `true` = cracked. **Opened rows price at zero** (`itemRawUnitPrice` returns null) — the pulls get scanned in as singles. Sealed and opened copies never merge. |
+| `grade` | Slab details (`GradeInfo`) when the copy is graded. **Part of the merge key** — a PSA 10 never merges into the raw row. The *cert* is not: two PSA 10s of the same card are interchangeable. Available to every game, not just sports. |
+| `marketValue` | Collector-set value per copy, USD. **Overrides every computed price** and is deliberately *not* scaled by the condition factor — they priced the copy in front of them. For sports it is the only figure there is (no price feed exists). |
 | `purchasePrice` | Per-copy cost basis, USD. Merges are quantity-weighted averages. |
 | `forTrade` | Copies offered for trade, `0 ≤ forTrade ≤ qty`. **Every write clamps through `tradeCount()`**; `0` stores as `undefined`. |
 | `card` | A denormalized snapshot of the `Card`, so the collection renders offline. `applyCardUpdate()` pushes fresh prices into every row that shows a card. |
@@ -80,6 +82,31 @@ another row, summing quantities and quantity-weighting the cost basis.
 (`cardForItem`): games where a printing is its own api id match directly; a YGO
 row re-picks its set variant so a refresh doesn't silently revert it to the
 default printing.
+
+### `GradeInfo` — a grade is a property of the copy
+
+`{ company, grade, label?, cert?, qualifier? }`, on `CollectionItem` and never
+on `Card`: the card is the printing, the grade describes the object in the
+holder. Folding it into the card id would fork the catalog eleven ways and
+break every price lookup. `grade: 0` is an AUTHENTIC slab — graded, unnumbered.
+
+`slab.ts` owns both the parser and `sanitizeGrade`, which the backup path and
+`social.ts` both reuse — one validation implementation, per the rule in
+[extending.md](extending.md). Grades travel on `SharedCard` so a trade shows
+what it really is, and round-trip through a CSV `Grade` column.
+
+### `SportsInfo` — what a sports card is identified by
+
+Present on `sports` cards only. Sports has no catalog, so these attributes —
+`sport`, `year`, `brand`, `product`, `player`, `team`, `parallel`, `serial`,
+`rookie`, `auto`, `relic` — *are* the identity rather than a description of a
+looked-up one, and the card id is a deterministic slug over the subset that
+distinguishes one printing from another. See
+[card-data.md](card-data.md#sports-cards); `sportsSlug` is a wire format.
+
+`Sport` is a field rather than nine more `Game` literals on purpose: sports
+collectors organize by player, set and year, and every `Record<Game, …>` table
+in the app would otherwise multiply. Splitting later is a data migration.
 
 ### Decks
 

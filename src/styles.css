@@ -42,6 +42,7 @@
   --game-swu: #d9c04b;
   --game-dgm: #eb8f4a;
   --game-gcg: #6f97dd;
+  --game-spt: #5fbf6a;
   --holo: linear-gradient(
     112deg,
     #4fc7dd 0%,
@@ -1938,6 +1939,9 @@ button {
 }
 .gamechip--gundam {
   color: var(--game-gcg);
+}
+.gamechip--sports {
+  color: var(--game-spt);
 }
 .raritychip {
   padding: 2px 6px;
@@ -5996,4 +6000,44 @@ button {
   line-height: 1.5;
   color: var(--paper-2);
   text-align: center;
+}
+
+/* --- Sports cards & grading ---------------------------------------------
+ * A graded slab and a serial-numbered parallel are the two facts a sports
+ * collector reads first, so both get a chip that is legible at a glance in a
+ * list. The grade chip is deliberately the loudest thing on a copy row: it is
+ * the single biggest multiplier on what the card is worth.
+ */
+.gradechip {
+  padding: 2px 7px;
+  border-radius: var(--r-0);
+  border: 1px solid color-mix(in srgb, var(--game-spt) 45%, transparent);
+  background: color-mix(in srgb, var(--game-spt) 14%, transparent);
+  color: var(--game-spt);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.serialchip {
+  padding: 2px 6px;
+  border-radius: var(--r-0);
+  border: 1px solid var(--rule-strong);
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.factchip {
+  padding: 2px 6px;
+  border-radius: var(--r-0);
+  background: var(--surface-2, transparent);
+  border: 1px solid var(--rule-strong);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.factchip--rookie {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }

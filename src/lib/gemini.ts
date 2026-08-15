@@ -138,6 +138,8 @@ const DECKLIST_SPEC: Record<Game, string> = {
   starwars: ' (50+ cards; name the Leader and Base outside the code block).',
   digimon: ' (main deck, exactly 50 cards; then a line `-- Egg Deck --` and up to 5 Digi-Eggs).',
   gundam: ' (exactly 50 cards; resource deck is fixed, skip it).',
+  // Unreachable — the builder never offers a game without boards.
+  sports: '.',
 }
 
 export async function buildDecks(request: BuildDecksRequest, apiKey: string, model: string): Promise<BuildDecksResult> {

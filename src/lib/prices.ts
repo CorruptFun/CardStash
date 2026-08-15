@@ -14,6 +14,8 @@ export interface Priceable {
   qty: number
   /** Sealed products: true once cracked — the sealed market price no longer applies. */
   opened?: boolean
+  /** Collector-set value per copy, USD. Overrides every computed price. */
+  marketValue?: number
   card: Card
 }
 
@@ -99,6 +101,13 @@ export function conditionFactor(condition: Condition): number {
 
 /** Per-copy value of an item: finish-specific price × condition factor. */
 export function itemUnitPrice(item: Priceable): number | null {
+  // A value the collector set themselves wins outright, and is NOT scaled by
+  // the condition factor: they priced the copy in front of them, so its
+  // condition and its grade are already inside the number. Discounting it
+  // again would quietly mark down every card someone valued by hand — and
+  // for sports, where there is no price feed at all, this is the only figure
+  // there is.
+  if (item.marketValue != null && item.marketValue > 0) return Math.round(item.marketValue * 100) / 100
   const raw = itemRawUnitPrice(item)
   if (raw == null) return null
   const factor = conditionFactor(item.condition)

@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import type { Card, CollectionItem, Finish, Game } from '../lib/types'
+import type { Card, CollectionItem, Finish, Game, GradeInfo } from '../lib/types'
 
 export type ToastKind = 'info' | 'success' | 'error'
 
@@ -25,6 +25,8 @@ export interface SheetRequest {
   deckId?: string
   /** Preselect this finish in the add bar (scanner saw a foil sheen). */
   finish?: Finish
+  /** Preselect this grade in the add bar (scanner read a slab label). */
+  grade?: GradeInfo
   origin?: 'scan' | 'search' | 'collection' | 'deck' | 'friend'
 }
 

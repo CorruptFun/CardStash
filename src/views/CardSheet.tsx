@@ -21,6 +21,8 @@ import {
 import { wantKeyFor } from '../lib/social'
 import { addedToBoardToast, boardForCard } from '../lib/deckstats'
 import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, isFoilFinish, SOURCE_LABEL } from '../lib/games'
+import { gradeShort } from '../lib/slab'
+import { SPORT_LABEL } from '../lib/sports'
 import { cardTrend } from '../lib/portfolio'
 import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
@@ -325,6 +327,7 @@ function CardSheet() {
             ) : (
               card.rarity && <span className="raritychip">{card.rarity}</span>
             )}
+            <SportsFacts card={card} />
           </div>
           <h2>{card.name}</h2>
           <p className="cardsheet__set">
@@ -657,6 +660,30 @@ function CardSheet() {
   )
 }
 
+/**
+ * The marks a sports collector reads first. A serial number and a rookie flag
+ * change what a card is worth by more than its condition does, and unlike a
+ * TCG's rarity they are not one tidy field — so they get chips of their own
+ * rather than being buried in the type line.
+ */
+function SportsFacts({ card }: { card: Card }) {
+  const info = card.sports
+  if (!info) return null
+  return (
+    <>
+      <span className="factchip">{SPORT_LABEL[info.sport]}</span>
+      {info.serial && (
+        <span className="serialchip">
+          {info.serial.num}/{info.serial.of}
+        </span>
+      )}
+      {info.rookie && <span className="factchip factchip--rookie">RC</span>}
+      {info.auto && <span className="factchip">Auto</span>}
+      {info.relic && <span className="factchip">Relic</span>}
+    </>
+  )
+}
+
 function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const toast = useUi((s) => s.toast)
   const sealed = row.opened != null || !!row.card.sealed
@@ -666,11 +693,14 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const [opened, setOpened] = useState(row.opened ?? false)
   const [forTrade, setForTrade] = useState(row.forTrade ?? 0)
   const [paid, setPaid] = useState(row.purchasePrice != null ? String(row.purchasePrice) : '')
+  const [value, setValue] = useState(row.marketValue != null ? String(row.marketValue) : '')
   const [note, setNote] = useState(row.note ?? '')
   const [saving, setSaving] = useState(false)
   const unit = itemUnitPrice(row)
   const paidValue = parseMoney(paid)
   const hasPaid = paid.trim().length > 0
+  const marketValue = parseMoney(value)
+  const hasValue = value.trim().length > 0
 
   const toggleEdit = () => {
     if (!editing) {
@@ -679,6 +709,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
       setOpened(row.opened ?? false)
       setForTrade(row.forTrade ?? 0)
       setPaid(row.purchasePrice != null ? String(row.purchasePrice) : '')
+      setValue(row.marketValue != null ? String(row.marketValue) : '')
       setNote(row.note ?? '')
     }
     setEditing(!editing)
@@ -693,6 +724,9 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
           // An opened box isn't the sealed product anymore — nothing to trade.
           forTrade: sealed && opened ? 0 : forTrade,
           purchasePrice: hasPaid ? (paidValue ?? row.purchasePrice) : undefined,
+          // Clearing the field clears the override, putting the row back on
+          // whatever the price feed says (nothing at all, for sports).
+          marketValue: hasValue ? (marketValue ?? row.marketValue) : undefined,
           note: note.trim() || undefined,
         }),
       'Save',
@@ -720,6 +754,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
               <span className="copyrow__cond">{row.condition}</span>
             </>
           )}
+          {row.grade && <span className="gradechip">{gradeShort(row.grade)}</span>}
           {(row.forTrade ?? 0) > 0 && (
             <span className="tradechip">
               <Icon name="swap" size={11} /> {row.forTrade}
@@ -780,7 +815,23 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
               placeholder="Paid $ each"
               aria-label="Paid per card"
             />
+            <input
+              className="input"
+              type="text"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => setValue(moneyInput(e.target.value))}
+              placeholder="Worth $ each"
+              aria-label="Market value per card"
+            />
           </div>
+          {hasValue && (
+            <span className={`copyedit__echo ${marketValue != null ? '' : 'copyedit__echo--bad'}`}>
+              {marketValue != null
+                ? 'Your value — used as-is, not adjusted for condition'
+                : 'Enter an amount like 12.50'}
+            </span>
+          )}
           {!(sealed && opened) && (
             <div className="copyedit__trade">
               <span className="copyedit__tradetext">

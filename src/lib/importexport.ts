@@ -1,8 +1,9 @@
 import type { ImportRow } from './cardsearch'
+import { gradeShort } from './slab'
 import { parseCsv, csvField } from './csv'
 import { FINISH_LABEL, GAMES } from './games'
 import { itemUnitPrice, parseMoney } from './prices'
-import type { CollectionItem, Condition, Finish, Game } from './types'
+import type { CollectionItem, Condition, Finish, Game, GradeInfo } from './types'
 
 /** Header-flexible collection CSV import (Dragon Shield-ish tracker exports). */
 
@@ -30,6 +31,20 @@ export function normalizeCondition(raw: string): Condition {
 }
 
 const GAME_ALIASES: Record<string, Game> = {
+  sports: 'sports',
+  'sports cards': 'sports',
+  'trading cards': 'sports',
+  baseball: 'sports',
+  basketball: 'sports',
+  football: 'sports',
+  hockey: 'sports',
+  soccer: 'sports',
+  racing: 'sports',
+  wrestling: 'sports',
+  topps: 'sports',
+  panini: 'sports',
+  bowman: 'sports',
+  'upper deck': 'sports',
   mtg: 'mtg',
   magic: 'mtg',
   'magic: the gathering': 'mtg',
@@ -123,6 +138,26 @@ export interface CsvImportRow extends ImportRow {
   purchasePrice?: number
   scryfallId?: string
   forTrade?: number
+  grade?: GradeInfo
+  marketValue?: number
+}
+
+/**
+ * "PSA 10", "BGS 9.5", "SGC 8 OC" — how a grade is written in every CSV a
+ * collector will hand us, including the ones another app exported.
+ */
+export function parseGradeCell(raw: string | undefined): GradeInfo | undefined {
+  const text = (raw ?? '').trim()
+  if (!text) return undefined
+  const match = text.match(/\b(PSA|BGS|SGC|CGC|HGA|TAG)\b\s*(10(?:\.0)?|\d(?:\.5)?)?\s*\(?([A-Z]{2})?\)?/i)
+  if (!match) return undefined
+  const grade = match[2] != null ? Number(match[2]) : 0
+  if (!Number.isFinite(grade) || grade < 0 || grade > 10) return undefined
+  return {
+    company: match[1].toUpperCase() as GradeInfo['company'],
+    grade,
+    qualifier: match[3]?.toUpperCase(),
+  }
 }
 
 /** "2" → 2, "yes"/"all" → the row's qty, junk → none. */
@@ -156,6 +191,8 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
   const language = col('language', 'lang')
   const price = col('purchase price', 'price paid', 'cost')
   const forTrade = col('for trade', 'trade', 'for_trade', 'trade quantity')
+  const grade = col('grade', 'grading', 'slab')
+  const marketValue = col('market value', 'value', 'my value', 'unit price (usd)')
   if (name === -1) throw new Error('No "Name" column found — is this a collection CSV export?')
 
   const parsed: CsvImportRow[] = []
@@ -180,6 +217,13 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
       language: language === -1 ? undefined : cells[language]?.trim() || undefined,
       purchasePrice: parsePurchasePrice(price === -1 ? undefined : cells[price]),
       forTrade: parseForTrade(forTrade === -1 ? undefined : cells[forTrade], rowQty),
+      grade: parseGradeCell(grade === -1 ? undefined : cells[grade]),
+      // Only taken back in when it is the collector's own figure. The export's
+      // computed "Unit price" column reads as a value too, so a plain
+      // round-trip must not silently freeze today's market price onto a row.
+      marketValue: marketValue === -1 || /unit price/.test(header[marketValue] ?? '')
+        ? undefined
+        : parsePurchasePrice(cells[marketValue]),
     })
   }
   if (!parsed.length) throw new Error('No importable rows found')
@@ -205,6 +249,7 @@ const EXPORT_HEADER = [
   'Finish',
   'Condition',
   'For trade',
+  'Grade',
   'Sealed',
   'Unit price (USD)',
   'Purchase price',
@@ -227,6 +272,7 @@ export function collectionToCsv(items: CollectionItem[]): string {
         item.finish === 'nonfoil' ? '' : item.finish,
         item.condition,
         item.forTrade ?? '',
+        item.grade ? gradeShort(item.grade) : '',
         item.opened == null ? '' : item.opened ? 'opened' : 'sealed',
         itemUnitPrice(item)?.toFixed(2) ?? '',
         item.purchasePrice?.toFixed(2) ?? '',

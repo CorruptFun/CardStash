@@ -23,6 +23,14 @@ export const GAME_BOARDS: Record<Game, DeckBoard[]> = {
   starwars: ['main', 'side'],
   digimon: ['main', 'extra'],
   gundam: ['main', 'side'],
+  // Sports cards are collected, not played. No boards means no decks — see
+  // `hasDecks`, which is what the UI filters on.
+  sports: [],
+}
+
+/** Whether this game builds decks at all. Sports collects; it does not play. */
+export function hasDecks(game: Game): boolean {
+  return GAME_BOARDS[game].length > 0
 }
 
 /**
@@ -149,6 +157,8 @@ const DECK_RULES: Record<Game, DeckRules> = {
   starwars: { minMain: 50, maxSide: 10, copyLimit: 3 },
   digimon: { exactMain: 50, maxExtra: 5, copyLimit: 4 },
   gundam: { exactMain: 50, maxSide: 10, copyLimit: 4 },
+  // Unreachable (sports has no boards), but the record is exhaustive.
+  sports: { copyLimit: 0 },
 }
 
 function deckWarnings(game: Game, counts: Record<DeckBoard, number>, rows: DeckCard[]): string[] {

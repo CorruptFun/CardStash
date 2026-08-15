@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import { sanitizeGrade } from './slab'
 import { GAMES, FINISH_LABEL } from './games'
 import { ygoPrintingVariants } from './ygo'
 import type {
@@ -13,6 +14,7 @@ import type {
   Finish,
   Friend,
   Game,
+  GradeInfo,
   PricePoint,
   ProfilePayload,
   ReplyPayload,
@@ -173,6 +175,10 @@ export interface AddOptions {
   opened?: boolean
   /** Copies of the new row offered for trade. */
   forTrade?: number
+  /** Slab details when the copy being added is graded. */
+  grade?: GradeInfo
+  /** Collector-set value per copy, USD. */
+  marketValue?: number
 }
 
 /** Normalize a for-trade count against a row's qty (0 stores as absent). */
@@ -184,6 +190,19 @@ function tradeCount(forTrade: number | undefined, qty: number): number | undefin
 /** Same printing = same set + collector number (YGO reprints share one card id). */
 function samePrinting(a: { setCode?: string; number?: string }, b: { setCode?: string; number?: string }): boolean {
   return (a.setCode ?? '') === (b.setCode ?? '') && (a.number ?? '') === (b.number ?? '')
+}
+
+/**
+ * Graded copies never merge into the raw row, or into a differently graded
+ * one. A PSA 10 and a raw NM are the same printing but not the same holding:
+ * different value, different thing to trade. The cert is deliberately NOT
+ * part of this — two PSA 10s of the same card are interchangeable, and a row
+ * per cert would fragment the collection for no gain.
+ */
+function sameGrade(a: { grade?: GradeInfo }, b: { grade?: GradeInfo }): boolean {
+  if (!a.grade && !b.grade) return true
+  if (!a.grade || !b.grade) return false
+  return a.grade.company === b.grade.company && a.grade.grade === b.grade.grade && a.grade.qualifier === b.grade.qualifier
 }
 
 /** Sealed and opened copies of the same product must never merge. */
@@ -203,7 +222,11 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
       .equals(card.id)
       .and(
         (item) =>
-          item.finish === finish && item.condition === condition && samePrinting(item, card) && sameOpened(item, { opened }),
+          item.finish === finish &&
+          item.condition === condition &&
+          samePrinting(item, card) &&
+          sameOpened(item, { opened }) &&
+          sameGrade(item, { grade: opts.grade }),
       )
       .first()
     if (existing) {
@@ -288,7 +311,12 @@ export async function removeCopies(id: string, count: number): Promise<void> {
  */
 export async function updateItem(
   id: string,
-  patch: Partial<Pick<CollectionItem, 'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade'>>,
+  patch: Partial<
+    Pick<
+      CollectionItem,
+      'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade' | 'grade' | 'marketValue'
+    >
+  >,
 ): Promise<CollectionItem | null> {
   return db.transaction('rw', [db.collection, db.tombstones], async () => {
     const item = await db.collection.get(id)
@@ -304,7 +332,8 @@ export async function updateItem(
           other.finish === edited.finish &&
           other.condition === edited.condition &&
           samePrinting(other, edited) &&
-          sameOpened(other, edited),
+          sameOpened(other, edited) &&
+          sameGrade(other, edited),
       )
       .first()
     if (!collision) {
@@ -715,6 +744,8 @@ export function sanitizeBackup(raw: unknown): Backup {
       opened: typeof entry.opened === 'boolean' ? entry.opened : undefined,
       forTrade: tradeCount(asPositive(entry.forTrade), cleanQty),
       purchasePrice: asPositive(entry.purchasePrice),
+      grade: sanitizeGrade(entry.grade),
+      marketValue: asPositive(entry.marketValue),
       addedAt: Number.isFinite(addedAt) && addedAt > 0 ? addedAt : Date.now(),
       card: card as unknown as Card,
     })

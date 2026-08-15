@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { hasDecks } from '../lib/deckstats'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
@@ -35,11 +36,13 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
   })
   // Seeds pick the starting game; otherwise MTG when enabled, else the first
   // game the user keeps on.
-  const initialGame = seeds[0]?.game ?? (config.enabledGames.includes('mtg') ? 'mtg' : config.enabledGames[0])
+  const deckGames = config.enabledGames.filter(hasDecks)
+  const initialGame = seeds[0]?.game ?? (deckGames.includes('mtg') ? 'mtg' : (deckGames[0] ?? 'mtg'))
   const [game, setGame] = useState<Game>(initialGame)
   // Owned cards stay visible after their game is turned off, so a seed can
   // arrive for one — keep that game pickable while it's the selected game.
-  const gameOptions = GAMES.filter((g) => config.enabledGames.includes(g) || g === game)
+  // Only games that actually build decks; sports has no boards and no rules.
+  const gameOptions = GAMES.filter((g) => hasDecks(g) && (config.enabledGames.includes(g) || g === game))
   const [format, setFormat] = useState(initialGame === 'mtg' ? 'Standard' : '')
   const [style, setStyle] = useState('')
   const [budget, setBudget] = useState<number | null>(50)

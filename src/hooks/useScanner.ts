@@ -443,7 +443,11 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       lastAttemptRef.current = performance.now()
       patch({ status: 'thinking', miss: null, detail: null })
       const mode = modeRef.current
-      const region = mode === 'sealed' ? sealedRegion() : reticleRegion(video.videoWidth, video.videoHeight)
+      // A slab is bigger than a card and its label sits above the card itself,
+      // so the card reticle would crop away the only part worth reading. It
+      // takes the wide window for the same reason a booster box does.
+      const region =
+        mode === 'sealed' || mode === 'slab' ? sealedRegion() : reticleRegion(video.videoWidth, video.videoHeight)
       // Dark scene: average a short burst of frames — sensor noise is
       // independent per frame, so the stack recovers what no single-frame
       // processing can. The stillness gate already fired, so no ghosting.
