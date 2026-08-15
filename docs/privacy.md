@@ -53,7 +53,7 @@ The copy says so.
 | the Cardstock `stripe-escrow` function | opening a purchase, onboarding as a seller, shipping or confirming an order | the session token, the card id/name and the amounts, or an order id — **never an address**; the function reads one from Stripe and returns it to the seller without storing it | off by default; dormant entirely if the deployment has no Stripe secrets |
 | `checkout.stripe.com` | the buyer is redirected to pay | whatever the buyer types into Stripe's own hosted checkout — card details and shipping address go to Stripe, never through us | only on a deliberate purchase |
 | `connect.stripe.com` | a seller starts Connect onboarding | Stripe's hosted identity verification; **we never see a government ID or a bank number** | only when someone chooses to sell |
-| `VITE_DIAG_ENDPOINT` | while `diagShare` is on **and** the build compiled in an endpoint + token | redacted event batches + a random device id + app version | off by default; dormant entirely if the build configured neither |
+| the Cardstock `ingest_events()` RPC | while `diagShare` is on **and** the disclosure has been answered | redacted event batches + a random per-install id + app version, as `anon` — **never the session token** | on by default outside the EU/EEA/UK, asked there; dormant entirely if the build has no Supabase project |
 
 A cert lookup sends the certification number and nothing else — not the photo,
 not the collection, not any identifier for the user. The number is already
@@ -104,7 +104,6 @@ text stays on-device (see below), and analytics never learn what was scanned.
 | Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, and — only while `cloudScanRescue` is on — the scan rescue |
 | pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
 | PSA API token | **ours, compiled in** from `VITE_PSA_TOKEN` — not stored per user, no Settings field | psacard.com only, as a bearer token | resolving a scanned slab's cert to the exact card |
-| Diagnostics token | **ours, compiled in** from `VITE_DIAG_TOKEN` — not stored per user, no Settings field | the compiled-in `VITE_DIAG_ENDPOINT` only, as a bearer token | authorizing telemetry upload |
 | Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |
 | Google OAuth client id | compiled in from `VITE_GOOGLE_CLIENT_ID` | Google only | identifying the app during consent |
 
@@ -177,12 +176,14 @@ that it doesn't today.
    session count, active days), a coarse device shape, and collection size as a
    **bucket** — never an exact count. `clearAnalytics()` drops the install
    record along with the events.
-4. **Upload is doubly gated**, on the two things that can actually differ: the
-   build must have a destination (`DIAG_AVAILABLE` — both `VITE_DIAG_ENDPOINT`
-   and `VITE_DIAG_TOKEN`, see `lib/diagconfig.ts`) **and** the user must have
-   turned `diagShare` on. Neither is a text field any more; the endpoint and
-   token used to be typed into Settings, which made sharing nominally opt-in and
-   practically impossible. Batches of 500, minimum 30s
+4. **Upload is triply gated**, and each gate answers a different question:
+   `DIAG_AVAILABLE` (does this build have a Supabase project at all),
+   `diagConsentAt` (has this person actually been *told*), and `diagShare` (did
+   they say yes). The middle gate is what makes an on-by-default defensible —
+   nothing is posted before the disclosure has been shown, however `diagShare`
+   came to be true. There is no endpoint or token field any more; both used to
+   be typed into Settings, which made sharing nominally opt-in and practically
+   impossible. Batches of 500, minimum 30s
    between flushes, 10s timeout, keepalive batches halved until under 60 KB.
    Progress is tracked by `flushedThrough`, so a failed upload simply retries
    the same events.
@@ -197,9 +198,19 @@ explicitly taps Copy and pastes it somewhere. It must never be fed into
 
 ## If you build a receiver
 
-No receiver exists. The client posts
-`{app, v, device, firstSeen, sessions, activeDays, sentAt, events[]}` as JSON
-with `Authorization: Bearer <token>` to whatever `VITE_DIAG_ENDPOINT` names.
+The receiver is `public.ingest_events(jsonb)` on Cardstock's own Supabase
+project — `supabase/migrations/0007_analytics.sql`, which is also the only
+documentation of its trust model. The client posts
+`{p_batch: {app, v, device, firstSeen, sessions, activeDays, sentAt, events[]}}`
+authenticated with the **publishable key**, as `anon`.
+
+**The session JWT is deliberately never sent.** Posting as the signed-in user
+would tie a content-free counter to an account, which is the one thing this log
+is built not to do — `device` is a random per-install id and must never become
+`auth.uid()`.
+
+Reading is closed to everyone: RLS is on with no policy, and the table grants
+nothing to `anon` or `authenticated`, so only `service_role` can query it.
 
 **A receiver that expects some other schema is worse than none.** `flushTelemetry`
 advances `flushedThrough` on any 2xx, so a receiver that answers 200 and drops
@@ -238,9 +249,10 @@ write any of this):
 **Do not align this schema with viva-maya's.** They are different architectures
 solving different problems — that project posts single rows to its own Supabase
 with RLS as the trust boundary; this one posts a batched envelope to a
-compiled-in endpoint, with a bearer token as the whole trust model. Sharing a
-table would mean giving Cardstock a backend, which decision 1 forbids. The
-lessons above transfer; the schema does not.
+`security definer` function that validates and caps it. Sharing a table across
+apps is what `docs/roadmap.md` §6 documents the cost of — migration numbers
+collide and one app's firehose sits beside another's user data. The lessons
+transfer; the schema does not.
 
 ## What a share actually contains
 

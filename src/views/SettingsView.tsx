@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal, Toggle } from '../components/basics'
 import { DriveBackup } from '../components/DriveBackup'
 import { Icon } from '../components/Icon'
-import { clearAnalytics, insights, type Insights } from '../lib/analytics'
+import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
 import { clearAllData } from '../lib/db'
 import { seedDemoData } from '../lib/demo'
@@ -462,7 +462,14 @@ export function SettingsView() {
               <span>Share diagnostics</span>
               <em>Send the anonymous log so scanning gets better. Never card names, searches or keys.</em>
             </div>
-            <Toggle on={config.diagShare} onChange={(diagShare) => config.set({ diagShare })} label="Share diagnostics" />
+            {/* Through `noteDiagConsent` rather than a bare `set`, so toggling
+                it on here counts as being asked and buries anything collected
+                before this moment. */}
+            <Toggle
+              on={config.diagShare}
+              onChange={(diagShare) => void noteDiagConsent(diagShare)}
+              label="Share diagnostics"
+            />
           </div>
         )}
       </section>

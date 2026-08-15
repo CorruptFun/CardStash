@@ -53,21 +53,6 @@ jobs:
           # VITE_PSA_ENDPOINT at a proxy that holds the token server-side.
           VITE_PSA_TOKEN: ${{ secrets.VITE_PSA_TOKEN }}
           VITE_PSA_ENDPOINT: ${{ vars.VITE_PSA_ENDPOINT }}
-          # Where the anonymous diagnostics log is posted (lib/diagconfig.ts).
-          # BOTH must be set or the feature is dormant: no request is made and
-          # the "Share diagnostics" row does not render. Unset today, which is
-          # why the deployed app collects events locally and uploads none.
-          #
-          # There is no default endpoint on purpose — the old one pointed at a
-          # host that serves a different app. Whatever this names must accept
-          # the batch envelope built by `payload()` in lib/analytics.ts; a
-          # receiver that answers 200 for a shape it does not understand loses
-          # those events permanently, because `flushedThrough` advances on any
-          # 2xx. Same caveat as VITE_PSA_TOKEN: a secret keeps the token out of
-          # the repo, NOT out of the bundle, so the receiver must treat it as
-          # identifying the app rather than authenticating anyone.
-          VITE_DIAG_ENDPOINT: ${{ vars.VITE_DIAG_ENDPOINT }}
-          VITE_DIAG_TOKEN: ${{ secrets.VITE_DIAG_TOKEN }}
       - name: Publish dist/ to gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

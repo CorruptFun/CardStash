@@ -15,5 +15,5 @@ export default class Dexie {
 }
 
 export function settings() {
-  return { diagShare: false, diagEndpoint: '', diagToken: '', gameFilter: 'auto', enabledGames: [] }
+  return { diagShare: false, diagConsentAt: 0, gameFilter: 'auto', enabledGames: [] }
 }

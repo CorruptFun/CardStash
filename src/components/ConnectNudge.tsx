@@ -44,7 +44,14 @@ const COPY: Record<ConnectStep, { title: string; body: string; cta: string; href
   },
 }
 
-export function ConnectNudge({ suppressed }: { suppressed: boolean }) {
+export function ConnectNudge({
+  suppressed,
+  onVisibleChange,
+}: {
+  suppressed: boolean
+  /** So the banner below this one knows the slot is taken — see DiagConsent. */
+  onVisibleChange?: (visible: boolean) => void
+}) {
   const config = useSettings()
   const [step, setStep] = useState<ConnectStep | null>(null)
 
@@ -54,12 +61,17 @@ export function ConnectNudge({ suppressed }: { suppressed: boolean }) {
     setStep(nudgeDue())
   }, [config.onboardedAt, config.accountNudgeAt, config.socialHandle, config.cloudKeyCheck, config.driveBackup])
 
+  const visible = !suppressed && !!step
+  useEffect(() => {
+    onVisibleChange?.(visible)
+  }, [visible, onVisibleChange])
+
   const snooze = useCallback(() => {
     snoozeNudge()
     setStep(null)
   }, [])
 
-  if (suppressed || !step) return null
+  if (!visible || !step) return null
   const copy = COPY[step]
 
   return (

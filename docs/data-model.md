@@ -214,7 +214,7 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `cloudAuto` (`true`) | Reserved for syncing after collection writes; nothing schedules it yet. |
 | `geminiKey` / `geminiModel` (`'gemini-flash-latest'`) | AI deck builder only. **Scanning never uses Gemini.** |
 | `pokemonKey` (`''`) | Optional pokemontcg.io key (higher rate limits). |
-| `diagShare` (`false`) | Opt-in telemetry upload. The destination is compiled in (`lib/diagconfig.ts`), not stored — uploads need both this toggle and a build that configured `VITE_DIAG_ENDPOINT` + `VITE_DIAG_TOKEN`. |
+| `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
 
 **Session tokens are deliberately NOT here.** They live under their own

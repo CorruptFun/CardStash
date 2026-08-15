@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ConnectNudge } from './components/ConnectNudge'
+import { DiagConsent } from './components/DiagConsent'
 import { Icon, type IconName } from './components/Icon'
 import { InstallPrompt } from './components/InstallPrompt'
 import { Toasts } from './components/Toasts'
@@ -77,6 +78,7 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
   const [welcome, setWelcome] = useState(() => shouldShowWelcome())
   const [installVisible, setInstallVisible] = useState(false)
+  const [nudgeVisible, setNudgeVisible] = useState(false)
   useEffect(() => {
     const onHashChange = () => {
       uiStore.getState().closeSheet()
@@ -118,10 +120,16 @@ export function App() {
         {route.name === 'orders' && <OrderView key={route.orderId ?? 'none'} orderId={route.orderId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
+      {/* One banner slot, three claimants, in descending order of what it costs
+          to ignore them: losing this week's storage, being unable to recover a
+          collection at all, and a question about counters. Each tells the next
+          whether the slot is taken — stacking them is how all three get
+          ignored. */}
       {route.name !== 'scan' && route.name !== 'ingest' && (
         <>
           <InstallPrompt onVisibleChange={setInstallVisible} />
-          <ConnectNudge suppressed={installVisible} />
+          <ConnectNudge suppressed={installVisible} onVisibleChange={setNudgeVisible} />
+          <DiagConsent suppressed={installVisible || nudgeVisible} />
         </>
       )}
       <nav className="nav safe-bottom" aria-label="Main">

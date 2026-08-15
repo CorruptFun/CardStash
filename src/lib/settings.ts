@@ -5,6 +5,29 @@ import type { Game, ShareScope } from './types'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest'
 
+/**
+ * Is this device somewhere consent must be ASKED for rather than assumed?
+ *
+ * Read off the browser's own timezone — local, zero egress, no IP geolocation,
+ * which matters because "where are you" must not itself become a network call
+ * in a local-first app. It is a heuristic and deliberately a generous one: a
+ * European timezone on a traveller's laptop costs us one opted-out install,
+ * while the reverse mistake is a compliance problem.
+ *
+ * `Europe/*` covers the EEA and the UK together. Istanbul and Moscow fall in it
+ * too and are outside both; that is the generous direction, so it stays.
+ */
+export function needsExplicitDiagConsent(): boolean {
+  try {
+    return /^Europe\//.test(Intl.DateTimeFormat().resolvedOptions().timeZone ?? '')
+  } catch {
+    // No Intl, or a browser that will not say: assume the stricter regime.
+    return true
+  }
+}
+
+const defaultDiagShare = (): boolean => !needsExplicitDiagConsent()
+
 export interface Settings {
   gameFilter: Game | 'auto'
   /**
@@ -74,11 +97,23 @@ export interface Settings {
   cloudScanModel: string
   pokemonKey: string
   /**
-   * May the anonymous log be posted. WHERE it goes is compiled in
-   * (`diagconfig.ts`) rather than typed in — this is the only half of that
-   * question a user can answer, so it is the only half still stored.
+   * May the anonymous log be posted. WHERE it goes is not a setting
+   * (`diagconfig.ts`) — this is the only half of the question a user can
+   * answer, so it is the only half stored.
    */
   diagShare: boolean
+  /**
+   * When the user was actually told, and 0 until they have been.
+   *
+   * Separate from `diagShare` because "on" and "answered" are different facts
+   * and only the pair is honest. A fresh install starts on outside the EU/UK,
+   * which is only defensible once the disclosure has been seen — so until this
+   * is set, `flushTelemetry` holds everything. It is also the upgrade rail: an
+   * install from before consent existed has a backlog collected under the old
+   * off-by-default regime, and `noteDiagConsent()` buries that backlog rather
+   * than shipping it retroactively.
+   */
+  diagConsentAt: number
   /** Stable id this device shares binders/trades under — minted on first share. */
   profileId: string
   /** Display name on shared binders and trade proposals. */
@@ -142,7 +177,13 @@ export const useSettings = create<Settings>()(
       cloudScanRescue: false,
       cloudScanModel: '',
       pokemonKey: '',
-      diagShare: false,
+      // On for a NEW install, and honest because `diagConsentAt` gates the
+      // actual upload until the disclosure has been shown. In the EU/EEA/UK
+      // `defaultDiagShare()` returns false instead — ePrivacy consent covers any
+      // non-essential storage access, not just cookies, so opt-out is not
+      // lawful there and the first-run copy asks rather than tells.
+      diagShare: defaultDiagShare(),
+      diagConsentAt: 0,
       profileId: '',
       profileName: '',
       profileNote: '',
@@ -178,6 +219,14 @@ export const useSettings = create<Settings>()(
         merged.enabledGames = GAMES.filter((game) => stored.includes(game))
         if (!merged.enabledGames.length) merged.enabledGames = [...GAMES]
         if (merged.gameFilter !== 'auto' && !merged.enabledGames.includes(merged.gameFilter)) merged.gameFilter = 'auto'
+        // An install from before consent existed must not be opted in by the
+        // arrival of a new default. It collected its events under the old
+        // off-by-default regime, so it stays off until it is asked — the
+        // ConnectNudge-style disclosure sets both fields together.
+        if (persisted && typeof (persisted as Partial<Settings>).diagConsentAt !== 'number') {
+          merged.diagShare = false
+          merged.diagConsentAt = 0
+        }
         return merged
       },
     },

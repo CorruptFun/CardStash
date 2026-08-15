@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
-import { DIAG_AVAILABLE, DIAG_ENDPOINT, DIAG_TOKEN } from './diagconfig'
+import { SUPABASE_KEY } from './cloudconfig'
+import { DIAG_AVAILABLE, DIAG_ENDPOINT } from './diagconfig'
 import { settings } from './settings'
 import { uid } from './util'
 import { APP_VERSION } from './version'
@@ -749,9 +750,12 @@ export async function flushTelemetry({ force = false, keepalive = false } = {}):
   // Still doubly gated, but on the two things that can actually differ: whether
   // this BUILD has somewhere to post to, and whether this USER said yes. The
   // destination is no longer a pair of text fields nobody could fill in.
-  if (!DIAG_AVAILABLE || !settings().diagShare) return
-  const endpoint = DIAG_ENDPOINT
-  const token = DIAG_TOKEN
+  const config = settings()
+  // Three gates, and each answers a different question: does this build have a
+  // receiver, has this person been TOLD, and did they say yes. The middle one
+  // is what makes an on-by-default sane — nothing ships before the disclosure
+  // has been shown, however the flag got set.
+  if (!DIAG_AVAILABLE || !config.diagConsentAt || !config.diagShare) return
   flushing = true
   try {
     if (!force) {
@@ -767,19 +771,25 @@ export async function flushTelemetry({ force = false, keepalive = false } = {}):
       sessions: await metaNumber('sessions', 0),
       activeDays: await metaNumber('activeDays', 0),
     }
-    let body = JSON.stringify(payload(events, device, install))
+    // The RPC argument name is `p_batch` — see `ingest_events()` in migration
+    // 0007. The envelope inside it is unchanged.
+    let body = JSON.stringify({ p_batch: payload(events, device, install) })
     while (keepalive && events.length > 1 && byteLength(body) > KEEPALIVE_BYTES) {
       events = events.slice(0, Math.floor(events.length / 2))
-      body = JSON.stringify(payload(events, device, install))
+      body = JSON.stringify({ p_batch: payload(events, device, install) })
     }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), FLUSH_TIMEOUT_MS)
     let ok = false
     try {
       ok = (
-        await fetch(endpoint, {
+        await fetch(DIAG_ENDPOINT, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          // The publishable key, not a bearer token: this posts as `anon` and
+          // is deliberately never associated with the signed-in user. Sending
+          // the session JWT here would tie a content-free counter to an
+          // account, which is the one thing this log is built not to do.
+          headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
           body,
           keepalive: keepalive && byteLength(body) <= KEEPALIVE_BYTES,
           credentials: 'omit',
@@ -804,6 +814,31 @@ export async function flushTelemetry({ force = false, keepalive = false } = {}):
   } finally {
     flushing = false
   }
+}
+
+/**
+ * Record that the user has now been told, and draw a line under everything
+ * collected before that moment.
+ *
+ * The line is the point. Flipping `diagShare` on for an install that has been
+ * running for weeks would otherwise upload weeks of events gathered while the
+ * answer was no — retroactive consent, which is not consent. Advancing
+ * `flushedThrough` to the newest event id means only what happens AFTER the
+ * disclosure is ever sent.
+ *
+ * Called for both answers. Someone who declines still gets the line drawn, so
+ * that changing their mind later starts from the same clean point.
+ */
+export async function noteDiagConsent(share: boolean): Promise<void> {
+  try {
+    const newest = await adb.events.orderBy('id').last()
+    if (typeof newest?.id === 'number') {
+      await adb.meta.put({ key: 'flushedThrough', value: newest.id })
+    }
+  } catch {
+    /* diagnostics only */
+  }
+  settings().set({ diagShare: share, diagConsentAt: Date.now() })
 }
 
 let flusherInstalled = false
