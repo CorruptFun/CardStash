@@ -177,5 +177,10 @@ Deno.serve(async (req: Request) => {
   // Parsing into decklists stays on the client: it is presentation logic, it is
   // already unit-tested there, and an older bundle must keep working against
   // this function without a redeploy.
-  return json({ markdown, remaining: remaining - 1 })
+  // NOT `remaining - 1`. `consume_build_credit` increments the counter and then
+  // returns `p_limit - v_calls`, so its answer ALREADY excludes this call —
+  // subtracting again under-reported by one and would have told someone they
+  // had none left while they still had one. Caught by a real build reporting
+  // 4998 against a limit of 5000.
+  return json({ markdown, remaining })
 })
