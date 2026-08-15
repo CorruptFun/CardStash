@@ -574,7 +574,15 @@ Deno.serve(async (req: Request) => {
       return onboard(userId)
     case 'account': {
       const row = await selectOne(`seller_accounts?user_id=eq.${userId}&select=payouts_enabled,charges_enabled`)
-      return json({ ready: row?.payouts_enabled === true, payoutsEnabled: row?.payouts_enabled === true })
+      // `exists` separates "has begun onboarding" from "has never started", so
+      // the app can tell someone Stripe is waiting on them WITHOUT saying it to
+      // people who never asked to sell. It reveals nothing they do not already
+      // know about themselves.
+      return json({
+        ready: row?.payouts_enabled === true,
+        payoutsEnabled: row?.payouts_enabled === true,
+        exists: !!row,
+      })
     }
     case 'checkout':
       return checkout(userId, body)

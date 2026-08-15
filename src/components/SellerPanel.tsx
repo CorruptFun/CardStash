@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Icon } from './Icon'
 import { isSignedIn } from '../lib/authsession'
-import { marketAvailable, sellerReady, startSellerOnboarding } from '../lib/marketplace'
+import { marketAvailable, sellerState, startSellerOnboarding, type SellerState } from '../lib/marketplace'
 import { useUi } from '../store/ui'
 
 /**
@@ -24,15 +24,15 @@ import { useUi } from '../store/ui'
  */
 export function SellerPanel() {
   const toast = useUi((s) => s.toast)
-  const [ready, setReady] = useState<boolean | null>(null)
+  const [state, setState] = useState<SellerState>('unknown')
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!marketAvailable() || !isSignedIn()) {
-      setReady(null)
+      setState('unknown')
       return
     }
-    setReady(await sellerReady())
+    setState(await sellerState())
   }, [])
 
   useEffect(() => {
@@ -46,7 +46,13 @@ export function SellerPanel() {
     }
   }, [refresh])
 
-  if (!marketAvailable() || !isSignedIn()) return null
+  // `unknown` means the question could not be answered — no Stripe secrets on
+  // this deployment, an expired session, no network. Saying nothing is the only
+  // honest option: every sentence below asserts something about this person's
+  // payment setup, and we do not know any of them. This is also what keeps the
+  // section invisible while the feature is switched off, which is its state for
+  // everyone today.
+  if (!marketAvailable() || !isSignedIn() || state === 'unknown') return null
 
   const start = async () => {
     setBusy(true)
@@ -61,7 +67,7 @@ export function SellerPanel() {
     }
   }
 
-  if (ready === true) {
+  if (state === 'ready') {
     return (
       <section className="setsec">
         <h3>Selling</h3>
@@ -87,15 +93,15 @@ export function SellerPanel() {
       </p>
       <div className="setrow">
         <div className="setrow__text">
-          <span>{ready === false ? 'Finish setting up payments' : 'Get set up to sell'}</span>
+          <span>{state === 'started' ? 'Finish setting up payments' : 'Get set up to sell'}</span>
           <em>
-            {ready === false
+            {state === 'started'
               ? 'Stripe still needs something from you before you can be paid.'
               : 'Takes a few minutes. You can stop at any point and come back.'}
           </em>
         </div>
         <button className="btn btn--primary btn--sm" disabled={busy} onClick={start}>
-          {busy ? 'Opening…' : ready === false ? 'Continue' : 'Set up'}
+          {busy ? 'Opening…' : state === 'started' ? 'Continue' : 'Set up'}
         </button>
       </div>
     </section>
