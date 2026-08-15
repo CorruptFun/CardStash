@@ -44,8 +44,7 @@ The copy says so.
 | `tcgcsv.com` | catalog games, sealed products | nothing but the path (static files) | as above |
 | `api.psacard.com` | a slab scan whose label carried a cert number | the cert number, and **our** token as a bearer header — no user data of any kind | not opt-in, but only ever fires on a deliberate slab scan; dormant entirely if the build ships no token, and slab scanning still works without it |
 | card image CDNs | `<img>` rendering | standard image requests | — |
-| `generativelanguage.googleapis.com` | AI deck builder run | the prompt: game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"**; the user's key in a header | fully opt-in (needs a key) |
-| `generativelanguage.googleapis.com` | a scan the local pipeline could not read or answered suspiciously, **while `cloudScanRescue` is on and a Gemini key is set** | that one camera frame as a JPEG, plus the user's key in a header | off by default |
+| the Cardstock `build-deck` function | AI deck builder run | the STRUCTURED request — game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"** — plus the session token. The prompt is assembled server-side and our key never reaches the browser | needs an account and a subscription |
 | the Cardstock `scan-card` function | the same rescue, for a signed-in subscriber with no key of their own | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default |
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
@@ -101,8 +100,8 @@ text stays on-device (see below), and analytics never learn what was scanned.
 
 | Key | Stored | Sent to | Used for |
 | --- | ------ | ------- | -------- |
-| Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, and — only while `cloudScanRescue` is on — the scan rescue |
-| pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
+| Gemini API key | **ours, server-side only** — held as a Supabase secret by `scan-card` and `build-deck`, never in the bundle | Google only, from our edge functions | the AI deck builder and the scan rescue |
+| pokemontcg.io key | **ours, compiled in** from `VITE_POKEMON_KEY` — no Settings field | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
 | PSA API token | **ours, compiled in** from `VITE_PSA_TOKEN` — not stored per user, no Settings field | psacard.com only, as a bearer token | resolving a scanned slab's cert to the exact card |
 | Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |
 | Google OAuth client id | compiled in from `VITE_GOOGLE_CLIENT_ID` | Google only | identifying the app during consent |

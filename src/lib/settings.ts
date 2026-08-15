@@ -3,7 +3,13 @@ import { persist } from 'zustand/middleware'
 import { GAMES } from './games'
 import type { Game, ShareScope } from './types'
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest'
+/**
+ * Our pokemontcg.io key, compiled in. Optional: without one the app uses the
+ * anonymous rate limit, which is what every user had anyway when this was a
+ * Settings field nobody filled in.
+ */
+const POKEMON_KEY: string = ((import.meta.env ?? {}) as Record<string, string | undefined>).VITE_POKEMON_KEY ?? ''
+
 
 /**
  * Is this device somewhere consent must be ASKED for rather than assumed?
@@ -75,26 +81,33 @@ export interface Settings {
    * Powers the AI deck builder, and — only when `cloudScanRescue` is on — the
    * last-resort cloud read for a card the on-device pipeline could not identify.
    */
-  geminiKey: string
-  geminiModel: string
   /**
-   * Send a frame the local pipeline FAILED on to Gemini, as a last resort.
+   * Send a frame the local pipeline FAILED on to be read in the cloud, as a
+   * last resort.
    *
-   * Off by default and useless without `geminiKey`, so the shipped default is
-   * unchanged: scanning is on-device, works offline and on first launch, and no
-   * image leaves the device. Turning this on is the user electing to send the
-   * frames that already missed — never the ones that succeeded — to their own
-   * API key. Two switches, deliberately: a key alone (set for the deck builder)
-   * must not start uploading camera frames.
+   * OFF BY DEFAULT, and it stays a switch even though the key is now ours.
+   * Being signed in is not consent and neither is paying: uploading a camera
+   * frame is a different act from subscribing to a tier, so entitlement gates
+   * the BILL and this gates the IMAGE. Leave it off and the promise is
+   * unchanged — scanning is on-device, works offline and on first launch, and
+   * no image ever leaves. Turning it on elects to send only the frames that
+   * already missed, never the ones that succeeded.
    */
   cloudScanRescue: boolean
   /**
-   * Override the scan rescue's model. Empty = the pinned `CLOUD_SCAN_MODEL`,
-   * which is deliberately NOT `geminiModel`: the deck builder and the scanner
-   * want different models, and tuning one must not silently change the other's
-   * cost per use.
+   * Override the scan rescue's model. Empty = the pinned `CLOUD_SCAN_MODEL`.
+   * No UI writes this; it survives as a local escape hatch for debugging a bad
+   * model, and the hosted route pins its own model server-side regardless —
+   * a client-chosen model is a client-chosen bill.
    */
   cloudScanModel: string
+  /**
+   * pokemontcg.io key. NOT user-editable any more — there is no field, and the
+   * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
+   * does. It stays on this object rather than becoming a bare import because
+   * some twenty call sites already thread it through as a parameter, and
+   * changing its SOURCE is a one-line edit where changing its SHAPE is not.
+   */
   pokemonKey: string
   /**
    * May the anonymous log be posted. WHERE it goes is not a setting
@@ -172,11 +185,9 @@ export const useSettings = create<Settings>()(
       cloudRevision: 0,
       cloudSyncedAt: 0,
       cloudAuto: true,
-      geminiKey: '',
-      geminiModel: DEFAULT_GEMINI_MODEL,
       cloudScanRescue: false,
       cloudScanModel: '',
-      pokemonKey: '',
+      pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK
       // `defaultDiagShare()` returns false instead — ePrivacy consent covers any
@@ -223,6 +234,9 @@ export const useSettings = create<Settings>()(
         // arrival of a new default. It collected its events under the old
         // off-by-default regime, so it stays off until it is asked — the
         // ConnectNudge-style disclosure sets both fields together.
+        // Build config, never the stored copy: an install that persisted an
+        // empty key back when this was a text field must still pick up ours.
+        merged.pokemonKey = POKEMON_KEY
         if (persisted && typeof (persisted as Partial<Settings>).diagConsentAt !== 'number') {
           merged.diagShare = false
           merged.diagConsentAt = 0

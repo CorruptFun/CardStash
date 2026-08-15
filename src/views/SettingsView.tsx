@@ -5,11 +5,8 @@ import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
 import { clearAllData } from '../lib/db'
-import { seedDemoData } from '../lib/demo'
 import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
-import { testGeminiKey } from '../lib/gemini'
-import { clearScanCache } from '../lib/identify'
-import { DEFAULT_GEMINI_MODEL, useSettings } from '../lib/settings'
+import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { APP_VERSION } from '../lib/version'
 import { CloudSync } from '../components/CloudSync'
@@ -56,10 +53,7 @@ const MISS_LABEL: Record<string, string> = {
 export function SettingsView() {
   const config = useSettings()
   const toast = useUi((s) => s.toast)
-  const [showGeminiKey, setShowGeminiKey] = useState(false)
-  const [showPokemonKey, setShowPokemonKey] = useState(false)
   const [confirmErase, setConfirmErase] = useState(false)
-  const [testingKey, setTestingKey] = useState(false)
   const [stats, setStats] = useState<Insights | null>(null)
   const [statsEpoch, setStatsEpoch] = useState(0)
 
@@ -72,15 +66,6 @@ export function SettingsView() {
       live = false
     }
   }, [statsEpoch])
-
-  const testKey = async () => {
-    if (testingKey) return
-    setTestingKey(true)
-    const result = await testGeminiKey(config.geminiKey, config.geminiModel)
-    setTestingKey(false)
-    if (result.ok) toast(`Key works — answered by ${result.model}`, 'success')
-    else toast(`Key test failed: ${result.error}`, 'error')
-  }
 
   return (
     <div className="screen safe-top">
@@ -154,138 +139,21 @@ export function SettingsView() {
           edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
           engine downloads ~12 MB once and is cached for offline use.
           {config.cloudScanRescue
-            ? ' Cloud rescue is on, so the cards this device can’t read — and the few it reads in a way known to be unreliable — are sent as a single photo to be identified. It needs either a subscription or your own Gemini key below; without one, scanning simply carries on locally.'
+            ? ' Cloud rescue is on, so the cards this device can’t read — and the few it reads in a way known to be unreliable — are sent as a single photo to be identified. It needs an account and a subscription; without one, scanning simply carries on locally.'
             : ' With cloud rescue off, no image ever leaves this device.'}
         </p>
       </section>
       <CloudSync />
-      <section className="setsec">
-        <h3>AI & API keys</h3>
-        <p className="setsec__note">
-          Keys are stored only on this device and sent only to their own service. The Gemini key powers the AI deck
-          builder, and — only if you switch on Cloud rescue above — the cards this device can’t read. Add one if you
-          want AI-built decks or cloud rescue without a subscription:{' '}
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-            get a free key here <Icon name="external" size={12} />
-          </a>
-          .
-        </p>
-        <div className="setfield">
-          <label htmlFor="gemini-key">
-            <span>Gemini API key</span>
-            <KeyState set={!!config.geminiKey} />
-          </label>
-          <div className="setfield__row">
-            <input
-              id="gemini-key"
-              name="gemini-api-key"
-              className={`input ${showGeminiKey ? '' : 'input--masked'}`}
-              type="text"
-              value={config.geminiKey}
-              placeholder="AIza…"
-              onChange={(e) => config.set({ geminiKey: e.target.value.trim() })}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-bwignore=""
-            />
-            <button className="iconbtn" onClick={() => setShowGeminiKey(!showGeminiKey)} aria-label="Show key" aria-pressed={showGeminiKey}>
-              <Icon name="eye" size={17} />
-            </button>
-          </div>
-          {config.geminiKey && (
-            <button
-              className="btn btn--ghost btn--sm setfield__test"
-              onClick={() => {
-                testKey()
-              }}
-              disabled={testingKey}
-            >
-              {testingKey ? 'Testing…' : 'Test key'}
-            </button>
-          )}
-        </div>
-        <div className="setfield">
-          <label htmlFor="gemini-model">
-            <span>Gemini model</span>
-          </label>
-          <input
-            id="gemini-model"
-            className="input"
-            value={config.geminiModel}
-            onChange={(e) => config.set({ geminiModel: e.target.value.trim() || DEFAULT_GEMINI_MODEL })}
-          />
-        </div>
-        <div className="setfield">
-          <label htmlFor="pokemon-key">
-            <span>Pokémon TCG API key</span>
-            <KeyState set={!!config.pokemonKey} />
-          </label>
-          <div className="setfield__row">
-            <input
-              id="pokemon-key"
-              name="pokemon-tcg-api-key"
-              className={`input ${showPokemonKey ? '' : 'input--masked'}`}
-              type="text"
-              value={config.pokemonKey}
-              placeholder="from dev.pokemontcg.io"
-              onChange={(e) => config.set({ pokemonKey: e.target.value.trim() })}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-bwignore=""
-            />
-            <button
-              className="iconbtn"
-              onClick={() => setShowPokemonKey(!showPokemonKey)}
-              aria-label="Show key"
-              aria-pressed={showPokemonKey}
-            >
-              <Icon name="eye" size={17} />
-            </button>
-          </div>
-          <em className="setfield__hint">Optional — raises the Pokémon rate limit.</em>
-        </div>
-      </section>
       {/* Renders nothing — not an empty heading — when the build has no OAuth client id. */}
       <DriveBackup />
       <section className="setsec">
         <h3>Data</h3>
-        <div className="setrow">
-          <div className="setrow__text">
-            <span>Demo data</span>
-            <em>Load a sample collection + deck to explore the app</em>
-          </div>
-          <button
-            className="btn btn--ghost btn--sm"
-            onClick={() => {
-              seedDemoData().then(() => toast('Demo collection loaded', 'success'))
-            }}
-          >
-            Load
-          </button>
-        </div>
-        <div className="setrow">
-          <div className="setrow__text">
-            <span>Reset scanner cache</span>
-            <em>Forget recently identified frames</em>
-          </div>
-          <button
-            className="btn btn--ghost btn--sm"
-            onClick={() => {
-              clearScanCache()
-              toast('Scanner cache cleared', 'success')
-            }}
-          >
-            Clear
-          </button>
-        </div>
+        {/* Gone from here: "Demo data" and "Reset scanner cache". The first
+            seeded a fake collection into a real one — a developer convenience
+            sitting one tap away from a user's actual cards. The second cleared
+            an in-memory array of 60 entries that a page reload empties anyway,
+            so it never did anything a user could perceive. `?demo=1` still
+            seeds demo data for the harnesses, which is where that belongs. */}
         <div className="setrow">
           <div className="setrow__text">
             <span>Erase everything</span>
@@ -512,8 +380,4 @@ export function SettingsView() {
       </Modal>
     </div>
   )
-}
-
-function KeyState({ set }: { set: boolean }) {
-  return <span className={`setfield__state ${set ? 'setfield__state--on' : ''}`}>{set ? 'Key set' : 'Not set'}</span>
 }

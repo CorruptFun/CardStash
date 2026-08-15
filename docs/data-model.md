@@ -212,8 +212,7 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `cloudSalt` / `cloudKeyCheck` (`''`) | Vault KDF salt and key fingerprint. Neither is secret; both let a returning device derive its key and reject a wrong passphrase without a round trip. |
 | `cloudRevision` (`0`) / `cloudSyncedAt` (`0`) | Server revision last seen and last successful sync. A stale revision means merge before writing. |
 | `cloudAuto` (`true`) | Reserved for syncing after collection writes; nothing schedules it yet. |
-| `geminiKey` / `geminiModel` (`'gemini-flash-latest'`) | AI deck builder only. **Scanning never uses Gemini.** |
-| `pokemonKey` (`''`) | Optional pokemontcg.io key (higher rate limits). |
+| `pokemonKey` | pokemontcg.io key, from `VITE_POKEMON_KEY` at build time — **not user-editable**, and `merge()` always takes the build's value over a persisted one. `geminiKey`/`geminiModel` are gone: the deck builder runs on our key through `build-deck`. |
 | `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
 

@@ -105,6 +105,8 @@ const RPC_MESSAGES: Record<string, string> = {
   bad_handle: 'Handles can use letters, numbers and underscores, 3–24 characters',
   handle_taken: 'That handle is already taken — try another',
   handle_reserved: 'That handle is reserved',
+  handle_locked: 'Your handle is permanent, so it cannot be changed',
+  no_profile: 'Claim a handle first',
   bad_display_name: 'Add a display name',
   no_such_handle: 'No collector with that handle',
   cannot_friend_self: 'That is your own handle',

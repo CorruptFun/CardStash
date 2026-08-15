@@ -1,5 +1,4 @@
 import { linkAbort } from './fetchJson'
-import { GAME_FULL_NAME } from './games'
 import type { Card, Game } from './types'
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -64,7 +63,6 @@ function responseText(res: any): string {
  * whose configured model also went away.
  */
 const FALLBACK_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.7-flash']
-let lastServedModel: string | null = null
 
 async function callWithFallback(
   model: string,
@@ -78,7 +76,6 @@ async function callWithFallback(
   for (const candidate of models) {
     try {
       const res = await callGemini(candidate, apiKey, body, timeoutMs, signal)
-      lastServedModel = candidate
       return res
     } catch (err) {
       lastError = err
@@ -88,48 +85,6 @@ async function callWithFallback(
   throw lastError
 }
 
-export async function testGeminiKey(
-  apiKey: string,
-  model: string,
-): Promise<{ ok: true; model: string } | { ok: false; error: string }> {
-  try {
-    await callWithFallback(
-      model,
-      apiKey,
-      {
-        contents: [{ parts: [{ text: 'Reply with the single word OK.' }] }],
-        generationConfig: { maxOutputTokens: 16, temperature: 0 },
-      },
-      12_000,
-    )
-    return { ok: true, model: lastServedModel ?? model }
-  } catch (err: any) {
-    return { ok: false, error: err.message?.slice(0, 200) ?? 'Unknown error' }
-  }
-}
-
-/* --- Cloud scan rescue -----------------------------------------------------
- * A LAST RESORT for the scan pipeline, not a replacement for it. Identification
- * is on-device by design (decisions.md 2) — it works offline, on first launch,
- * with no key and no account, and no image leaves the device. That path is
- * unchanged and still the default.
- *
- * What it cannot do is read a name that Tesseract cannot see: a foil sheen
- * riding the glyphs, gold script on full art, a two-letter suffix lost to a
- * moving highlight. Measured, that last one is not merely a miss but the
- * WORST failure class — dropping "ex" leaves a bare species that matches a
- * real, cheaper card EXACTLY, so no threshold can reject it (lesson 29/47).
- *
- * So this runs ONLY after every local pass has failed, ONLY when the user
- * supplied their own key AND opted in, and its answer is never trusted on its
- * own: `identify.ts` requires the returned collector number to agree with a
- * catalog row before accepting it. A cloud model returns confident wrong
- * answers too — it just loses the intermediate evidence (band text, collector
- * line) the local guards bite on, which is exactly why the number is asked for
- * alongside the name.
- */
-
-/** What the model is asked to read off the card — printed values only. */
 export interface CloudCardRead {
   name: string
   number?: string
@@ -170,7 +125,7 @@ const CARD_PROMPT =
 const CLOUD_SCAN_TIMEOUT_MS = 12_000
 
 /**
- * The model the scan rescue uses, pinned SEPARATELY from `geminiModel`.
+ * The model the scan rescue uses, pinned SEPARATELY from the builder's.
  *
  * The two Gemini uses in this app want different things. The deck builder
  * reasons over a whole collection and the user may reasonably point it at
@@ -314,62 +269,41 @@ export interface BuildDecksResult {
   decks: ParsedDeck[]
 }
 
-/** What goes inside the ```decklist fence, per game. */
-const DECKLIST_SPEC: Record<Game, string> = {
-  mtg: ' (main deck, 60 cards, include lands).',
-  pokemon: ' (60 cards including energy).',
-  yugioh: ' (Main Deck 40-60; then a line `-- Extra Deck --` and extra deck monsters).',
-  riftbound: ' (main deck, exactly 40 cards; name the Legend, runes and battlefields outside the code block).',
-  lorcana: ' (60 cards, at most two inks).',
-  onepiece: ' (exactly 50 cards; name the Leader outside the code block).',
-  starwars: ' (50+ cards; name the Leader and Base outside the code block).',
-  digimon: ' (main deck, exactly 50 cards; then a line `-- Egg Deck --` and up to 5 Digi-Eggs).',
-  gundam: ' (exactly 50 cards; resource deck is fixed, skip it).',
-  // Unreachable — the builder never offers a game without boards.
-  sports: '.',
-}
 
-export async function buildDecks(request: BuildDecksRequest, apiKey: string, model: string): Promise<BuildDecksResult> {
+export async function buildDecksHosted(request: BuildDecksRequest): Promise<BuildDecksResult> {
+  const { isSignedIn, freshToken } = await import('./authsession')
+  const { SUPABASE_URL, CLOUD_AVAILABLE } = await import('./cloudconfig')
+  if (!CLOUD_AVAILABLE) throw new GeminiError('The deck builder is not switched on for this build')
+  if (!isSignedIn()) throw new GeminiError('Sign in to use the deck builder')
+
   const { game, format, style, budget, collectionList, useCollection, seedCards } = request
-  const seedList = (seedCards ?? [])
-    .map((card) => `- ${card.name}${card.setName ? ` (${card.setName})` : ''}`)
-    .join('\n')
-  const prompt = [
-    `You are an expert ${GAME_FULL_NAME[game]} deck builder. Use Google Search to check the CURRENT competitive metagame (tier lists, recent tournament results) before answering.`,
-    format ? `Format: ${format}.` : '',
-    style ? `The player wants: ${style}.` : '',
-    seedList
-      ? `Build every deck AROUND these specific cards — each proposal must include them and make them central to the game plan:\n${seedList}`
-      : '',
-    budget != null ? `Budget for cards they still need to buy: about $${budget} USD.` : '',
-    useCollection && collectionList
-      ? `The player's collection (name ×qty):\n${collectionList}\n\nBuild primarily from these cards; only add cards to buy when they matter.`
-      : 'Assume the player is starting from scratch.',
-    '',
-    'Reply in markdown with exactly this structure:',
-    '1. `## Meta snapshot` — 3-5 bullets on the current meta with dates/sources.',
-    '2. Then 2 deck proposals. Each one:',
-    '   - `## Deck: <deck name>` — one line on the game plan and why it fits.',
-    '   - A fenced code block starting with ```decklist containing ONLY lines of the form `<qty> <exact card name>`' +
-      DECKLIST_SPEC[game],
-    '   - `**To buy:**` bullets of the key cards they lack, with rough per-card prices.',
-    'Keep total response under 900 words. Card names must be exact printed names.',
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const token = await freshToken()
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/build-deck`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      game,
+      format,
+      style,
+      budget,
+      useCollection,
+      collectionList: useCollection ? collectionList : '',
+      seedCards: (seedCards ?? []).map((card) => ({ name: card.name, setName: card.setName })),
+    }),
+  }).catch(() => null)
 
-  const res = await callWithFallback(
-    model,
-    apiKey,
-    {
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
-    },
-    60_000,
-  )
-  const markdown = responseText(res)
-  if (!markdown) throw new GeminiError('Gemini returned an empty response')
+  if (!res) throw new GeminiError('Could not reach the deck builder — check your connection')
+  if (!res.ok) {
+    const code = res.status
+    if (code === 401) throw new GeminiError('Sign in to use the deck builder')
+    if (code === 403) throw new GeminiError('The AI deck builder is part of a subscription')
+    if (code === 429) throw new GeminiError('You have used this month\u2019s deck builds')
+    if (code === 503) throw new GeminiError('The deck builder is not configured yet')
+    throw new GeminiError('The deck builder could not answer just now')
+  }
+  const payload = (await res.json().catch(() => null)) as { markdown?: string } | null
+  const markdown = typeof payload?.markdown === 'string' ? payload.markdown : ''
+  if (!markdown) throw new GeminiError('The deck builder returned an empty response')
   return { markdown, decks: parseDecklists(markdown) }
 }
 

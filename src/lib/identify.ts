@@ -1127,27 +1127,19 @@ async function identifyViaOcr(
     // camera frame anywhere has to be something the user switched on, and
     // paying for a tier is not the same act as consenting to the upload.
     if (!config.cloudScanRescue) return null
-    const hosted = isSignedIn()
-    const byo = !!config.geminiKey
-    if (!hosted && !byo) return null
+    // One route now. The bring-your-own-key path is gone with the Settings
+    // field that fed it: nobody supplies a key any more, the rescue is part of
+    // what a subscription buys, and the model that costs money is pinned
+    // server-side because a client-chosen model is a client-chosen bill.
+    if (!isSignedIn()) return null
     bail()
     // Dynamic import, but be honest about what it buys: gemini.ts is ALREADY in
     // the main bundle (BuilderView and SettingsView import it statically), so
     // this saves no download — unlike drive.ts and cloud.ts, which really are
     // code-split. What it does buy is keeping authsession/cloudconfig out of
     // the scan path until a rescue actually runs.
-    const { readCardHosted, readCardViaGemini } = await import('./gemini')
-    // Deliberately NOT config.geminiModel on the BYO path — that one belongs to
-    // the deck builder. Empty override falls through to the pinned
-    // CLOUD_SCAN_MODEL; the hosted path pins its model server-side, because a
-    // client-chosen model is a client-chosen bill.
-    const read =
-      (hosted ? await readCardHosted(reading.canvas, signal).catch(() => null) : null) ??
-      (byo
-        ? await readCardViaGemini(reading.canvas, config.geminiKey, config.cloudScanModel || undefined, signal).catch(
-            () => null,
-          )
-        : null)
+    const { readCardHosted } = await import('./gemini')
+    const read = await readCardHosted(reading.canvas, signal).catch(() => null)
     if (!read) {
       traceEvent('cloud-read', { name: null })
       return null

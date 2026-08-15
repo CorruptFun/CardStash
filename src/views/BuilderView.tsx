@@ -4,10 +4,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { track } from '../lib/analytics'
+import { isSignedIn } from '../lib/authsession'
 import { matchGame } from '../lib/cardsearch'
 import { addCardToDeck, createDeck, db, ownedNameCounts, updateDeck } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
-import { buildDecks, type BuildDecksResult, type ParsedDeck } from '../lib/gemini'
+import { buildDecksHosted, type BuildDecksResult, type ParsedDeck } from '../lib/gemini'
 import { GAME_LABEL, GAMES } from '../lib/games'
 import { useSettings } from '../lib/settings'
 import type { Card, Game } from '../lib/types'
@@ -78,11 +79,15 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
     setError(null)
     const startedAt = performance.now()
     try {
-      const res = await buildDecks(
-        { game, format, style, budget, collectionList, useCollection, seedCards: seeds },
-        config.geminiKey,
-        config.geminiModel,
-      )
+      const res = await buildDecksHosted({
+        game,
+        format,
+        style,
+        budget,
+        collectionList,
+        useCollection,
+        seedCards: seeds,
+      })
       setResult(res)
       setPhase('result')
       track('ai_builder_run', { game, ok: true, seeded: seeds.length > 0, ms: Math.round(performance.now() - startedAt) })
@@ -153,7 +158,12 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
     }
   }
 
-  if (!config.geminiKey) {
+  // Gated on an ACCOUNT, not on a pasted key. The key is ours now, so the only
+  // thing the client can honestly check is whether there is anyone to bill --
+  // entitlement and the monthly allowance are the server's to answer, and it
+  // says so in the error rather than here (see `buildDecksHosted`). Checking
+  // subscription state locally would add one more way to be wrong offline.
+  if (!isSignedIn()) {
     return (
       <div className="screen safe-top">
         <BuilderHeader navigate={navigate} />
@@ -165,13 +175,13 @@ export function BuilderView({ navigate }: { navigate: (hash: string) => void }) 
             <span className="wordmark">
               Cardstock <span className="holotext">✦</span>
             </span>
-            <h3>Bring your own Gemini key</h3>
+            <h3>Sign in to build decks</h3>
             <p>
-              The AI builder uses Google's Gemini with live search to study the current meta and design decks around
-              your collection. Add a free API key from Google AI Studio to unlock it.
+              The AI builder studies the current meta with live search and designs decks around the cards you already
+              own. It runs on our key, so there is nothing to set up — it just needs to know who you are.
             </p>
-            <a className="btn btn--primary" href="#/settings">
-              Open settings
+            <a className="btn btn--primary" href="#/friends">
+              Connect an account
             </a>
           </div>
         </div>
