@@ -19,6 +19,15 @@
       "source": "47a9aed6-IMG_1167.jpeg"
     },
     {
+      "key": "pkm-leafeon-vstar-promo",
+      "file": "pkm-leafeon-vstar-promo.jpg",
+      "game": "pokemon",
+      "name": "Leafeon VSTAR",
+      "label": "photo-pkm",
+      "note": "SWSH195 black-star promo, full-art holo, HELD IN HAND against a white textured wall. Prints BOTH halves the VMAX/VSTAR rescue needs: 'Evolves from Leafeon V' under the name and 'VSTAR rule ... your Pokemon VSTAR' in the bottom strip. NOT in the captured API universe (Leafeon VMAX is) so it cannot PASS — it is a WRONG-CARD guard fixture: a catalog-uniqueness resolver answers Leafeon VMAX here.",
+      "source": "77cf3732-IMG_0473.jpeg"
+    },
+    {
       "key": "pkm-machamp-revholo",
       "file": "pkm-machamp-revholo.jpg",
       "game": "pokemon",
@@ -828,6 +837,1242 @@
       ],
       "note": "reverse holo HELD IN HAND, glare sweeping the foil panel",
       "source": "IMG_0456.mov"
+    },
+    {
+      "key": "pkm-crobat-ex-clip-hand",
+      "game": "pokemon",
+      "name": "Team Rocket's Crobat ex",
+      "label": "clip",
+      "dir": "clips/pkm-crobat-ex-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.322,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.356,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.389,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.169,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.202,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.235,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.015,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.048,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.082,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.861,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.895,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.928,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.708,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.741,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.774,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "modern SV ex with a possessive prefix, holo, HELD IN HAND over a tile floor — pair with -flat"
+    },
+    {
+      "key": "pkm-crobat-ex-clip-flat",
+      "game": "pokemon",
+      "name": "Team Rocket's Crobat ex",
+      "label": "clip",
+      "dir": "clips/pkm-crobat-ex-clip-flat",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.4,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.433,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.467,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.45,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.483,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.517,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.5,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.533,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.567,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.55,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.583,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.617,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.6,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.633,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.667,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "same card FLAT on a granite counter — the control half of the pair"
+    },
+    {
+      "key": "pkm-pikachu-clip-hand",
+      "game": "pokemon",
+      "name": "Pikachu",
+      "label": "clip",
+      "dir": "clips/pkm-pikachu-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.606,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.639,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.672,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 2.195,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 2.229,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 2.262,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 3.785,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 3.818,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 3.852,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 5.375,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 5.408,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 5.441,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 6.964,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 6.998,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 7.031,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix) — negative evidence for the variant guard; HELD IN HAND"
+    },
+    {
+      "key": "pkm-pikachu-clip-flat",
+      "game": "pokemon",
+      "name": "Pikachu",
+      "label": "clip",
+      "dir": "clips/pkm-pikachu-clip-flat",
+      "fps": 29.91,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.524,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.557,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.591,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.899,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.933,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.966,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 3.275,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 3.308,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 3.342,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 4.651,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 4.684,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 4.717,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 6.026,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 6.059,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 6.093,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix), FLAT on granite — control half"
+    },
+    {
+      "key": "pkm-darkrai-clip-hand",
+      "game": "pokemon",
+      "name": "Darkrai",
+      "label": "clip",
+      "dir": "clips/pkm-darkrai-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.408,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.441,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.475,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.479,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.512,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.546,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.55,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.583,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.617,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.621,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.654,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.688,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.692,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.725,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.759,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix), holo, HELD IN HAND"
+    },
+    {
+      "key": "pkm-darkrai-clip-flat",
+      "game": "pokemon",
+      "name": "Darkrai",
+      "label": "clip",
+      "dir": "clips/pkm-darkrai-clip-flat",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.302,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.335,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.368,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.093,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.127,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.16,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.885,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.918,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.952,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.677,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.71,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.743,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.468,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.502,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.535,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix), holo, FLAT on granite — control half"
+    },
+    {
+      "key": "pkm-giacomo-clip-hand",
+      "game": "pokemon",
+      "name": "Giacomo",
+      "label": "clip",
+      "dir": "clips/pkm-giacomo-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.366,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.399,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.432,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.325,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.359,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.392,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 2.285,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 2.318,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 2.352,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 3.245,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 3.278,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 3.311,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 4.204,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 4.238,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 4.271,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "TRAINER (Supporter) — no Pokemon rule box at all; HELD IN HAND"
+    },
+    {
+      "key": "pkm-giacomo-clip-flat",
+      "game": "pokemon",
+      "name": "Giacomo",
+      "label": "clip",
+      "dir": "clips/pkm-giacomo-clip-flat",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.264,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.297,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.331,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 0.957,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 0.99,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.024,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.65,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.683,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.717,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.343,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.376,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.41,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.036,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.069,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.103,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "TRAINER (Supporter), FLAT on granite — control half"
+    },
+    {
+      "key": "pkm-scoopup-clip-hand",
+      "game": "pokemon",
+      "name": "Scoop Up Cyclone",
+      "label": "clip",
+      "dir": "clips/pkm-scoopup-clip-hand",
+      "fps": 29.99,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.294,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.327,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.36,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 1.064,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 1.098,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.131,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.835,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.868,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.902,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.606,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.639,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.672,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.376,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.41,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.443,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "TRAINER (Item, ACE SPEC) — carries its own rule text; HELD IN HAND"
+    },
+    {
+      "key": "pkm-scoopup-clip-flat",
+      "game": "pokemon",
+      "name": "Scoop Up Cyclone",
+      "label": "clip",
+      "dir": "clips/pkm-scoopup-clip-flat",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.262,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.295,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.328,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 0.948,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 0.982,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 1.015,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.635,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.668,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.702,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.322,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.355,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.388,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 3.008,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 3.042,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 3.075,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "TRAINER (Item, ACE SPEC), FLAT on granite — control half"
+    },
+    {
+      "key": "pkm-deoxys-clip-hand",
+      "game": "pokemon",
+      "name": "Deoxys",
+      "label": "clip",
+      "dir": "clips/pkm-deoxys-clip-hand",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.227,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.261,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.294,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 0.824,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 0.857,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 0.89,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.42,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.453,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.487,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 2.016,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 2.05,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 2.083,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 2.613,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 2.646,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 2.68,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix), holo, HELD IN HAND"
+    },
+    {
+      "key": "pkm-deoxys-clip-flat",
+      "game": "pokemon",
+      "name": "Deoxys",
+      "label": "clip",
+      "dir": "clips/pkm-deoxys-clip-flat",
+      "fps": 29.98,
+      "bursts": 5,
+      "burstFrames": 3,
+      "frames": [
+        {
+          "file": "b0-0.jpg",
+          "at": 0.2,
+          "burst": 0,
+          "within": 0
+        },
+        {
+          "file": "b0-1.jpg",
+          "at": 0.233,
+          "burst": 0,
+          "within": 1
+        },
+        {
+          "file": "b0-2.jpg",
+          "at": 0.267,
+          "burst": 0,
+          "within": 2
+        },
+        {
+          "file": "b1-0.jpg",
+          "at": 0.725,
+          "burst": 1,
+          "within": 0
+        },
+        {
+          "file": "b1-1.jpg",
+          "at": 0.758,
+          "burst": 1,
+          "within": 1
+        },
+        {
+          "file": "b1-2.jpg",
+          "at": 0.792,
+          "burst": 1,
+          "within": 2
+        },
+        {
+          "file": "b2-0.jpg",
+          "at": 1.25,
+          "burst": 2,
+          "within": 0
+        },
+        {
+          "file": "b2-1.jpg",
+          "at": 1.283,
+          "burst": 2,
+          "within": 1
+        },
+        {
+          "file": "b2-2.jpg",
+          "at": 1.317,
+          "burst": 2,
+          "within": 2
+        },
+        {
+          "file": "b3-0.jpg",
+          "at": 1.775,
+          "burst": 3,
+          "within": 0
+        },
+        {
+          "file": "b3-1.jpg",
+          "at": 1.808,
+          "burst": 3,
+          "within": 1
+        },
+        {
+          "file": "b3-2.jpg",
+          "at": 1.842,
+          "burst": 3,
+          "within": 2
+        },
+        {
+          "file": "b4-0.jpg",
+          "at": 2.3,
+          "burst": 4,
+          "within": 0
+        },
+        {
+          "file": "b4-1.jpg",
+          "at": 2.333,
+          "burst": 4,
+          "within": 1
+        },
+        {
+          "file": "b4-2.jpg",
+          "at": 2.367,
+          "burst": 4,
+          "within": 2
+        }
+      ],
+      "note": "BARE SPECIES (no suffix), holo, FLAT on granite — control half"
     }
   ]
 }

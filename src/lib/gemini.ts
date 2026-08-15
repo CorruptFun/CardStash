@@ -55,8 +55,15 @@ function responseText(res: any): string {
     .trim()
 }
 
-/** Models to fall back to when the configured one 404s (renamed/retired). */
-const FALLBACK_MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash']
+/**
+ * Models to fall back to when the configured one 404s (renamed/retired).
+ * Cheapest first: every use here (deck building, the scan rescue) is a small
+ * bounded prompt, so the lite tier is the right default and the flash tier is
+ * only insurance. Keep these CURRENT — the whole `gemini-2.5-*` family was
+ * retired, and a deprecated id in this list is a silent 404 for every user
+ * whose configured model also went away.
+ */
+const FALLBACK_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.7-flash']
 let lastServedModel: string | null = null
 
 async function callWithFallback(
@@ -98,6 +105,186 @@ export async function testGeminiKey(
     return { ok: true, model: lastServedModel ?? model }
   } catch (err: any) {
     return { ok: false, error: err.message?.slice(0, 200) ?? 'Unknown error' }
+  }
+}
+
+/* --- Cloud scan rescue -----------------------------------------------------
+ * A LAST RESORT for the scan pipeline, not a replacement for it. Identification
+ * is on-device by design (decisions.md 2) — it works offline, on first launch,
+ * with no key and no account, and no image leaves the device. That path is
+ * unchanged and still the default.
+ *
+ * What it cannot do is read a name that Tesseract cannot see: a foil sheen
+ * riding the glyphs, gold script on full art, a two-letter suffix lost to a
+ * moving highlight. Measured, that last one is not merely a miss but the
+ * WORST failure class — dropping "ex" leaves a bare species that matches a
+ * real, cheaper card EXACTLY, so no threshold can reject it (lesson 29/47).
+ *
+ * So this runs ONLY after every local pass has failed, ONLY when the user
+ * supplied their own key AND opted in, and its answer is never trusted on its
+ * own: `identify.ts` requires the returned collector number to agree with a
+ * catalog row before accepting it. A cloud model returns confident wrong
+ * answers too — it just loses the intermediate evidence (band text, collector
+ * line) the local guards bite on, which is exactly why the number is asked for
+ * alongside the name.
+ */
+
+/** What the model is asked to read off the card — printed values only. */
+export interface CloudCardRead {
+  name: string
+  number?: string
+  printedTotal?: string
+  setCode?: string
+  game?: string
+}
+
+/**
+ * Ask for the printed values, not for an opinion. The schema is the guard's
+ * raw material: a name alone cannot be cross-checked, so the collector number
+ * is requested every time and the prompt is explicit that unread fields must
+ * be omitted rather than guessed — a hallucinated number that happens to hit a
+ * catalog row would defeat the very check it exists to feed.
+ */
+const CARD_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    name: { type: 'STRING' },
+    number: { type: 'STRING' },
+    printedTotal: { type: 'STRING' },
+    setCode: { type: 'STRING' },
+    game: { type: 'STRING' },
+  },
+  required: ['name'],
+}
+
+const CARD_PROMPT =
+  'You are reading a trading card photograph for a collection app. ' +
+  'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
+  '(ex, GX, V, VMAX, VSTAR) and any possessive prefix ("Iono\'s", "Team Rocket\'s"). ' +
+  'Also return the collector number and printed set total from the small collector line ' +
+  '(for "055/086": number "055", printedTotal "086"), and the printed set code if visible. ' +
+  'CRITICAL: omit any field you cannot actually read on the card. Never guess a number. ' +
+  'An omitted field is correct; an invented one is not.'
+
+/** Scanning is interactive — a rescue that outlives the user's patience is a miss. */
+const CLOUD_SCAN_TIMEOUT_MS = 12_000
+
+/**
+ * The model the scan rescue uses, pinned SEPARATELY from `geminiModel`.
+ *
+ * The two Gemini uses in this app want different things. The deck builder
+ * reasons over a whole collection and the user may reasonably point it at
+ * something large; the scan rescue transcribes one card and wants accuracy on
+ * small printed type at the lowest sane cost. Sharing one setting would mean a
+ * user tuning their deck builder silently changing what every scan costs.
+ *
+ * Measured on six real cards (Krookodile ex, a bare Pikachu, Leafeon VSTAR, a
+ * possessive-prefix Crobat ex, a Trainer and a Deoxys), flash-lite and the
+ * newest flash both scored 6/6 — identical answers, including the small
+ * collector line — at $0.00038 and $0.00194 a call. Reading printed text off a
+ * card is not a reasoning task, so the reasoning tier buys nothing here and
+ * costs 5x. Re-measure with `modelcmp` before changing this on vibes.
+ */
+export const CLOUD_SCAN_MODEL = 'gemini-3.1-flash-lite'
+
+/**
+ * The HOSTED rescue: our own edge function reads the card, using a key that
+ * lives on the server and never ships to the client.
+ *
+ * This is the path for subscribers, and it is tried before the BYO-key one.
+ * Entitlement and the monthly allowance are checked SERVER-side — the client
+ * deliberately does not pre-check them, because a client-side entitlement check
+ * is a suggestion and would only add a way to be wrong about it locally.
+ *
+ * Every failure returns null and is indistinguishable to the caller from a
+ * local miss: not signed in, not subscribed, out of allowance, function down,
+ * Google down. A scanner must never explain billing to someone holding a card.
+ */
+export async function readCardHosted(canvas: HTMLCanvasElement, signal?: AbortSignal): Promise<CloudCardRead | null> {
+  const { isSignedIn, freshToken } = await import('./authsession')
+  const { SUPABASE_URL, CLOUD_AVAILABLE } = await import('./cloudconfig')
+  if (!CLOUD_AVAILABLE || !isSignedIn()) return null
+  const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  if (!data) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), CLOUD_SCAN_TIMEOUT_MS)
+  const unlink = linkAbort(signal, controller)
+  try {
+    const token = await freshToken()
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/scan-card`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ image: data }),
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    const parsed = await res.json()
+    return parsed?.name ? (parsed as CloudCardRead) : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+    unlink()
+  }
+}
+
+/**
+ * Read one captured frame through Gemini. Returns null on anything unusable —
+ * the caller treats that exactly like a local miss.
+ */
+export async function readCardViaGemini(
+  canvas: HTMLCanvasElement,
+  apiKey: string,
+  model = CLOUD_SCAN_MODEL,
+  signal?: AbortSignal,
+): Promise<CloudCardRead | null> {
+  if (!apiKey) return null
+  // The capture is already capped at CAPTURE_MAX_EDGE (1600); at that size the
+  // image bills ~1.1k tokens, so a rescue costs a fraction of a cent. Sending
+  // it smaller would save nothing that matters and can cost the collector line,
+  // which is the half of the answer the guard actually needs.
+  const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  if (!data) return null
+  try {
+    const res = await callWithFallback(
+      model,
+      apiKey,
+      {
+        contents: [{ parts: [{ text: CARD_PROMPT }, { inline_data: { mime_type: 'image/jpeg', data } }] }],
+        generationConfig: {
+          temperature: 0,
+          // The answer is ~50 tokens, but a THINKING model spends its output
+          // budget on reasoning tokens first and emits nothing if the cap is
+          // reached — measured, gemini-3.5-flash burned ~380 thinking tokens
+          // against a 200 cap and returned `finishReason: MAX_TOKENS` with an
+          // empty body, i.e. a silent null at full price on every call. The
+          // pinned model does not think, but this must not become a trap for
+          // anyone who overrides `cloudScanModel` with one that does.
+          maxOutputTokens: 2000,
+          responseMimeType: 'application/json',
+          responseSchema: CARD_SCHEMA,
+        },
+      },
+      CLOUD_SCAN_TIMEOUT_MS,
+      signal,
+    )
+    const parsed = JSON.parse(responseText(res))
+    const text = (value: unknown): string | undefined => {
+      const s = typeof value === 'string' ? value.trim() : ''
+      return s && s.toLowerCase() !== 'unknown' && s.toLowerCase() !== 'null' ? s : undefined
+    }
+    const name = text(parsed?.name)
+    if (!name) return null
+    return {
+      name,
+      number: text(parsed?.number),
+      printedTotal: text(parsed?.printedTotal),
+      setCode: text(parsed?.setCode),
+      game: text(parsed?.game),
+    }
+  } catch {
+    // A rescue that throws is just a miss — never surface it as a scan error.
+    return null
   }
 }
 
