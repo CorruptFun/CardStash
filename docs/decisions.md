@@ -18,20 +18,65 @@ broken caching in [card-data.md](card-data.md).
 
 ---
 
-### 2. Scanning is fully on-device
+### 2. The free scan path is fully on-device; the cloud is an opt-in rescue
 
-**Why.** A cloud-vision scanner would be more accurate out of the box, but it
-would mean shipping camera frames to a third party, needing a key to work at
-all, and being useless offline. "Point your camera at a card" has to work on a
-train, on a first launch, with no account.
+**Why.** A cloud-vision scanner would be more accurate out of the box, but
+making it *the* scanner would mean shipping camera frames to a third party,
+needing a key to work at all, and being useless offline. "Point your camera at a
+card" has to work on a train, on a first launch, with no account. That is still
+the rule, and it is why the local pipeline is the one that gets the investment.
 
 **Consequences.** A large, hard-won OCR pipeline (`identify.ts`, `ocr.ts`,
 `vision.ts`, `corner.ts`) and the regression harness that keeps it honest. The
 OCR engine is self-hosted (~11 MB of worker + wasm + language data) but
-lazily fetched and runtime-cached, so
-devices that never scan never pay for it. The Gemini key stays scoped to the AI
-deck builder — that boundary is load-bearing and stated in three places in the
-source.
+lazily fetched and runtime-cached, so devices that never scan never pay for it.
+
+**What changed (v0.16).** There is now a cloud rescue, and it is deliberately
+shaped so the sentence above survives it. It runs only when the user has
+switched `cloudScanRescue` on, and only on a frame the local pipeline could not
+settle — a full miss, or an answer of a shape measured to be confidently wrong
+(guard invariant 12). A scan that succeeds locally never touches the network,
+and a user who never opts in cannot tell the feature exists. Signing in is not
+consent and neither is paying: the upload is its own switch, because sending a
+camera frame somewhere is a different act from subscribing to a tier.
+
+The Gemini boundary moved with it and is now stated precisely rather than
+absolutely: the key is scoped to the AI deck builder **and** the scan rescue,
+and to nothing else.
+
+---
+
+### 2a. A first-party backend is the entitlement authority
+
+**Why.** CLAUDE.md listed three honest options for where a paid tier's
+entitlement could live — client-side flag, third-party check, first-party
+backend — and the third is now chosen. The first is a suggestion rather than an
+authority (a flag in localStorage is one devtools tab from being true). The
+second puts a vendor between the user and their own camera. The third is the
+only one that can also hold the thing that actually costs money: the model key,
+and the meter that counts a subscriber's scans.
+
+That backend already exists for other reasons — the same Supabase project that
+carries the cloud vault and hosted social — so this adds a table and an edge
+function rather than a new tier of infrastructure.
+
+**Consequences.**
+
+- **The server decides, and the client does not pre-check.** `scan-card` reads
+  the caller's entitlement and allowance itself; `identify.ts` sends the frame
+  and believes the answer or the refusal. A client-side entitlement check would
+  only add a way to be locally wrong about it.
+- **`entitlement.ts` stays the seam, and stays honest.** `cloud-scan` is the
+  first feature in that table to be gated at all. `photo-upload` and
+  `page-scan` remain ungated — whether *those* become paid is a separate
+  product decision, and the table exists so it can be made in one place.
+- **The free path still works offline with no account, and that is the
+  invariant this decision is written to protect.** The backend is the authority
+  on a *paid extra*, never on scanning itself. If the project is unreachable,
+  or the user has no account, or the tier lapsed, the local pipeline answers
+  exactly as it always did. Nothing about entitlement is allowed to gate
+  `detectCardRegions` or any other shared primitive (CLAUDE.md), and analytics
+  stay content-free regardless of subscription state.
 
 ---
 
@@ -358,7 +403,7 @@ covered by tests that must keep passing.
 
 ---
 
-## 17. Sports cards are synthesized from the card, not looked up
+### 17. Sports cards are synthesized from the card, not looked up
 
 **Context.** Every game in the app resolves against a catalog. Sports has none
 that is free: TCGplayer carries no sports singles (so the TCGCSV path is
@@ -411,7 +456,7 @@ turns honest misses into invented cards.
 
 ---
 
-## 18. A grade belongs to the copy, not to the card
+### 18. A grade belongs to the copy, not to the card
 
 **Context.** Slabbed cards needed representing, and a PSA 10 is worth a
 multiple of the same card raw. The tempting shortcut is to treat a graded card

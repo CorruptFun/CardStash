@@ -82,7 +82,17 @@
        * Returns { outcome, ms, trace }.
        */
       async runCell(cell) {
-        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        // cloudKey is only ever present when the runner was given a real key
+        // (--gemini); without it cloudScanRescue is false and the cloud branch
+        // in identify.ts is never reached, so ordinary runs stay offline and
+        // deterministic exactly as before.
+        useSettings.getState().set({
+          gameFilter: cell.hint ?? 'auto',
+          pokemonKey: '',
+          geminiKey: cell.cloudKey ?? '',
+          cloudScanModel: cell.cloudModel ?? '',
+          cloudScanRescue: !!cell.cloudKey,
+        })
         const img = await loadImage(cell.imageUrl)
         let canvas
         if (cell.photo) {
@@ -204,7 +214,17 @@
        * degraded input, as a photograph is.
        */
       async runFrames(cell) {
-        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        // cloudKey is only ever present when the runner was given a real key
+        // (--gemini); without it cloudScanRescue is false and the cloud branch
+        // in identify.ts is never reached, so ordinary runs stay offline and
+        // deterministic exactly as before.
+        useSettings.getState().set({
+          gameFilter: cell.hint ?? 'auto',
+          pokemonKey: '',
+          geminiKey: cell.cloudKey ?? '',
+          cloudScanModel: cell.cloudModel ?? '',
+          cloudScanRescue: !!cell.cloudKey,
+        })
         const imgs = await Promise.all(cell.imageUrls.map(loadImage))
         const canvas = document.createElement('canvas')
         canvas.width = imgs[0].naturalWidth
@@ -258,7 +278,17 @@
        * cost more than the scan.
        */
       async runPage(cell) {
-        useSettings.getState().set({ gameFilter: cell.hint ?? 'auto', pokemonKey: '' })
+        // cloudKey is only ever present when the runner was given a real key
+        // (--gemini); without it cloudScanRescue is false and the cloud branch
+        // in identify.ts is never reached, so ordinary runs stay offline and
+        // deterministic exactly as before.
+        useSettings.getState().set({
+          gameFilter: cell.hint ?? 'auto',
+          pokemonKey: '',
+          geminiKey: cell.cloudKey ?? '',
+          cloudScanModel: cell.cloudModel ?? '',
+          cloudScanRescue: !!cell.cloudKey,
+        })
         const img = await loadImage(cell.imageUrl)
         const canvas = cell.photo
           ? fitPhoto(img, cell.maxEdge ?? PAGE_MAX_EDGE)

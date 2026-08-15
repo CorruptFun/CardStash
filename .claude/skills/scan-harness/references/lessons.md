@@ -536,3 +536,37 @@ result seems absurd, check this list before writing code.
     boxes on a regular lattice and the wrong way scatters them, and
     `completeGrid` already infers that lattice — rather than a per-rectangle
     shape guess. Ship nothing until it beats 8/8 on the upright page.
+
+## Where the rescue had to fire (the suspect-answer round)
+
+55. **A rescue wired to the MISS path cannot fix the WRONG-CARD class, and the
+    two look identical on a summary line.** The cloud read was added at the
+    bottom of `identifyViaOcr`, after every local pass gives up — the obvious
+    place, and the place where it can never meet the failure it was bought for.
+    A confident wrong card is not a miss: the local matcher returns "Krookodile"
+    at score 1.0 and returns it happily (lessons 29, 47), so the rescue is never
+    consulted, and every stable wrong card survives switching it on. The tell
+    was that turning the feature on moved the wrong-card count by zero while the
+    edge function, handed the same frames directly, read them correctly. When a
+    fix measures as no-change, ask whether it RAN at all before concluding it
+    does not work — the same trap as lesson 24, one layer up.
+56. **The trigger for a second opinion is a property of the ANSWER, not of the
+    read quality.** There is no score to threshold here — that is the whole
+    point of the class — so the question has to become structural: is this the
+    SHAPE of answer that is wrong when it is wrong? For Pokémon it is exactly
+    "a bare species that has a suffixed sibling in the catalog", which is
+    cheap to ask (one prefix-tolerant lookup, since the siblings come back in
+    the species' own page) and is false for most cards, so it does not turn a
+    rescue into a default. Pair it with the arming check FIRST and sync: a user
+    who never opted in must not pay even the sibling lookup, which also makes
+    the change provably free — the standard battery has to come back identical,
+    cell for cell, and that identity is the regression test.
+57. **Judge a cloud read with `similarity`, never `nameScore`.** `nameScore`
+    forgives a missing suffix by design and parks a bare species at ~0.95
+    (guard invariant 8), which is correct for a half-read name plate and
+    catastrophic for a transcription that CLAIMS to be exact: it turned a
+    perfectly-read "Pikachu" into "Pikachu ex" five times on one clip. A cloud
+    answer is not a degraded read to be forgiven, so there is nothing to
+    forgive, and the forgiveness is precisely what manufactures the wrong card.
+    Same reasoning as `TURNED_MATCH_THRESHOLD`, arrived at independently — when
+    a match is the ONLY evidence, judge the whole printed name.
