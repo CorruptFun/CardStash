@@ -109,6 +109,25 @@ test('any of several v1 signatures matching is enough, so secret rotation works'
   assert.equal(await verifyStripeSignature(body, `t=${NOW_S},v1=${other},v1=${mine}`, SECRET, now), true)
 })
 
+test('several secrets are accepted, because a Connect platform has two endpoints', async () => {
+  // The charge events arrive on the "your account" endpoint and
+  // `account.updated` on the "connected accounts" one. Stripe issues a separate
+  // signing secret per endpoint, both pointing here.
+  const connect = 'whsec_connected_accounts'
+  const body = '{"type":"account.updated"}'
+  const fromConnect = `t=${NOW_S},v1=${createHmac('sha256', connect).update(`${NOW_S}.${body}`).digest('hex')}`
+
+  assert.equal(await verifyStripeSignature(body, fromConnect, [SECRET, connect], now), true)
+  assert.equal(await verifyStripeSignature(body, signed(body), [SECRET, connect], now), true)
+  // A secret on neither endpoint still fails.
+  assert.equal(await verifyStripeSignature(body, fromConnect, [SECRET], now), false)
+  // A bare string still works, so the single-endpoint case needs no ceremony.
+  assert.equal(await verifyStripeSignature(body, signed(body), SECRET, now), true)
+  // An empty or all-blank list verifies nothing.
+  assert.equal(await verifyStripeSignature(body, signed(body), [], now), false)
+  assert.equal(await verifyStripeSignature(body, signed(body), ['', ' '], now), false)
+})
+
 test('the header parser ignores schemes it does not know', () => {
   const parsed = parseSignatureHeader(`t=${NOW_S},v0=abc,v1=def`)
   assert.equal(parsed.timestamp, NOW_S)

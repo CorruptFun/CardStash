@@ -56,7 +56,19 @@ const json = (body: unknown, status = 200) =>
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const STRIPE_KEY = Deno.env.get('STRIPE_SECRET_KEY') ?? ''
-const WEBHOOK_SECRET = Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? ''
+
+/**
+ * Every signing secret this endpoint should accept, comma-separated.
+ *
+ * A Connect platform needs TWO Stripe endpoints — one scoped to "your account"
+ * for the checkout and charge events, one scoped to "connected accounts" for
+ * `account.updated` — and each gets its own secret. Both can point at this URL.
+ * Accepting a list also covers a rotation window for free.
+ */
+const WEBHOOK_SECRETS = (Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
 const STRIPE_API = Deno.env.get('STRIPE_API_BASE') ?? 'https://api.stripe.com'
 
 /** Where Stripe sends people back to. Origin only — routes are hash-based. */
@@ -423,7 +435,7 @@ async function confirm(userId: string, body: any, req: Request): Promise<Respons
 
 async function webhook(req: Request, raw: string): Promise<Response> {
   const signature = req.headers.get('stripe-signature') ?? ''
-  if (!(await verifyStripeSignature(raw, signature, WEBHOOK_SECRET))) {
+  if (!(await verifyStripeSignature(raw, signature, WEBHOOK_SECRETS))) {
     return json({ error: 'bad signature' }, 401)
   }
 
@@ -504,7 +516,7 @@ async function webhook(req: Request, raw: string): Promise<Response> {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
-  if (!STRIPE_KEY || !WEBHOOK_SECRET) return json({ error: 'not configured' }, 503)
+  if (!STRIPE_KEY || !WEBHOOK_SECRETS.length) return json({ error: 'not configured' }, 503)
 
   const route = new URL(req.url).pathname.split('/').filter(Boolean).pop() ?? ''
 

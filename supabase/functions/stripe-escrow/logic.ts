@@ -86,26 +86,40 @@ export const SIGNATURE_TOLERANCE_S = 300
  * stays valid forever, so anyone who ever saw one request could replay "this
  * order was paid" indefinitely. The timestamp is inside the signed payload, so
  * it cannot be edited without invalidating the signature.
+ *
+ * TAKES SEVERAL SECRETS, and that is not only about rotation. A Connect
+ * platform needs TWO endpoints: the charge and checkout events happen on the
+ * platform account, while `account.updated` is about a connected account and
+ * arrives only on a destination scoped to connected accounts. Stripe issues a
+ * separate signing secret per endpoint, so a single-secret verifier silently
+ * rejects every delivery from one of them — and the half that breaks is seller
+ * onboarding, which presents as "verification never completes" with nothing in
+ * the logs but a 401.
  */
 export async function verifyStripeSignature(
   rawBody: string,
   header: string,
-  secret: string,
+  secrets: string | string[],
   now: () => number = Date.now,
   toleranceS: number = SIGNATURE_TOLERANCE_S,
 ): Promise<boolean> {
-  if (!rawBody || !header || !secret) return false
+  const keys = (Array.isArray(secrets) ? secrets : [secrets]).filter(Boolean)
+  if (!rawBody || !header || !keys.length) return false
   const { timestamp, signatures } = parseSignatureHeader(header)
   if (!Number.isFinite(timestamp) || !signatures.length) return false
 
   const ageS = Math.abs(now() / 1000 - timestamp)
   if (ageS > toleranceS) return false
 
-  const expected = await stripeSignature(`${timestamp}.${rawBody}`, secret)
-  // Compare against every offered v1 rather than short-circuiting on the first,
-  // so a rotation window works. safeEqual keeps each comparison constant-time.
+  // Every secret against every offered v1, without short-circuiting on the
+  // first match, so neither the endpoint a request came from nor whether it
+  // matched early is observable in the response time. safeEqual keeps each
+  // individual comparison constant-time.
   let ok = false
-  for (const given of signatures) if (safeEqual(given, expected)) ok = true
+  for (const key of keys) {
+    const expected = await stripeSignature(`${timestamp}.${rawBody}`, key)
+    for (const given of signatures) if (safeEqual(given, expected)) ok = true
+  }
   return ok
 }
 
