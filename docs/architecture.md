@@ -203,6 +203,8 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | the user's own binder URL (e.g. a Gist raw link) | Friend refresh | read |
 | the user's sync server | Only when `syncOn` and an address is set | read/write |
 | the diagnostics endpoint | Only when sharing is on **and** a token is set | write |
+| the shared card index (`lookup_card_data` on our own project) | Only for cards with **no image at all**, driven by what is on screen, batched and debounced, misses cached three days. Sends card ids with the publishable key as `anon` — **never the session token**. Off with `cardSourceLookup` | read |
+| the shared card index (`submit_card_data` / `flag_card_data`) | Only when the user turns on contributing **and** ticks the box on that card. Attributed, so it needs an account | write |
 
 The scan pipeline never sends an image anywhere. Card identification is
 Tesseract + canvas math on-device; the APIs are only asked by name, set and

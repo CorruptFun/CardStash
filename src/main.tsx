@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installErrorHooks, installSessionTracking, installTelemetryFlusher } from './lib/analytics'
 import { installAutoBackup } from './lib/autobackup'
-import { db, requestPersistence, pruneHistory } from './lib/db'
+import { db, loadPatches, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
 import { runAutoBackup } from './lib/drive'
 import { settings } from './lib/settings'
@@ -88,6 +88,11 @@ async function boot(): Promise<void> {
   // on mount lands inside one. The flusher stays last, so a session_end is
   // written before the flush that the same visibility change triggers.
   installErrorHooks()
+  // Ahead of the first render, and awaited: the patch index is read
+  // synchronously by every card image on screen (see db.ts), so loading it
+  // afterwards would paint the grey fallback on cards the user has already
+  // fixed and then swap it out. It is one small table.
+  await loadPatches().catch(() => {})
   installSessionTracking(async () => {
     const [cards, decks, friends] = await Promise.all([db.collection.count(), db.decks.count(), db.friends.count()])
     return { cards, decks, friends, games: settings().enabledGames.length }

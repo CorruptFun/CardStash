@@ -1,9 +1,11 @@
 import Dexie, { type Table } from 'dexie'
 import { sanitizeGrade } from './slab'
+import { customCard, mergePatch, mergePatches, sanitizePatch, unmergePatch } from './cardpatch'
 import { GAMES, FINISH_LABEL } from './games'
 import { ygoPrintingVariants } from './ygo'
 import type {
   Card,
+  CardPatch,
   CatalogCache,
   CollectionItem,
   KvCacheRow,
@@ -47,6 +49,7 @@ class CardstockDB extends Dexie {
   trades!: Table<TradeRecord, string>
   wants!: Table<WantRow, string>
   tombstones!: Table<Tombstone, string>
+  patches!: Table<CardPatch, string>
 
   constructor() {
     super('cardstock')
@@ -108,6 +111,19 @@ class CardstockDB extends Dexie {
             if (item.updatedAt == null) item.updatedAt = item.addedAt
           })
       })
+
+    /**
+     * v8: user-authored card data — the picture a catalog never had, and the
+     * fields the user filled in for a card no catalog lists (`cardpatch.ts`).
+     *
+     * Keyed by the card id it patches rather than by a row id of its own,
+     * because there is exactly one answer per card and an upsert must not be
+     * able to produce two. `custom` is deliberately NOT indexed: it is a
+     * boolean, IndexedDB has no boolean key type, and an index on one silently
+     * stores nothing — a query against it would look like "no custom cards"
+     * rather than fail. The whole table is small enough to filter.
+     */
+    this.version(8).stores({ patches: 'cardId, game, updatedAt' })
 
     /**
      * Stamped by hook rather than at the ~14 call sites that write collection
@@ -566,8 +582,16 @@ function cardForItem(card: Card, item: CollectionItem): Card {
   )
 }
 
-/** Push a freshly fetched card into every collection/deck row that shows it. */
-export async function applyCardUpdate(card: Card): Promise<void> {
+/**
+ * Push a freshly fetched card into every collection/deck row that shows it.
+ *
+ * The fetch is re-patched on the way in. A price refresh is the one thing that
+ * routinely overwrites a stored card wholesale, so without this the user's own
+ * photo would survive right up until prices went stale and then silently
+ * revert to the catalog's missing one.
+ */
+export async function applyCardUpdate(fresh: Card): Promise<void> {
+  const card = patched(fresh)
   await db.transaction('rw', db.collection, db.deckCards, async () => {
     const items = await db.collection.where('cardId').equals(card.id).toArray()
     for (const item of items) await db.collection.update(item.id, { card: cardForItem(card, item), name: card.name })
@@ -575,6 +599,177 @@ export async function applyCardUpdate(card: Card): Promise<void> {
     for (const row of deckRows) await db.deckCards.update(row.id, { card })
   })
   await recordPricePoint(card)
+}
+
+/* ------------------------------------------------ user-authored card data */
+
+/**
+ * The patch index, held in memory for the whole session.
+ *
+ * Patches have to be readable SYNCHRONOUSLY. `CardImg` renders in a hundred
+ * places and cannot await a Dexie round trip to decide whether the user
+ * already supplied the picture the catalog is missing — an async lookup there
+ * would flash the grey fallback on every scroll. The table is one row per card
+ * the user has personally touched, so it is small by construction; the cost is
+ * one read at boot and a map write per edit.
+ *
+ * `loadPatches()` is awaited by boot before the first render. Until then the
+ * map is empty, which degrades to exactly today's behaviour rather than to
+ * anything wrong.
+ */
+const patchIndex = new Map<string, CardPatch>()
+const patchListeners = new Set<() => void>()
+/** Bumped on every index change, so `useSyncExternalStore` has a snapshot. */
+let patchRevision = 0
+
+function notifyPatches(): void {
+  patchRevision++
+  for (const listener of patchListeners) listener()
+}
+
+export function subscribePatches(listener: () => void): () => void {
+  patchListeners.add(listener)
+  return () => patchListeners.delete(listener)
+}
+
+export function patchRevisionSnapshot(): number {
+  return patchRevision
+}
+
+/** Fill the in-memory index from Dexie. Called once at boot. */
+export async function loadPatches(): Promise<void> {
+  const rows = await db.patches.toArray()
+  patchIndex.clear()
+  for (const row of rows) {
+    const clean = sanitizePatch(row)
+    if (clean) patchIndex.set(clean.cardId, clean)
+  }
+  notifyPatches()
+}
+
+/** The patch for one card, if the user (or the shared index) has one. */
+export function patchFor(cardId: string): CardPatch | undefined {
+  return patchIndex.get(cardId)
+}
+
+/** Lay any local patch over a card. The one call every read path should use. */
+export function patched(card: Card): Card {
+  return mergePatch(card, patchIndex.get(card.id))
+}
+
+/** Lay patches over a list of cards. */
+export function patchedAll(cards: Card[]): Card[] {
+  return mergePatches(cards, patchIndex)
+}
+
+/**
+ * Write a patch and push it through everything already holding a copy of the
+ * card.
+ *
+ * The second half is not optional. `Card` is denormalized into collection
+ * rows, deck rows and the scan tray (see `applyCardUpdate`), so a patch that
+ * only updated the index would fix the card sheet and leave the collection
+ * grid showing the same grey rectangle the user just fixed. One write, every
+ * surface — the same contract a price refresh has.
+ */
+export async function savePatch(raw: CardPatch): Promise<CardPatch | null> {
+  const patch = sanitizePatch(raw)
+  if (!patch) {
+    await deletePatch(raw?.cardId)
+    return null
+  }
+  const previous = patchIndex.get(patch.cardId)
+  await db.patches.put(patch)
+  patchIndex.set(patch.cardId, patch)
+  notifyPatches()
+  await repatchStoredCard(patch.cardId, previous)
+  return patch
+}
+
+/** Drop a patch: the card goes back to whatever its catalog says. */
+export async function deletePatch(cardId: string | undefined): Promise<void> {
+  if (!cardId) return
+  // Read the outgoing patch BEFORE dropping it: the stored copies of the card
+  // carry its image baked in, and peeling that back off needs to know what it
+  // was. Deleting first is how an undo leaves the picture it was undoing.
+  const previous = patchIndex.get(cardId)
+  patchIndex.delete(cardId)
+  await db.patches.delete(cardId)
+  if (previous) {
+    notifyPatches()
+    await repatchStoredCard(cardId, previous)
+  }
+}
+
+/**
+ * Re-stamp the stored copies of one card after its patch changed.
+ *
+ * Deliberately re-derives from the row's own card rather than from a catalog
+ * fetch: this runs offline, and the point is to apply an edit the user just
+ * made, not to spend a network request confirming it.
+ */
+async function repatchStoredCard(cardId: string, previous?: CardPatch): Promise<void> {
+  await db.transaction('rw', db.collection, db.deckCards, db.scans, async () => {
+    const items = await db.collection.where('cardId').equals(cardId).toArray()
+    for (const item of items) {
+      const card = patched(basePatchTarget(item.card, previous))
+      await db.collection.update(item.id, { card: cardForItem(card, item), name: card.name })
+    }
+    const deckRows = await db.deckCards.where('cardId').equals(cardId).toArray()
+    for (const row of deckRows) await db.deckCards.update(row.id, { card: patched(basePatchTarget(row.card, previous)) })
+    // The scan tray is not indexed by cardId and does not need to be: it is
+    // capped at 30 rows (SCAN_TRAY_LIMIT), so a filter is cheaper than the
+    // schema version an index would cost.
+    const scans = await db.scans.filter((scan) => scan.cardId === cardId).toArray()
+    for (const scan of scans) await db.scans.update(scan.id, { card: patched(basePatchTarget(scan.card, previous)) })
+  })
+}
+
+/**
+ * A stored card with any PREVIOUS patch peeled back off.
+ *
+ * Without this, removing a patch would leave the old edit frozen into every
+ * stored copy: `mergePatch` overwrites in place, so the catalog's own values
+ * are gone from the denormalized copy the moment a patch is written over it.
+ * `unmergePatch` puts back exactly what the patch remembers covering, which is
+ * why `CardPatch.base` exists.
+ */
+function basePatchTarget(card: Card, previous?: CardPatch): Card {
+  if (!card.patched) return card
+  return unmergePatch(card, previous)
+}
+
+/**
+ * Cards that exist only because the user described them — the local catalog.
+ *
+ * Same idea as sports' "local recall is the catalog": with no upstream to
+ * search, the cards this user typed in ARE the search index for them, and it
+ * needs no network.
+ */
+export async function customCards(game?: Game): Promise<Card[]> {
+  const rows = await db.patches.toArray()
+  return rows
+    .filter((row) => row.custom && (!game || row.game === game))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map((row) => customCard(row.game, row.fields, row.image))
+}
+
+const CUSTOM_SEARCH_LIMIT = 20
+
+/** Free-text search over the user's own cards, merged into normal results. */
+export async function searchCustomCards(game: Game, query: string): Promise<Card[]> {
+  const q = query.trim().toLowerCase()
+  if (q.length < 2) return []
+  const cards = await customCards(game)
+  return cards
+    .filter((card) =>
+      [card.name, card.setName, card.setCode, card.number, card.typeLine]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    )
+    .slice(0, CUSTOM_SEARCH_LIMIT)
 }
 
 const SCAN_TRAY_LIMIT = 30
@@ -675,6 +870,13 @@ export interface Backup {
   friends: Friend[]
   trades: TradeRecord[]
   wants: WantRow[]
+  /**
+   * User-authored card data. Optional on the way IN — every backup written
+   * before v8 lacks it and must still restore — but always written on the way
+   * out. A photo the user took of their own card exists nowhere else in the
+   * world, so leaving it out of the backup would make "restore" quietly lossy.
+   */
+  patches?: CardPatch[]
 }
 
 export async function exportBackup(): Promise<Backup> {
@@ -689,6 +891,7 @@ export async function exportBackup(): Promise<Backup> {
     friends: await db.friends.toArray(),
     trades: await db.trades.toArray(),
     wants: await db.wants.toArray(),
+    patches: await db.patches.toArray(),
   }
 }
 
@@ -817,6 +1020,14 @@ export function sanitizeBackup(raw: unknown): Backup {
     if (want) wants.push(want)
   }
 
+  const patches: CardPatch[] = []
+  for (const entry of asArray(raw.patches)) {
+    // Same sanitizer a pasted link and the shared index go through: a backup
+    // is an outside document, and an image in one is a URL the app will render.
+    const patch = sanitizePatch(entry)
+    if (patch) patches.push(patch)
+  }
+
   return {
     app: 'cardstock',
     version: 1,
@@ -828,6 +1039,7 @@ export function sanitizeBackup(raw: unknown): Backup {
     friends,
     trades,
     wants,
+    patches,
   }
 }
 
@@ -835,7 +1047,7 @@ export async function importBackup(raw: unknown): Promise<void> {
   const backup = sanitizeBackup(raw)
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants, db.tombstones],
+    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants, db.tombstones, db.patches],
     async () => {
       await db.collection.bulkPut(backup.collection)
       // Restoring a row is the user un-deleting it. Leave the tombstone in
@@ -848,14 +1060,29 @@ export async function importBackup(raw: unknown): Promise<void> {
       await db.friends.bulkPut(backup.friends)
       await db.trades.bulkPut(backup.trades)
       await db.wants.bulkPut(backup.wants)
+      if (backup.patches?.length) await db.patches.bulkPut(backup.patches)
     },
   )
+  // The in-memory index is now behind the table it mirrors.
+  if (backup.patches?.length) await loadPatches()
 }
 
 export async function clearAllData(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.scans, db.catalogs, db.friends, db.trades, db.wants, db.tombstones],
+    [
+      db.collection,
+      db.decks,
+      db.deckCards,
+      db.history,
+      db.scans,
+      db.catalogs,
+      db.friends,
+      db.trades,
+      db.wants,
+      db.tombstones,
+      db.patches,
+    ],
     async () => {
       await Promise.all([
         // Tombstones are cleared, never written, by an erase — see tombstone().
@@ -870,7 +1097,9 @@ export async function clearAllData(): Promise<void> {
         db.friends.clear(),
         db.trades.clear(),
         db.wants.clear(),
+        db.patches.clear(),
       ])
     },
   )
+  await loadPatches()
 }

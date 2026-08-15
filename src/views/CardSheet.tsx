@@ -7,6 +7,7 @@ import { Sheet } from '../components/Sheet'
 import { amountBucket, track } from '../lib/analytics'
 import { canBuyFrom, marketReady, startCheckout } from '../lib/marketplace'
 import { printingVariants, refreshCard } from '../lib/cardsearch'
+import { isCustomCard, needsImage } from '../lib/cardpatch'
 import {
   addCardToDeck,
   addToCollection,
@@ -120,6 +121,7 @@ function useDeckMembership(cardId: string) {
 function CardSheet() {
   const sheet = useUi((s) => s.sheet)!
   const toast = useUi((s) => s.toast)
+  const openEditor = useUi((s) => s.openEditor)
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const [card, setCard] = useState(sheet.card)
@@ -377,6 +379,7 @@ function CardSheet() {
         <div className="cardsheet__title">
           <div className="cardsheet__gamerow">
             <span className={`gamechip gamechip--${card.game}`}>{GAME_LABEL[card.game]}</span>
+            {isCustomCard(card) && <span className="raritychip raritychip--own">Added by you</span>}
             {sealed ? (
               <span className="raritychip">{card.sealed?.kind ?? 'Sealed'}</span>
             ) : (
@@ -411,6 +414,12 @@ function CardSheet() {
                 <Icon name="heart" size={13} filled={!!wanted} /> {wanted ? 'On your want list' : 'Want'}
               </button>
             )}
+            {/* The card has no art anywhere, so offer the one thing that fixes
+                it. Phrased as help rather than as an error: nothing is broken,
+                the catalog simply never had a picture. */}
+            <button className="ownedchip ownedchip--fix" onClick={() => openEditor({ card })}>
+              <Icon name="camera" size={13} /> {needsImage(card) ? 'Add a picture' : 'Fix this card'}
+            </button>
           </span>
         </div>
       </header>

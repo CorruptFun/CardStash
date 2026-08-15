@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Modal, Toggle } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
+import { isSignedIn } from '../lib/authsession'
+import { cardSourceAvailable, clearCardSourceMisses } from '../lib/cardsource'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
-import { clearAllData } from '../lib/db'
+import { clearAllData, db } from '../lib/db'
 import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
@@ -142,6 +145,7 @@ export function SettingsView() {
             : ' With cloud rescue off, no image ever leaves this device.'}
         </p>
       </section>
+      <CardSourceSection />
       <CloudSync />
       <section className="setsec">
         <h3>Data</h3>
@@ -376,5 +380,69 @@ export function SettingsView() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+/**
+ * The card index: what the app asks for, and what it gives back.
+ *
+ * Two switches rather than one, deliberately, and the same shape as hosted
+ * social's `socialConfigured()` / `socialPublishing()` split: benefiting from
+ * other collectors' work and contributing your own photos are different
+ * decisions with different consequences, and bundling them would mean getting
+ * a picture costs you a decision about publishing your own.
+ */
+function CardSourceSection() {
+  const config = useSettings()
+  const toast = useUi((s) => s.toast)
+  const custom = useLiveQuery(() => db.patches.filter((row) => row.custom === true).count(), [])
+  const patches = useLiveQuery(() => db.patches.count(), [])
+  if (!cardSourceAvailable()) return null
+  return (
+    <section className="setsec">
+      <h3>Card pictures &amp; details</h3>
+      <p className="setsec__note">
+        Some cards have no picture in any catalog, and some cards aren’t in one at all. You can photograph and describe
+        those yourself on the card’s screen — that always works, offline, with no account.
+        {patches ? ` You’ve fixed ${patches} card${patches === 1 ? '' : 's'} so far${custom ? `, ${custom} of which you added from scratch` : ''}.` : ''}
+      </p>
+      <div className="setrow">
+        <div className="setrow__text">
+          <span>Fill in missing pictures</span>
+          <em>
+            When a card has no picture at all, ask Cardstock’s card index whether another collector has photographed
+            it. Sends only the card’s id, never your account — and never for cards that already have art.
+          </em>
+        </div>
+        <Toggle
+          on={config.cardSourceLookup}
+          onChange={(cardSourceLookup) => {
+            config.set({ cardSourceLookup })
+            // Turning it back on clears the "nobody has this" cache, so the
+            // answer is not stale for days after the user changed their mind.
+            if (cardSourceLookup) void clearCardSourceMisses()
+          }}
+          label="Fill in missing pictures"
+        />
+      </div>
+      <div className="setrow">
+        <div className="setrow__text">
+          <span>Contribute what I add</span>
+          <em>
+            Offer your pictures and details to other collectors by default. Each card still asks before anything is
+            sent, and your name, handle and collection are never included. Needs an account so a bad contribution can
+            be traced and removed.
+          </em>
+        </div>
+        <Toggle
+          on={config.cardSourceShare}
+          onChange={(cardSourceShare) => {
+            config.set({ cardSourceShare })
+            if (cardSourceShare && !isSignedIn()) toast('Sign in on the Friends screen to contribute', 'info')
+          }}
+          label="Contribute what I add"
+        />
+      </div>
+    </section>
   )
 }

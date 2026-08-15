@@ -166,8 +166,73 @@ export interface Card {
   sealed?: SealedInfo
   /** Present when this is a sports card, carrying what it was identified by. */
   sports?: SportsInfo
+  /**
+   * A `CardPatch` has been laid over this card — a user-supplied image, edited
+   * fields, or both (see `cardpatch.ts`). Display-only: never stored on the
+   * card, never sent anywhere, and recomputed on every merge, so a stale
+   * `true` on a card read back from Dexie means nothing and costs nothing.
+   */
+  patched?: boolean
   prices: Prices
   links: CardLinks
+}
+
+/**
+ * The subset of `Card` a user (or the shared index) may fill in or correct.
+ * Kept separate from `Card` so the sanitizer in `cardpatch.ts` has exactly one
+ * list to enforce — anything not named here cannot be patched.
+ */
+export interface CardFields {
+  name?: string
+  setName?: string
+  setCode?: string
+  number?: string
+  rarity?: string
+  /** YYYY-MM-DD. A bare year the user typed is widened to Jan 1. */
+  releasedAt?: string
+  typeLine?: string
+  subtext?: string
+}
+
+/**
+ * One card's local override: the picture the catalogs did not have, and the
+ * details the user filled in themselves.
+ *
+ * An overlay, not a replacement — see `cardpatch.ts`. Rows keyed by the card
+ * id they patch, which for a card no catalog lists is a `custom-…` id minted
+ * from the printed facts.
+ */
+export interface CardPatch {
+  /** `${game}:${apiId}` — the card this patches. Primary key. */
+  cardId: string
+  game: Game
+  /** The user's photo as a `data:image/*;base64` URL, downscaled on the way in. */
+  image?: string
+  /** Fingerprint of `image`, for dedupe against the shared index. */
+  imageHash?: string
+  /** Only the keys the user actually changed. */
+  fields: CardFields
+  /**
+   * What the card said before this patch, for exactly the keys in `fields`.
+   *
+   * Undo needs it. A stored `Card` is denormalized into collection and deck
+   * rows, so once a patch is written over one the catalog's values are gone
+   * from that copy — and "re-fetch it" is not an answer offline, nor for a
+   * card no catalog lists. Keys absent here were absent on the card too.
+   */
+  base?: CardFields
+  /** The catalog image the patch's photo covered, restored on undo. */
+  baseImage?: string
+  baseImageLarge?: string
+  /** This card exists nowhere but here — the patch IS the card. */
+  custom?: boolean
+  /** Authored on this device, or pulled from the shared card index. */
+  origin: 'local' | 'community'
+  /** The user chose to contribute this to the shared index. */
+  shared?: boolean
+  /** When the shared index last accepted it. */
+  sharedAt?: number
+  updatedAt: number
 }
 
 /** One row of the collection: copies of one printing of a card in a given finish+condition. */

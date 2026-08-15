@@ -796,3 +796,79 @@ identical to a new user — which is precisely the mistake that caused this.
 that safe, so the change is a `rename_handle()` RPC that inserts the new claim
 while leaving the old row standing, plus copy that is honest about the old
 handle never coming back. Do not implement it by relaxing `set_profile`.
+
+---
+
+### 22. The user is a card source, and so are we
+
+**The problem, stated plainly.** Every card in this app comes out of somebody
+else's catalog, and those catalogs have two holes no amount of client work can
+close. Rows with **no picture** — TCGCSV ships them constantly, promos and
+Japanese prints frequently have none — and cards in **no catalog at all**:
+regional promos, prereleases the APIs have not caught up with, error prints,
+playtest cards, unlisted sealed product. The first looks like a broken app (a
+binder of grey rectangles, with the name sitting right there). The second is
+worse: the scan misses, search finds nothing, and the collection cannot hold
+the card the user is physically holding. Neither has a fix that can be bought
+or waited for, because nobody is coming to fill these gaps.
+
+**The decision.** The user fills them. `cardpatch.ts` lets anyone attach a
+photo and type what a card is, and that fix is a first-class card afterwards —
+it scans, searches, sits in decks, rides the backup and the vault. And the
+fixes people choose to contribute pool into `card_data` on our own project
+(migration 0013), so the next person to scan that promo gets the answer for
+free. That is the whole ambition of this one: an app that was a consumer of
+five catalogs becomes a source of card information in its own right, out of
+work its users were already doing for themselves.
+
+**Overlay, not replacement, and that is the load-bearing shape.** A patch lays
+over the catalog's card instead of forking it. Prices keep refreshing
+underneath, an upstream correction still lands, only the changed keys are
+stored, and undo is exact because the patch remembers what each key said
+before. The alternative — copying the card and editing the copy — would have
+been simpler for a week and then permanently wrong: every patched card would
+have stopped tracking its own price.
+
+**A custom card carries no prices, ever.** Same rule as sports (decision 17)
+and for the same reason: no feed exists for a card nobody lists, and a made-up
+number about someone's money is worse than an empty one. Value comes from
+`CollectionItem.marketValue`.
+
+**The id is the contract, again.** `customSlug` mints an id from the printed
+facts so two devices describing the same card agree on what it is called —
+which is what makes the shared index possible at all, and what makes changing
+that function a rename of every custom card anyone owns.
+
+**Reading is anonymous; writing is not.** This asymmetry is the security model.
+`lookup_card_data()` is granted to `anon` and called with the publishable key
+and **never the session JWT** — the decision 20 rule, for the same reason: what
+card someone is looking at must not become a row tied to their account, and it
+has to work signed out because the free path is signed out. `submit_card_data()`
+requires `auth.uid()`, is rate limited, and allows one row per person per card,
+because contributing is the only operation here that can hurt anyone: a wrong
+picture propagates to every device that asks. Per-submitter rows rather than
+one global row per card is what keeps the index from being first-write-wins,
+where the first blurry photo could never be improved on.
+
+**Two switches, not one.** `cardSourceLookup` defaults **on** — it sends a card
+id and gets a picture back, the same class of request already made to Scryfall
+on every search, and it only ever fires for a card with no art. `cardSourceShare`
+defaults **off**, and the editor asks again on the card itself, because a photo
+of a card is a photo someone took in their home. Same split as
+`socialConfigured()` vs `socialPublishing()` (decision 16), same reason:
+benefiting from the pool and feeding it are different decisions.
+
+**What it costs.** A moderation surface we did not have — `flag_card_data()`,
+three votes to hide, `service_role` to drop a bad contributor — and a table
+whose contents are only as good as the people filling it. And bytes: images are
+capped at ~220 KB after a downscale-and-requantize ladder, because the same
+bytes ride IndexedDB, the JSON backup and the vault. That cap is why patches
+are stripped out of binder shares (`httpsImage`) rather than travelling in a
+`#/x?d=…` link.
+
+**What would reopen it.** A real catalog appearing for the missing categories,
+which would make the local half redundant for those games but not the shared
+index. Or contributions arriving faster than one person can moderate, at which
+point the flag threshold stops being enough and this needs a review queue —
+that is a scale problem to solve when it exists, not a reason to build a
+moderation console for a table with nothing in it.

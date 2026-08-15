@@ -137,6 +137,28 @@ refreshes that row instead of stacking a duplicate tile.
   reader-checked TTL. Currently TCGplayer categories and per-game group
   indexes. `kvGet`/`kvPut` fail soft: quota noise reads as a cache miss.
 
+### `CardPatch` — the picture and details a catalog never had
+
+Keyed by the `cardId` it patches (one row per card, so an upsert cannot produce
+two). Holds `image` (a bounded `data:` URL), `imageHash`, `fields` (only the
+keys the user changed), `base` + `baseImage` (what those keys said before, so
+undo is exact and works offline), `custom` (this card exists nowhere else),
+`origin` (`local` | `community`) and `shared`/`sharedAt`.
+
+Rules that hold everywhere it is used, all enforced in `lib/cardpatch.ts`:
+
+- **Overlay, never replacement** — `mergePatch` lays the patch over the
+  catalog's card; prices are never patchable, and `Card.patched` is a
+  display-only marker recomputed on every merge.
+- **Only inline rasters** — `sanitizeImage` accepts `data:image/(png|jpeg|webp)`
+  under `MAX_IMAGE_BYTES` and nothing else. Remote URLs, `blob:` and SVG are
+  refused because this value becomes an `<img src>` in a dozen places.
+  `baseImage` has its own gate (`https:` only), for the same reason in reverse.
+- **`custom-…` ids are minted from the printed facts** and must stay stable —
+  changing `customSlug` renames every custom card anyone owns.
+- Custom cards carry **no prices**, like sports cards, and are skipped by
+  `refreshCard` and the bulk refresh.
+
 ### Social types
 
 `SharedCard` is the wire form of a collection row: printing identity, finish,
@@ -170,6 +192,8 @@ function.
 | 4 | `cache: 'key'` — small keyed caches (group lists) |
 | 5 | `friends: 'id, addedAt'`, `trades: 'id, friendId, status, createdAt'` |
 | 6 | `wants: 'key, game, addedAt'` |
+| 7 | `collection` gains `updatedAt`, `tombstones: 'id, at'`; **upgrade** backfills `updatedAt` from `addedAt` |
+| 8 | `patches: 'cardId, game, updatedAt'` — user-authored card images and fields. `custom` is deliberately **not** indexed: it is a boolean, IndexedDB has no boolean key type, and an index on one silently stores nothing |
 
 Adding a version: append a `this.version(n).stores({...})` block, never edit an
 existing one, and supply `.upgrade()` if stored rows need reshaping. See
@@ -195,6 +219,13 @@ collection rows must uphold them.
    stale link tapped twice is inert.
 7. `removeFriend` deliberately leaves trades intact — a trade carries its own
    copy of the name and cards, so it survives unfollowing.
+8. A patch write goes through `savePatch`/`deletePatch`, never `db.patches`
+   directly. Both keep the in-memory index in step and re-stamp the
+   denormalized `card` on every collection, deck and scan row for that card —
+   otherwise a fix would land on the card sheet and leave the collection grid
+   showing the picture the user just replaced. `deletePatch` reads the outgoing
+   patch **before** dropping it, because peeling an edit back off needs to know
+   what it covered.
 
 ## Settings (`src/lib/settings.ts`)
 
@@ -215,6 +246,8 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `pokemonKey` | pokemontcg.io key, from `VITE_POKEMON_KEY` at build time — **not user-editable**, and `merge()` always takes the build's value over a persisted one. `geminiKey`/`geminiModel` are gone: the deck builder runs on our key through `build-deck`. |
 | `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
+| `cardSourceLookup` (`true`) | May the app ask the shared card index about cards that have **no picture at all** (`lib/cardsource.ts`)? On by default: it sends a card id and gets a picture back, the same class of request already made to Scryfall on every search, aimed at our project instead of theirs — never the session token, never a background sweep, never for a card that already has art. |
+| `cardSourceShare` (`false`) | May the pictures and details this user fills in be contributed back? Off by default, and the switch that matters: a photo of a card is a photo the user took, and publishing it is a decision. The editor asks again per card on top of this. |
 
 **Session tokens are deliberately NOT here.** They live under their own
 `cardstock-cloud-session` localStorage key so they can never be swept into a
@@ -239,9 +272,15 @@ directly.
 {
   "app": "cardstock", "version": 1, "exportedAt": "<ISO>",
   "collection": [...], "decks": [...], "deckCards": [...],
-  "history": [...], "friends": [...], "trades": [...], "wants": [...]
+  "history": [...], "friends": [...], "trades": [...], "wants": [...],
+  "patches": [...]
 }
 ```
+
+`patches` is optional on the way **in** (every backup written before v8 lacks
+it) and always written on the way **out** — a photo the user took of their own
+card exists nowhere else in the world, so omitting it would make "restore"
+quietly lossy.
 
 `importBackup()` runs everything through `sanitizeBackup()` first and then
 `bulkPut`s into one transaction (a merge, not a replace). Sanitization is
@@ -254,6 +293,8 @@ defensive by construction — a backup file is untrusted input:
   back to `mtg` / `nonfoil` / `NM`;
 - quantities floor to non-negative integers, `forTrade` re-clamps, prices must
   be finite and positive, `addedAt` must be a plausible timestamp;
+- patches go through `sanitizePatch`, so an image in a backup file is held to
+  the same rule as one from a stranger's link;
 - friends, trades and wants go through the **same sanitizers `social.ts` uses
   for pasted links** (`sanitizeFriendRecord`, `sanitizeTradeRecord`,
   `sanitizeWantRecord`) — one validation implementation, not two.

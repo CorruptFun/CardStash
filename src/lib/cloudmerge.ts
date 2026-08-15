@@ -151,6 +151,10 @@ export function mergeBackups(local: Backup, remote: Backup): MergeResult {
     friends: mergeTable(local.friends, remote.friends, byField('id'), 'addedAt', remoteWins, report),
     trades: mergeTable(local.trades, remote.trades, byField('id'), 'createdAt', remoteWins, report),
     wants: mergeTable(local.wants, remote.wants, byField('key'), 'addedAt', remoteWins, report),
+    // One patch per card, keyed by the card it patches, and it carries its own
+    // `updatedAt` — so the device that most recently corrected a card wins,
+    // regardless of which vault is newer overall.
+    patches: mergeTable(local.patches ?? [], remote.patches ?? [], byField('cardId'), 'updatedAt', remoteWins, report),
   }
   return { merged, report }
 }

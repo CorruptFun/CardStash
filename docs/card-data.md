@@ -156,6 +156,89 @@ and never a dependency:
   the page regardless of the token. That is why `PsaOutcome` makes every
   failure mode a first-class value rather than a thrown error.
 
+## Cards the catalogs got wrong, and cards they never had
+
+Every source above assumes the card exists upstream. Two holes make that false
+often enough to be ordinary rather than exotic:
+
+- **A card with no picture.** TCGCSV rows ship without an image constantly,
+  promos and Japanese prints frequently have none, and a binder of grey
+  rectangles reads to a user as a broken app rather than as a gap in someone
+  else's database.
+- **A card in no catalog at all.** Regional promos, prereleases before the API
+  catches up, error prints, playtest cards, unlisted sealed product. The scan
+  misses, search finds nothing, and the collection cannot hold the card the
+  user is physically holding.
+
+`lib/cardpatch.ts` closes both with a **`CardPatch`**: a user-supplied image
+plus the fields they filled in, stored in Dexie keyed by the card id it
+patches. Two things about its shape are load-bearing:
+
+- **It is an overlay, not a replacement.** `mergePatch` lays the patch over
+  whatever the catalog said, so prices keep refreshing underneath it, a
+  correction upstream still arrives, and one tap puts the original back.
+  `fieldsDiff` stores only what actually changed, and `base` remembers what
+  each changed key said before — which is what makes undo exact and offline
+  (`unmergePatch`). Prices are never patchable.
+- **The id is the contract**, exactly as it is for sports. For a card that
+  exists upstream the key is the catalog's own id. For a card that exists
+  nowhere, `customSlug` mints `custom-<set>-<number>-<name>` from the printed
+  facts, so two devices describing the same card agree on what it is called.
+  Changing that slug renames every custom card anyone owns.
+
+A **custom card carries no prices at all**, for the same reason a sports card
+does not: no feed exists for a card nobody lists, and inventing a number about
+someone's money is worse than showing none. Value comes from
+`CollectionItem.marketValue`. `refreshCard` and the bulk refresh both skip
+custom cards rather than counting them as failures.
+
+Where patches are applied: `cardsearch.ts` patches everything it returns
+(`searchGame`, `matchGame`, `cardById`, `printingVariants`), `db.ts` re-stamps
+the denormalized copies in collection/deck/scan rows whenever a patch changes,
+and `CardImg` applies the index at render as the last backstop for cards that
+never went through the facade (a friend's binder, the demo seed). The index
+itself is in-memory and loaded at boot, because `CardImg` renders in a hundred
+places and cannot await Dexie to decide whether a picture exists.
+
+Images are bounded on the way in by `lib/cardimage.ts`: EXIF-correct decode
+through the scan pipeline's own decoder, downscaled to 720px on the long edge
+(catalog art is ~745), encoded WebP where available and JPEG otherwise, and
+walked down a quality/scale ladder until it fits `MAX_IMAGE_BYTES` (~220 KB).
+They are `data:` URLs rather than Blobs because a patched card has to render
+offline from a plain `<img src>`, survive a JSON export, and mean the same
+thing after a sync. Patches ride the backup and the vault; they are deliberately
+**stripped from binder shares and want lists** (`httpsImage` in `social.ts`) —
+a photo taken in someone's home is not a side effect of sharing a binder.
+
+### The shared card index (`lib/cardsource.ts`)
+
+The same fixes, pooled: `supabase/migrations/0013` holds `card_data`, and the
+app becomes a source of card information rather than only a consumer of five.
+Four rules, all deliberate:
+
+1. **Lookups are anonymous.** `lookup_card_data()` is granted to `anon` and
+   called with the publishable key, never the session JWT — the decision 20
+   rule, for the same reason. It also has to work signed out, because the free
+   path is signed out.
+2. **Writes are attributed.** `submit_card_data()` requires `auth.uid()`, is
+   rate limited, and upserts one row per person per card. Contributing is the
+   only operation here that can hurt anyone.
+3. **Everything returned is untrusted** and goes through `sanitizePatch`, the
+   same door a pasted link uses (decision 7).
+4. **A local patch always beats a fetched one.** Community rows land as
+   `origin: 'community'` and are skipped whenever the user has said something
+   themselves.
+
+Lookups fire only for cards with no image at all, driven by what is on screen
+(`noteMissingImage` in `CardImg`), debounced and batched, with misses cached
+for three days. Answers are saved as local patch rows, so a card the index
+solved keeps its picture on the next flight. `flag_card_data()` is the
+correction path: one vote per account, three hides a row, and flagging drops
+the local copy immediately.
+
+Two switches, never one: `cardSourceLookup` (on) and `cardSourceShare` (off),
+the same split as `socialConfigured()` vs `socialPublishing()`.
+
 ## The adapter contract
 
 Every source module exposes some subset of:

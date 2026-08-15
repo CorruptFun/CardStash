@@ -52,10 +52,37 @@ export interface SearchPrefill {
   game?: Game
 }
 
+/**
+ * What the card editor was opened on.
+ *
+ * Two modes, and the difference is whether a card already exists: `card` is a
+ * real card being corrected (usually one with no picture), while `create` is a
+ * card that exists nowhere and is about to be described from scratch. The
+ * editor writes a `CardPatch` either way — see `cardpatch.ts`.
+ */
+export interface EditorRequest {
+  /** The card being corrected. Absent when creating one from nothing. */
+  card?: Card
+  /** Creating: which game the new card belongs to. */
+  game?: Game
+  /** Creating: what the scanner or the search box read, as a starting name. */
+  name?: string
+  /**
+   * A picture to start from, already encoded by `cardimage.ts` — the frame a
+   * scan just failed on. Handing it straight to the editor is the difference
+   * between "we couldn't read that" and "here's the photo you just took, tell
+   * us what it is".
+   */
+  image?: string
+}
+
 interface UiState {
   sheet: SheetRequest | null
   openSheet: (req: SheetRequest) => void
   closeSheet: () => void
+  editor: EditorRequest | null
+  openEditor: (req: EditorRequest) => void
+  closeEditor: () => void
   toasts: Toast[]
   toast: (text: string, kind?: ToastKind, action?: ToastAction, ms?: number) => void
   dismissToast: (id: number) => void
@@ -72,6 +99,9 @@ export const uiStore = createStore<UiState>((set, get) => ({
   sheet: null,
   openSheet: (sheet) => set({ sheet }),
   closeSheet: () => set({ sheet: null }),
+  editor: null,
+  openEditor: (editor) => set({ editor }),
+  closeEditor: () => set({ editor: null }),
   toasts: [],
   toast: (text, kind = 'info', action, ms) => {
     const id = toastSeq++

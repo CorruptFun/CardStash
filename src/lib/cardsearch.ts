@@ -5,6 +5,9 @@ import { matchSports, searchSports, sportsById, sportsPrintings } from './sports
 import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
 import { sealedVariants } from './sealed'
 import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
+import { CUSTOM_PREFIX, customCard, isCustomCard } from './cardpatch'
+import { isAbort } from './fetchJson'
+import { patched, patchedAll, patchFor, searchCustomCards } from './db'
 import type { Card, Game } from './types'
 import { nameScore, normalizeName, sleep } from './util'
 
@@ -19,7 +22,7 @@ export interface ApiKeys {
   thorough?: boolean
 }
 
-export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+function searchSource(game: Game, query: string, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
   switch (game) {
     case 'mtg':
       return searchMtg(query, signal)
@@ -37,7 +40,53 @@ export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal
   }
 }
 
-export function matchGame(
+/**
+ * Free-text search: the game's catalog, plus the cards this user added
+ * themselves.
+ *
+ * The user's own cards come FIRST and are never dropped by the result cap. A
+ * card someone typed in by hand exists because no catalog had it, so burying
+ * it under forty catalog near-misses would make the feature look broken to the
+ * one person guaranteed to be looking for it.
+ *
+ * When the API fails, local hits are returned INSTEAD of the error — they need
+ * no network and they are real answers to what was typed. The cost is honest
+ * and small: an outage that happens to match a local card looks like a thin
+ * result set rather than a failure. With no local hits the error propagates
+ * unchanged, so the search screen still explains itself. An abort always
+ * rethrows: a cancelled search must not resolve as a result set.
+ */
+export async function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+  // Both start together — the local read must not delay the network call.
+  const local = searchCustomCards(game, query).catch(() => [] as Card[])
+  const source = searchSource(game, query, keys, signal)
+  // Claim the rejection now: it may be swallowed below, and an unhandled one
+  // in the meantime is a console error users would see for a handled case.
+  source.catch(() => {})
+
+  const mine = await local
+  let found: Card[] = []
+  try {
+    found = await source
+  } catch (err) {
+    if (!mine.length || isAbort(err) || signal?.aborted) throw err
+  }
+  const seen = new Set(mine.map((card) => card.id))
+  return [...mine, ...patchedAll(found).filter((card) => !seen.has(card.id))]
+}
+
+export async function matchGame(
+  game: Game,
+  name: string,
+  setCode?: string | null,
+  number?: string | null,
+  keys: ApiKeys = {},
+): Promise<Card | null> {
+  const found = await matchSource(game, name, setCode, number, keys)
+  return found ? patched(found) : found
+}
+
+function matchSource(
   game: Game,
   name: string,
   setCode?: string | null,
@@ -60,7 +109,18 @@ export function matchGame(
   }
 }
 
-export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise<Card | null> {
+export async function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise<Card | null> {
+  // A card the user described themselves has no upstream to ask. Its patch IS
+  // the card, so it resolves out of the local table and never hits a network.
+  if (apiId.startsWith(CUSTOM_PREFIX)) {
+    const patch = patchFor(`${game}:${apiId}`)
+    return patch ? customCard(patch.game, patch.fields, patch.image) : null
+  }
+  const found = await cardByIdSource(game, apiId, keys)
+  return found ? patched(found) : found
+}
+
+function cardByIdSource(game: Game, apiId: string, keys: ApiKeys = {}): Promise<Card | null> {
   // Sealed product ids (`tp-…`) can't be resolved without their group — those
   // refresh through refreshCard, which has the full card.
   if (apiId.startsWith('tp-')) return Promise.resolve(null)
@@ -82,6 +142,9 @@ export function cardById(game: Game, apiId: string, keys: ApiKeys = {}): Promise
 
 /** Re-fetch a card from its source API for fresh prices. */
 export function refreshCard(card: Card, keys: ApiKeys = {}): Promise<Card | null> {
+  // Nothing upstream to refresh from, and nothing to refresh: a card no
+  // catalog lists has no price feed either (see cardpatch.ts).
+  if (isCustomCard(card)) return Promise.resolve(null)
   if (card.sealed) return sealedRefresh(card)
   return cardById(card.game, card.apiId, keys)
 }
@@ -92,7 +155,9 @@ export function refreshCard(card: Card, keys: ApiKeys = {}): Promise<Card | null
  * them as a failure. They surface as "skipped", which is what they are.
  */
 function refreshable(card: Card): boolean {
-  return card.game !== 'sports'
+  // Custom cards join sports for the same reason: no feed exists, so counting
+  // them as failures would report a bulk refresh as broken when it worked.
+  return card.game !== 'sports' && !isCustomCard(card)
 }
 
 const MTG_BATCH = 75
@@ -257,6 +322,8 @@ const variantsCache = new Map<string, { at: number; cards: Card[] }>()
  * when the scanner's best guess isn't the copy in their hand.
  */
 export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+  // A card the user typed in has exactly one printing: the one in their hand.
+  if (isCustomCard(card)) return [card]
   // Sealed: the "variants" are the set's other products (pack ↔ box ↔ bundle).
   if (card.sealed) return withCurrent(await sealedVariants(card, signal), card)
   const cacheKey = `${card.game}|${normalizeName(card.name)}`
@@ -287,7 +354,9 @@ export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: 
       cards = await catalogPrintings(card.game, card.name, signal)
   }
   variantsCache.set(cacheKey, { at: Date.now(), cards })
-  return withCurrent(cards, card)
+  // Patches apply AFTER the cache write, so turning one off takes effect on the
+  // next render rather than ten minutes later.
+  return withCurrent(patchedAll(cards), card)
 }
 
 /** Make sure the printing the sheet opened on is present in the list. */

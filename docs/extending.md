@@ -128,11 +128,25 @@ works:
    `this.version(n).stores({...})` block (never edit an existing one), and add
    `.upgrade()` if stored rows need reshaping.
 3. Add the table to `exportBackup`, `sanitizeBackup`/`importBackup` and
-   `clearAllData` — otherwise it silently escapes backup and erase.
-4. If the rows can come from outside the app, write a sanitizer in `social.ts`
-   and reuse it from the backup path. One validation implementation.
-5. Expose CRUD as functions in `db.ts`; views should not touch `db.*` for
-   writes.
+   `clearAllData` — otherwise it silently escapes backup and erase. Make the
+   field **optional on the way in**: every backup written before your version
+   lacks it and must still restore.
+4. Add it to `mergeBackups` in `cloudmerge.ts` too, or it rides the vault
+   one-way and never merges — pick the key and the recency field deliberately
+   (`patches` merges on `cardId` by `updatedAt`, so the device that most
+   recently corrected a card wins regardless of which vault is newer).
+5. If the rows can come from outside the app, write ONE sanitizer and reuse it
+   from every entry point — the backup path, the link path, the server path.
+   It lives with the module that owns the data (`social.ts` for friends and
+   trades, `cardpatch.ts` for card patches); what matters is that there is
+   exactly one implementation, not which file it sits in.
+6. Expose CRUD as functions in `db.ts`; views should not touch `db.*` for
+   writes. If the row is denormalized anywhere else — `Card` is copied into
+   collection, deck and scan rows — the write function owns pushing the change
+   through, the way `savePatch` and `applyCardUpdate` do.
+7. Remember Dexie boolean fields cannot be indexed: IndexedDB has
+   no boolean key type, so `stores({ t: 'id, flag' })` silently indexes nothing
+   and a query against it looks like "no rows" rather than failing.
 
 ---
 

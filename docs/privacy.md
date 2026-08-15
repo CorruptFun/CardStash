@@ -57,6 +57,8 @@ The copy says so.
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
+| the shared card index, `lookup_card_data` | a card with **no picture at all** is on screen | that card's id (`mtg:…`), batched, with the publishable key as `anon` and **no session token** — the lookup is deliberately not tied to an account | on by default (`cardSourceLookup`), and it never fires for a card that already has art |
+| the shared card index, `submit_card_data` | the user ticks "share this" while saving a card | the picture they attached and the fields they typed, plus the session token so a bad contribution can be traced and removed. **Not** their handle, display name, collection, or which cards they own | off by default (`cardSourceShare`), and the editor asks again per card |
 | the Cardstock `stripe-escrow` function | opening a purchase, onboarding as a seller, shipping or confirming an order | the session token, the card id/name and the amounts, or an order id — **never an address**; the function reads one from Stripe and returns it to the seller without storing it | off by default; dormant entirely if the deployment has no Stripe secrets |
 | `checkout.stripe.com` | the buyer is redirected to pay | whatever the buyer types into Stripe's own hosted checkout — card details and shipping address go to Stripe, never through us | only on a deliberate purchase |
 | `connect.stripe.com` | a seller starts Connect onboarding | Stripe's hosted identity verification; **we never see a government ID or a bank number** | only when someone chooses to sell |
@@ -268,6 +270,11 @@ timestamp, and one row per shared card (card id, name, set, number, rarity,
 finish, condition, quantity, for-trade count, an https image URL and the market
 unit price), plus your want list if you have one.
 
+**An https URL, specifically.** A card you photographed yourself carries an
+inline `data:` image, and `httpsImage()` strips it out of both binder rows and
+want rows on the way out. A photo taken on your table is not a side effect of
+sharing a binder — contributing one is its own switch, asked separately.
+
 - With the default `scope: 'trade'` only rows you flagged for trade travel, and
   the quantity shown is the for-trade count — not what you own.
 - Opened sealed products never travel.
@@ -294,3 +301,7 @@ server address, at which point the same payload is `PUT` to that server.
    the `social.ts` sanitizers. There is one validation implementation.
 5. Anything new that persists user content belongs in the `cardstock` DB so
    backup, restore and erase keep covering it.
+6. A user's own photograph is user content. It may ride the backup and the
+   vault, it must be stripped from anything that travels to another person by
+   default, and publishing it needs its own opt-in — never a side effect of a
+   switch that was about something else.

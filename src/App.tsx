@@ -10,6 +10,7 @@ import { shouldShowWelcome } from './lib/onboarding'
 import { warmOwnedCatalogs } from './lib/tcgcsv'
 import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
+import { CardEditorHost } from './components/CardEditor'
 import { CardSheetHost } from './views/CardSheet'
 import { CollectionView } from './views/CollectionView'
 import { DecksView } from './views/DecksView'
@@ -144,6 +145,7 @@ export function App() {
         })}
       </nav>
       <CardSheetHost />
+      <CardEditorHost />
       <Toasts />
       {/* Not over the ingest route: a share link is how most people meet this
           app, and answering someone's trade offer with a signup wall loses

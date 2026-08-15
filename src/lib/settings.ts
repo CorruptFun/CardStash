@@ -166,6 +166,29 @@ export interface Settings {
   socialCursor: number
   /** Last successful social sync. */
   socialAt: number
+  /**
+   * May the app ask the shared card index about cards that have NO picture
+   * (`cardsource.ts`)?
+   *
+   * On by default, and the reasoning is worth stating because the vault and
+   * hosted social both default off. Those publish the user's own data; this
+   * asks a question about a card id and gets a picture back — the same class
+   * of request the app already makes to Scryfall and TCGplayer on every
+   * search, aimed at our own project instead of theirs. It fires ONLY for
+   * cards that have no image at all, never as a background sweep, and never
+   * carries the session token (see rule 1 in cardsource.ts).
+   */
+  cardSourceLookup: boolean
+  /**
+   * May the pictures and details the user fills in be contributed back?
+   *
+   * OFF by default, and this is the switch that matters. A photo of a card is
+   * a photo the user took, in their room, on their table; publishing it is a
+   * decision. Same split as `socialConfigured()` vs `socialPublishing()` —
+   * benefiting from the index and feeding it are separate acts, and the editor
+   * asks again per card on top of this.
+   */
+  cardSourceShare: boolean
   set: (patch: Partial<Settings>) => void
   toggleGame: (game: Game) => void
 }
@@ -207,6 +230,8 @@ export const useSettings = create<Settings>()(
       socialHandle: '',
       socialCursor: 0,
       socialAt: 0,
+      cardSourceLookup: true,
+      cardSourceShare: false,
       set: (patch) => set(patch),
       toggleGame: (game) =>
         set((state) => {

@@ -49,8 +49,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
   after any migration touching `binders`, `friendships`, `trade_offers` or
   `inbox`.
-- `npm run test:unit` — node tests (corner parsing, name candidates, harness
-  stubs). `npm run test:scan` — the real-image scan regression matrix
+- `npm run test:unit` — node tests (corner parsing, name candidates, card
+  patches, harness stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
   machine-generated `harness-fixtures` branch — never merge it).
   `npm run test:photos` runs the hand-curated real photographs in
@@ -94,6 +94,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   backup to storage the user owns, the vault is multi-device sync through a
   project we run. Both are opt-in and both are dormant unless configured; the
   free path must never depend on either.
+  User-authored card data — the picture and details for a card the catalogs got
+  wrong or never had — is `cardpatch.ts` (the pure overlay/slug/sanitizer core),
+  `cardimage.ts` (the bounded encoder) and `cardsource.ts` (the shared index
+  client); see the section below.
   Sealed set matching rules are pure in `sealedmatch.ts` (node-testable);
   the group index merges the "Pokemon Japan" TCGplayer category so Japanese
   packs match by their printed set code ("sv4K").
@@ -104,8 +108,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   resolve to the EN card. Requires picking the game — auto mode has no
   collector rescue. Guards are documented in the `scan-harness` skill.
 - `src/views/` — one file per screen; `CardSheet.tsx` is the card bottom-sheet.
-- `src/store/ui.ts` — UI store: bottom sheet, toasts, search prefill, and
-  `builderSeeds` (cards handed to the AI builder to design around).
+- `src/store/ui.ts` — UI store: bottom sheet, the card editor, toasts, search
+  prefill, and `builderSeeds` (cards handed to the AI builder to design around).
 - `src/styles.css` — the whole stylesheet (BEM-ish, design tokens on `:root`).
   `src/fonts.css` pins the exact font subsets shipped.
 - `src/sw.js` — hand-written service worker; `__BUILD_ID__` and
@@ -169,7 +173,7 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0012 — social is 0000–0004), not
+`supabase/migrations/` (0000–0013 — social is 0000–0004), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
@@ -297,6 +301,51 @@ Also dormant without `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`, as Drive is
 without a client id. `STRIPE_WEBHOOK_SECRET` takes a **comma-separated list** —
 a Connect platform needs two endpoints (platform scope for checkout/charge,
 connected-accounts scope for `account.updated`) and each has its own secret.
+
+## Cards the catalogs got wrong, or never had
+
+A card with **no picture** (TCGCSV ships those constantly) and a card in **no
+catalog at all** (regional promos, prereleases, error prints) are both ordinary,
+and both used to be dead ends. Now the user fixes them: attach a photo, type
+what the card is. `lib/cardpatch.ts` is the pure core, `db.ts` owns the
+`patches` table (Dexie v8) and the in-memory index, `components/CardEditor.tsx`
+is the UI, entered from the card sheet, the search empty state and the scan
+miss (which hands the editor the frame it just failed on). Read decision 22 and
+`docs/card-data.md` before touching any of it.
+
+Four things are load-bearing:
+
+- **A patch is an OVERLAY, never a replacement.** `mergePatch` lays it over the
+  catalog's card, so prices keep refreshing underneath and an upstream fix still
+  arrives. Only changed keys are stored; `base` remembers what they said before,
+  which is what makes undo exact and offline (`unmergePatch`). Prices are never
+  patchable. Never "fix" this by forking the card.
+- **The id is the contract**, as it is for sports. `customSlug` mints
+  `custom-<set>-<number>-<name>` from the printed facts — changing it renames
+  every custom card anyone owns. A custom card carries **no prices at all**, and
+  `refreshCard`/the bulk refresh skip it rather than counting it as a failure.
+- **Writes go through `savePatch`/`deletePatch`, never `db.patches`.** `Card` is
+  denormalized into collection, deck and scan rows, so a patch that only updated
+  the index would fix the sheet and leave the grid showing the old picture.
+  `deletePatch` reads the outgoing patch **before** dropping it — undo needs to
+  know what it covered.
+- **Images are bounded and inline.** `cardimage.ts` downscales to 720px and
+  walks a quality ladder under `MAX_IMAGE_BYTES` (~220 KB); `sanitizeImage`
+  accepts only `data:image/(png|jpeg|webp)` because the value becomes an
+  `<img src>` in a dozen places. They ride the backup and the vault, and are
+  **stripped from binder shares and want lists** (`httpsImage` in `social.ts`) —
+  a `#/x?d=…` link cannot carry them, and publishing someone's photo is not a
+  side effect of sharing a binder.
+
+**The shared index makes us a source, not just a consumer** (`cardsource.ts`,
+migration `0013`). Reading is anonymous — `lookup_card_data()` is granted to
+`anon`, called with the publishable key and **never the session JWT** (the
+decision 20 rule), only for cards with no image at all, driven by what is on
+screen and misses cached three days. Writing is attributed: `submit_card_data()`
+needs `auth.uid()`, is rate limited, and allows one row per person per card.
+Everything the server returns goes through `sanitizePatch`, and **a local patch
+always beats a fetched one**. Two switches: `cardSourceLookup` (on) and
+`cardSourceShare` (off) — don't collapse them.
 
 ## Sports cards have no catalog
 

@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { noteMissingImage } from '../lib/cardsource'
+import { mergePatch } from '../lib/cardpatch'
+import { patchFor, patchRevisionSnapshot, subscribePatches } from '../lib/db'
 import type { Card } from '../lib/types'
 import { Icon } from './Icon'
 
@@ -41,18 +44,35 @@ export function CardImg({
     src: undefined,
     state: 'loading',
   })
-  const src = size === 'large' ? (card.imageLarge ?? card.imageSmall) : (card.imageSmall ?? card.imageLarge)
+  /**
+   * The last stop for a card with no art. Cards arriving through
+   * `cardsearch.ts` are already patched, but plenty do not — a collection row
+   * stored before the patch existed, a friend's binder, the demo seed — and
+   * this component is the one thing every single one of them passes through.
+   * Subscribing to the index rather than reading it once makes a picture the
+   * user just added appear on every screen at once.
+   */
+  useSyncExternalStore(subscribePatches, patchRevisionSnapshot, patchRevisionSnapshot)
+  const shown = patchFor(card.id) ? mergePatch(card, patchFor(card.id)) : card
+  const src = size === 'large' ? (shown.imageLarge ?? shown.imageSmall) : (shown.imageSmall ?? shown.imageLarge)
+
+  // Nothing to show: ask the shared index whether anyone has solved this card.
+  // A no-op unless lookups are on and this card has not been asked about.
+  useEffect(() => {
+    if (!src) noteMissingImage(card)
+  }, [card, src])
+
   const state = loaded.src === src ? loaded.state : 'loading'
   return (
     <div
       className={`cardimg ${rounded ? 'cardimg--rounded' : ''} ${foil ? 'cardimg--foil' : ''} ${className}`}
-      style={!src || state === 'error' ? { background: GAME_FALLBACK_BG[card.game] } : undefined}
+      style={!src || state === 'error' ? { background: GAME_FALLBACK_BG[shown.game] } : undefined}
     >
       {src && state !== 'error' && (
         <img
           key={src}
           src={src}
-          alt={card.name}
+          alt={shown.name}
           loading="lazy"
           decoding="async"
           draggable={false}
@@ -65,8 +85,8 @@ export function CardImg({
         <div className={`cardimg__fallback ${state === 'loading' && src ? 'cardimg__fallback--shimmer' : ''}`}>
           {(!src || state === 'error') && (
             <>
-              <span className="cardimg__fbname">{card.name}</span>
-              {card.setName && <span className="cardimg__fbset">{card.setName}</span>}
+              <span className="cardimg__fbname">{shown.name}</span>
+              {shown.setName && <span className="cardimg__fbset">{shown.setName}</span>}
             </>
           )}
         </div>

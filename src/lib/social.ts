@@ -89,7 +89,14 @@ export function itemToSharedCard(item: CollectionItem, qty = item.qty, forTrade 
     condition: item.condition,
     qty,
     forTrade: Math.max(0, Math.min(qty, forTrade)),
-    image: item.card.imageSmall ?? item.card.imageLarge,
+    // `httpsImage`, not the raw field, and it matters more than it looks: a
+    // card the user photographed themselves carries a ~100 KB data URL
+    // (cardpatch.ts). Embedding that would bloat a `#/x?d=…` link past what a
+    // chat app will carry, and would publish a photo taken in someone's home
+    // as a side effect of sharing a binder — a decision that belongs to the
+    // card index's own opt-in switch, not to this. The receiving sanitizer
+    // drops non-https images anyway, so sending one is pure cost.
+    image: httpsImage(item.card.imageSmall ?? item.card.imageLarge),
     price: rowMarketUnit(item),
   }
 }
@@ -136,7 +143,9 @@ export function cardToWantRow(card: Card): WantRow {
     game: card.game,
     name: card.name,
     setCode: card.setCode,
-    image: card.imageSmall ?? card.imageLarge,
+    // Same rule as the binder row above: a want list travels, so a personal
+    // photo must not ride along inside it.
+    image: httpsImage(card.imageSmall ?? card.imageLarge),
     price: card.prices.best ?? card.prices.bestFoil ?? undefined,
     addedAt: Date.now(),
   }

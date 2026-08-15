@@ -7,6 +7,7 @@ import { ScanModes } from '../components/ScanModes'
 import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
+import { cardImageFromCanvas, IMAGE_MAX_EDGE } from '../lib/cardimage'
 import {
   CAMERA_REPROMPTS_EACH_ACQUIRE,
   CAPTURE_MAX_EDGE,
@@ -107,6 +108,7 @@ function ScanChip({
   onOpen,
   detail,
   onSearch,
+  onAdd,
   onRetry,
   onDetails,
 }: {
@@ -119,6 +121,8 @@ function ScanChip({
   onOpen: () => void
   detail: string | null
   onSearch: (() => void) | null
+  /** Keep the frame and describe the card by hand — see the button's comment. */
+  onAdd: () => void
   onRetry: () => void
   onDetails: () => void
 }) {
@@ -177,6 +181,14 @@ function ScanChip({
                 <Icon name="search" size={13} /> Search it instead
               </button>
             )}
+            {/* The honest possibility nobody offers: the card is real and the
+                catalog does not have it. Promos, prereleases and regional
+                prints fail here every time, and retrying reads the same card
+                the same way forever. This keeps the frame already on screen
+                and lets the user say what it is. */}
+            <button className="chip__searchbtn" onClick={onAdd}>
+              <Icon name="plus" size={13} /> Add it myself
+            </button>
             <button className="chip__searchbtn chip__searchbtn--icon" onClick={onDetails} aria-label="What did the scanner see?">
               <Icon name="eye" size={14} />
             </button>
@@ -217,6 +229,7 @@ export function ScanView({ active }: { active: boolean }) {
   const openSheet = useUi((s) => s.openSheet)
   const toast = useUi((s) => s.toast)
   const setSearchPrefill = useUi((s) => s.setSearchPrefill)
+  const openEditor = useUi((s) => s.openEditor)
   const sheetOpen = useUi((s) => s.sheet != null)
   const config = useSettings()
   const collectRef = useRef<CollectQueue | null>(null)
@@ -360,6 +373,10 @@ export function ScanView({ active }: { active: boolean }) {
         openSheet({ card: outcome.card, origin: 'scan', finish: scanFinish(outcome), grade: outcome.identification.grade })
         return
       }
+      // The uploaded photo is the best picture of this card anyone has, so it
+      // is encoded HERE, before the caller disposes the canvas — a toast
+      // action that fires two seconds later would find it already released.
+      const shot = cardImageFromCanvas(canvas)
       toast(
         outcome.readName ? `Read “${outcome.readName}” but couldn't match it` : outcome.message,
         'info',
@@ -371,10 +388,15 @@ export function ScanView({ active }: { active: boolean }) {
                 location.hash = '#/search'
               },
             }
-          : undefined,
+          : {
+              // Nothing was read at all, so there is nothing to search for —
+              // but the user still has a card and now a photo of it.
+              label: 'Add it myself',
+              fn: () => openEditor({ game: outcome.readGame, image: shot?.dataUrl }),
+            },
       )
     },
-    [onHit, openSheet, setSearchPrefill, toast],
+    [onHit, openEditor, openSheet, setSearchPrefill, toast],
   )
 
   /**
@@ -545,6 +567,27 @@ export function ScanView({ active }: { active: boolean }) {
     const miss = scanner.miss
     setSearchPrefill({ query: miss?.readName ?? '', game: miss?.readGame })
     location.hash = '#/search'
+  }
+
+  /**
+   * Hand the failed scan to the card editor, picture and all.
+   *
+   * The frame is grabbed live rather than replayed from the miss: the card is
+   * still in front of the lens, and a fresh capture at image resolution is a
+   * better picture than the one the pipeline downsampled to read text off. If
+   * the camera has already gone away the editor still opens — a card described
+   * without a photo is worth more than no card.
+   */
+  const addByHand = () => {
+    const frame = scanner.grabFrame(IMAGE_MAX_EDGE)
+    const shot = frame ? cardImageFromCanvas(frame) : null
+    if (frame) {
+      frame.width = 0
+      frame.height = 0
+    }
+    const miss = scanner.miss
+    const game = miss?.readGame ?? (config.gameFilter === 'auto' ? undefined : config.gameFilter)
+    openEditor({ game, name: miss?.readName, image: shot?.dataUrl })
   }
 
   const hit = scanner.hit
@@ -806,6 +849,7 @@ export function ScanView({ active }: { active: boolean }) {
                 }
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}
+                onAdd={addByHand}
                 onRetry={tapRescan}
                 onDetails={() => setDebugOpen(true)}
               />

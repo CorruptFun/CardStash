@@ -42,6 +42,10 @@ export const EVENT_TYPES = [
   'trade_update',
   'want_update',
   'sync_run',
+  'card_patch',
+  'card_source',
+  'card_source_submit',
+  'card_source_flag',
   'error',
 ] as const
 

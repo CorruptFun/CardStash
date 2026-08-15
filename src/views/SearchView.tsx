@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon'
 import { CardImg, Empty, Seg } from '../components/basics'
 import { track } from '../lib/analytics'
 import { searchGame } from '../lib/cardsearch'
+import { searchSharedCards } from '../lib/cardsource'
 import { recordPricePoint } from '../lib/db'
 import { isAbort } from '../lib/fetchJson'
 import { GAME_LABEL } from '../lib/games'
@@ -16,6 +17,7 @@ export function SearchView() {
   const config = useSettings()
   const games = config.enabledGames
   const openSheet = useUi((s) => s.openSheet)
+  const openEditor = useUi((s) => s.openEditor)
   const [game, setGame] = useState<Game>(() => {
     const preferred = config.gameFilter === 'auto' ? 'mtg' : config.gameFilter
     return games.includes(preferred) ? preferred : games[0]
@@ -50,6 +52,17 @@ export function SearchView() {
           setLoading(false)
           track('search', { game: searchIn, results: cards.length })
           for (const card of cards.slice(0, 10)) recordPricePoint(card)
+          // Cards no catalog lists, described by other collectors. Folded in
+          // after the fact rather than awaited: the catalog is the answer for
+          // almost every search, and making every one of them wait on a second
+          // round trip to help the rare miss is the wrong trade.
+          if (!cards.length) {
+            searchSharedCards(searchIn, text.trim())
+              .then((shared) => {
+                if (!controller.signal.aborted && shared.length) setResults(shared)
+              })
+              .catch(() => {})
+          }
         })
         .catch((err) => {
           if (controller.signal.aborted || isAbort(err)) return
@@ -151,7 +164,16 @@ export function SearchView() {
         />
       )}
       {!loading && !error && results && results.length === 0 && (
-        <Empty icon="search" title="No cards found" body={`Nothing in ${GAME_LABEL[game]} matches “${query}”.`} />
+        <Empty
+          icon="search"
+          title="No cards found"
+          body={`Nothing in ${GAME_LABEL[game]} matches “${query}”. Promos, prereleases and regional prints are often missing from the catalogs — you can add it yourself.`}
+          action={
+            <button className="btn btn--primary" onClick={() => openEditor({ game, name: query.trim() })}>
+              <Icon name="plus" size={16} /> Add this card
+            </button>
+          }
+        />
       )}
       {!loading && !error && results && results.length > 0 && (
         <>
