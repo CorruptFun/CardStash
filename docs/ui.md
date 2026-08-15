@@ -126,14 +126,37 @@ already the design rather than a white flash.
 
 ## Shared components
 
-- `basics.tsx` — `CardImg` (art with a placeholder + game tint), `Seg`
-  (segmented control, scrollable variant), `Stepper`, `Toggle`, `Modal`,
+- `basics.tsx` — `CardImg` (art with a placeholder + game tint, plus the `foil`
+  glare above), `Seg` (segmented control; `sm`/`md`/`lg` sizes, scrollable and
+  `glass` variants), `Stepper`, `Toggle`, `Modal` (`solid` or `glass`),
   `Empty`, `AnimatedNumber` (eased count-up for portfolio figures), `ManaCost`.
 - `Icon.tsx` — a hand-drawn 24×24 stroke icon set, one visual family, no icon
   font. Stroke width scales with size.
 - `Sheet.tsx`, `Toasts.tsx`, `DeckPicker.tsx`, `TradeSides.tsx`,
   `ShareActions.tsx` (link / file / native share sheet), `SocialPanel.tsx`,
-  `ScanDebug.tsx`.
+  `ScanModes.tsx`, `ScanDebug.tsx`.
+
+### The scan screen's top bar
+
+A viewfinder is used one-handed, at arm's length, often standing in a shop, and
+the thing under the controls is the actual product. So the bar carries as
+little as possible:
+
+- The **game picker** is `Seg` at `size="lg"` + `glass` — 48px tall, comfortably
+  over the platform's 44px touch minimum, and frosted so it sits on the picture
+  rather than in a panel. It shrinks and scrolls rather than clipping a game
+  name in half.
+- **`ScanModes`** is one button holding Packs, Page and Collect, opening a
+  `variant="glass"` `Modal` so the camera stays visible behind it. Those were
+  three separate pills; six controls over a live camera is a toolbar.
+
+**The button must keep naming the active mode.** Collect mode files every
+confident scan into the collection with no confirmation, so someone who forgets
+it is on discovers it as a pile of cards they did not mean to add. The label
+names the mode when exactly one is on, a badge counts them when more are, and
+the pill takes an active state. The label used to be hidden below 430px, back
+when three pills fought for the row — that rule is gone, and reinstating it
+would hide exactly the state that most needs showing.
 
 ## Mobile behaviours worth knowing
 
