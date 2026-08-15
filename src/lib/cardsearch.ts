@@ -1,10 +1,11 @@
-import { lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
-import { matchMtg, mtgById, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
-import { matchPokemon, pokemonById, pokemonPrintings, searchPokemon } from './pokemon'
+import { parseCardCode, type CardCode } from './cardcode'
+import { lorcanaBySetNumber, lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
+import { matchMtg, mtgById, mtgBySetNumber, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
+import { matchPokemon, pokemonById, pokemonByCollector, pokemonBySetNumber, pokemonPrintings, searchPokemon } from './pokemon'
 import { matchSports, searchSports, sportsById, sportsPrintings } from './sports'
-import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
+import { catalogByCode, catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
 import { sealedVariants } from './sealed'
-import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
+import { matchYgo, searchYgo, ygoById, ygoBySetCode, ygoPrintingVariants } from './ygo'
 import type { Card, Game } from './types'
 import { nameScore, normalizeName, sleep } from './util'
 
@@ -19,7 +20,88 @@ export interface ApiKeys {
   thorough?: boolean
 }
 
-export function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+/**
+ * Search a game for a typed query.
+ *
+ * A query that reads as a printed card code — "BLMR-EN085", "OP01-016",
+ * "NEO 266" — is looked up as one AS WELL AS being searched by name, and the
+ * code's answer leads. That is the whole point of the code: it names one
+ * printing, where a name names a dozen, and it is what a collector can read
+ * off a card in a language nothing else in the app can read. Running both
+ * costs one extra request on the rare query that parses as a code, and buys
+ * the guarantee that a card name which merely LOOKS like one ("Mew 25")
+ * loses nothing.
+ */
+export async function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
+  const code = parseCardCode(query)
+  if (!code) return searchByName(game, query, keys, signal)
+  const [byCode, byName] = await Promise.all([settle(searchByCode(game, code, keys, signal)), settle(searchByName(game, query, keys, signal))])
+  // The name search is the one whose failure the user needs to hear about —
+  // but only when the code lookup didn't already answer the question.
+  if (byName.error && !byCode.cards.length) throw byName.error
+  const seen = new Set<string>()
+  return [...byCode.cards, ...byName.cards].filter((card) => !seen.has(card.id) && seen.add(card.id))
+}
+
+interface Settled {
+  cards: Card[]
+  error?: unknown
+}
+
+async function settle(search: Promise<Card[]>): Promise<Settled> {
+  try {
+    return { cards: await search }
+  } catch (error) {
+    return { cards: [], error }
+  }
+}
+
+/**
+ * The printed set/batch code as a lookup. Each game answers it with the
+ * primitive it already uses to pin an exact printing during a scan — the
+ * difference is that a typed code is a statement of intent, so nothing here
+ * needs the corroboration a read off a photo does.
+ */
+async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
+  const one = (card: Card | null) => (card ? [card] : [])
+  switch (game) {
+    case 'mtg': {
+      if (!code.setCode) return []
+      // "266a" keeps its variant letter; "0266" also gets tried unpadded,
+      // which is how Scryfall spells collector numbers.
+      for (const number of new Set([code.number, code.digits].filter(Boolean) as string[])) {
+        const card = await mtgBySetNumber(code.setCode, number)
+        if (card) return [card]
+      }
+      return []
+    }
+    case 'pokemon': {
+      if (code.setCode && code.digits) {
+        const hits = await pokemonBySetNumber(code.setCode, code.digits, keys.pokemonKey, signal)
+        if (hits.length) return hits
+      }
+      // "123/198" with no set code: the denominator is the set size, which is
+      // what pins the set.
+      if (code.number && code.printedTotal)
+        return one(await pokemonByCollector(code.number, code.printedTotal, keys.pokemonKey, code.setCode))
+      return []
+    }
+    case 'yugioh':
+      // The passcode IS the card id at YGOPRODeck; the print code needs the
+      // set-code endpoint to become one.
+      return one(code.passcode ? await ygoById(code.passcode) : await ygoBySetCode(code.code, signal))
+    case 'lorcana':
+      return code.setCode && code.number ? one(await lorcanaBySetNumber(code.setCode, code.number, signal)) : []
+    case 'sports':
+      // Sports cards are synthesized from the card in hand (lib/sports.ts) —
+      // there is no catalog to look a printed number up in.
+      return []
+    default:
+      return catalogByCode(game, code, signal)
+  }
+}
+
+function searchByName(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
   switch (game) {
     case 'mtg':
       return searchMtg(query, signal)

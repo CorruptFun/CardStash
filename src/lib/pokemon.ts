@@ -584,6 +584,34 @@ export async function pokemonByCollector(
   return dexByCollector(num, printedTotal, setCode)
 }
 
+/**
+ * The printed set code plus collector number — "SVI 123", the batch number a
+ * collector reads off the card — without the set-size denominator that
+ * `pokemonByCollector` needs. Search only: a typed code is a statement of
+ * intent, where a scan's read of the same two fields is evidence that has to
+ * corroborate itself before it may answer.
+ *
+ * The printed code (`set.ptcgoCode`) is asked first because it is the one on
+ * the card; the API's own set id is the fallback for the sets that never got
+ * a printed code.
+ */
+export async function pokemonBySetNumber(
+  setCode: string,
+  number: string,
+  apiKey?: string,
+  signal?: AbortSignal,
+): Promise<Card[]> {
+  const set = stripLucene(setCode)
+  const nums = [...new Set([stripLucene(number), stripLucene(number.replace(/^0+(?=\d)/, ''))])].filter(Boolean)
+  if (!set || !nums.length) return []
+  const queries = nums.flatMap((num) => [`set.ptcgoCode:"${set}" number:"${num}"`, `set.id:"${set}" number:"${num}"`])
+  const rows = await runQueries(queries, 10, apiKey, signal).catch((err) => {
+    if (isAbort(err)) throw err
+    return []
+  })
+  return rows.map(toCard)
+}
+
 export async function pokemonById(id: string, apiKey?: string): Promise<Card | null> {
   const dex = parseDexApiId(id)
   if (dex) {

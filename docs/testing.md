@@ -60,6 +60,8 @@ for a canned-network stub) and `external` to keep a heavy lazy dependency out
 
 | Test | Covers |
 | ---- | ------ |
+| `cardcode.test.mjs` | `parseCardCode` — reading a printed set/batch number ("BLMR-EN085") out of a search query. The **refusals** are the point: an ordinary card name must never be mistaken for a code. |
+| `cardcode-search.test.mjs` | `ygoBySetCode` against a stubbed YGOPRODeck (exact-match set-code endpoint, region/padding spellings, the printing's own price) and `catalogByCode` over a stubbed catalog. |
 | `corner.test.mjs` | `parseCornerInfo` per game, `parsePasscode`, `sameYgoCode` — the collector-line parsers, including the fused-fraction reconstruction and its bounds. |
 | `names.test.mjs` | `nameCandidates` ranking, `nameScore`/`similarity`/`normalizeName` — including split champion names and the lead-segment tolerance. |
 | `orientation.test.mjs` | `looksSideways` and `latinWordCount` — the two pure decisions behind sideways handling. |

@@ -174,6 +174,44 @@ directly. Each adapter's only job is to normalize a foreign payload into the
 `Card` shape from [data-model.md](data-model.md) — same id scheme, same
 `Prices`, same `links`.
 
+## Search by printed card number
+
+The number printed on the card — "BLMR-EN085" on Yu-Gi-Oh, "OP01-016" on One
+Piece, "NEO 266" on Magic, "SVI 123/198" on Pokémon — is a first-class search
+query, not only scan evidence. It is the one identifier that names **one
+printing** where a name names a dozen, and the one a collector can read off a
+card whose name the app can't spell (or whose language it can't read).
+
+`cardcode.ts` is the pure parser (`parseCardCode`, node-tested), and
+`searchByCode` in `cardsearch.ts` routes the parse to whichever primitive that
+game already uses to pin an exact printing:
+
+| Game | Answered by |
+| --- | --- |
+| Magic | `mtgBySetNumber` (`/cards/:set/:number`), padded and unpadded |
+| Pokémon | `pokemonBySetNumber` (`set.ptcgoCode` then `set.id`), or `pokemonByCollector` when a `/198` set size was typed |
+| Yu-Gi-Oh | `ygoBySetCode` (`cardsetsinfo.php`), or `ygoById` for an 8-digit passcode |
+| Lorcana | `lorcanaBySetNumber` (`/cards/:set/:number`, then the set list filtered locally) |
+| TCGCSV games | `catalogByCode` — an array scan over the day-cached catalog, so it works offline |
+| Sports | nothing: the card is synthesized from the photo, there is no catalog (see [decision 17](decisions.md)) |
+
+Three rules hold this together:
+
+- **A code query still runs the name search.** Both go out, the code's answer
+  leads, results dedupe by id. That is what makes it safe for the parser to
+  accept "MEW 25" — which is both a real Pokémon printing and something a
+  person might type meaning the Pokémon.
+- **The parser is conservative and the failure is soft.** A separator is
+  required, the set prefix caps at six characters, fractions need a
+  denominator of 45+ (below that it's a power/toughness box), and anything
+  longer than a code is prose. A miss costs one wasted request, never a wrong
+  card.
+- **A typed code is intent; a read code is evidence.** The scan pipeline's
+  collector lookups fail closed and demand corroboration because a misread
+  digit lands on a real neighbouring card. Nothing here needs that — the user
+  is asserting the number, so `ygoBySetCode` may cheerfully try four spellings
+  of it (region infix present or absent, digits padded or not).
+
 `bestMatchAcrossGames(name, games)` is the scan pipeline's cross-game race. It
 runs every game concurrently with a soft per-game budget, scores each answer
 with `nameScore` (not raw similarity — a read of just "Jinx" must still clear
@@ -225,10 +263,19 @@ sorts ascending on purpose.
 ### YGOPRODeck (Yu-Gi-Oh) — `ygo.ts`
 
 `db.ygoprodeck.com/api/v7/cardinfo.php` with `name=` (exact), `fname=`
-(substring), `id=` (the printed passcode). One YGO api id covers every reprint,
-so `ygoPrintingVariants(card)` expands `card.printings` into one selectable
-`Card` per printing — and swaps in that printing's own price, because rarity
-moves YGO prices by orders of magnitude.
+(substring), `id=` (the printed passcode), plus `cardsetsinfo.php?setcode=` for
+the print code. One YGO api id covers every reprint, so
+`ygoPrintingVariants(card)` expands `card.printings` into one selectable `Card`
+per printing — and swaps in that printing's own price, because rarity moves YGO
+prices by orders of magnitude.
+
+`ygoBySetCode('BLMR-EN085')` is that expansion put to work: the set-code
+endpoint returns the card id (which is the passcode), the id endpoint returns
+the card, and the printing carrying the asked-for code is selected out of the
+set list — so a secret rare's code answers with the secret rare's price, not
+the reprint's headline. The endpoint is an **exact string match**, so the
+caller supplies the spellings: region infix present or absent, digits padded to
+three or not.
 
 `fname` has zero tolerance, so one OCR-eaten hyphen finds nothing. The recovery
 is to re-query on the longest clean *words* (plural — the longest token is

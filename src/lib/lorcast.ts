@@ -103,6 +103,32 @@ export async function lorcanaPrintings(name: string, signal?: AbortSignal): Prom
     .map(toCard)
 }
 
+/**
+ * The printed set code plus collector number. Lorcast exposes the pair as a
+ * path, the way Scryfall does; when it doesn't answer, the set's card list is
+ * filtered locally so a code query still resolves to one printing.
+ */
+export async function lorcanaBySetNumber(setCode: string, number: string, signal?: AbortSignal): Promise<Card | null> {
+  const set = setCode.trim().toLowerCase()
+  const num = number.replace(/^0+(?=\d)/, '')
+  if (!set || !num) return null
+  try {
+    const res = await fetchJson(`${API}/cards/${encodeURIComponent(set)}/${encodeURIComponent(num)}`, {
+      signal,
+      timeoutMs: 15_000,
+    })
+    if (res?.id) return toCard(res)
+  } catch (err) {
+    if (isAbort(err)) throw err
+  }
+  const rows = await runSearch(`set:${set}`, signal).catch((err) => {
+    if (isAbort(err)) throw err
+    return []
+  })
+  const hit = rows.find((raw: any) => String(raw.collector_number ?? '').replace(/^0+(?=\d)/, '') === num)
+  return hit ? toCard(hit) : null
+}
+
 export async function lorcanaById(id: string): Promise<Card | null> {
   try {
     const res = await fetchJson(`${API}/cards/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })

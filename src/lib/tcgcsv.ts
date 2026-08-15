@@ -1,3 +1,4 @@
+import { sameCardCode, type CardCode } from './cardcode'
 import { db, kvGet, kvPut } from './db'
 import { fetchJson } from './fetchJson'
 import { mergePrices } from './prices'
@@ -538,13 +539,45 @@ export async function catalogByCollector(game: Game, number: string, printedTota
     // Variants share the collector number as separate products ("Akali -
     // Silent (Alternate Art)") — with number-only evidence the BASE printing
     // is the honest pick, so parenthetical variants rank behind it.
-    .sort(
-      (a, b) =>
-        Number(/\(/.test(a.name)) - Number(/\(/.test(b.name)) ||
-        a.name.length - b.name.length ||
-        (b.releasedAt ?? '').localeCompare(a.releasedAt ?? ''),
-    )
+    .sort(baseFirst)
   return hits[0] ?? null
+}
+
+/** Base printing before its alternate arts — see catalogByCollector. */
+function baseFirst(a: Card, b: Card): number {
+  return (
+    Number(/\(/.test(a.name)) - Number(/\(/.test(b.name)) ||
+    a.name.length - b.name.length ||
+    (b.releasedAt ?? '').localeCompare(a.releasedAt ?? '')
+  )
+}
+
+/**
+ * Search by the printed card number instead of the name — "OP01-016",
+ * "BT12-041", "UNL 040". The catalog is already in memory (day-cached), so
+ * this is an array scan rather than a request, and it answers offline once
+ * the game's catalog has been warmed.
+ *
+ * Every printing sharing that number comes back, base art first: the number
+ * on the card is exactly what an alternate art and its base share, so
+ * answering with one of them would be a guess the query never asked for.
+ */
+export async function catalogByCode(game: Game, code: CardCode, signal?: AbortSignal): Promise<Card[]> {
+  const cards = await catalog(game, signal)
+  const set = code.setCode?.toLowerCase()
+  const digits = code.digits
+  if (!digits) return []
+  const hits = cards.filter((card) => {
+    if (sameCardCode(card.number, code.code)) return true
+    if (collectorDigits(card.number) !== digits) return false
+    if (set) return card.setCode?.toLowerCase() === set || card.number?.toLowerCase().startsWith(set)
+    // No set code typed: the printed fraction's denominator is what pins the
+    // set, so a bare "045" is never enough on its own.
+    if (!code.printedTotal) return false
+    const total = card.number?.split('/')[1]?.replace(/\D+/g, '')
+    return !!total && total.replace(/^0+(?=\d)/, '') === code.printedTotal
+  })
+  return hits.sort(baseFirst).slice(0, SEARCH_LIMIT)
 }
 
 /**
