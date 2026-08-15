@@ -107,6 +107,23 @@ export function clearScanCache(): void {
   cache.length = 0
 }
 
+/**
+ * Forget every cached frame that answered with this card.
+ *
+ * The frame-hash cache exists so a card sitting unchanged under the lens
+ * isn't re-identified every two seconds — but it also means a WRONG answer is
+ * re-served instantly, from the same frames, for as long as the card lies
+ * there. A user who drops that scan and scans again would get the identical
+ * wrong card back without a single OCR pass having run, which reads as the
+ * app ignoring them. Dropping a scan forgets its frames, so the next look is
+ * a real one.
+ */
+export function forgetScanCard(cardId: string): void {
+  for (let i = cache.length - 1; i >= 0; i--) {
+    if (cache[i].card?.id === cardId) cache.splice(i, 1)
+  }
+}
+
 export type IdentifyOutcome =
   | { ok: true; card: Card; identification: IdentificationMeta }
   | {

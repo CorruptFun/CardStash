@@ -272,6 +272,9 @@ export function ScanView({ active }: { active: boolean }) {
     async (scan: ScanRecord) => {
       const removed = await guarded(() => removeScan(scan.id), 'Remove scan')
       if (!removed) return
+      // The card is probably still under the lens: forget its frames and hold
+      // it back, or the next attempt files it straight back into the tray.
+      scanner.forgetHit(removed.card.id)
       haptic(settings().haptics ? 10 : 0)
       toast(`Removed ${removed.card.name} from scans`, 'success', {
         label: 'Undo',
@@ -280,12 +283,13 @@ export function ScanView({ active }: { active: boolean }) {
         },
       })
     },
-    [toast],
+    [scanner, toast],
   )
 
   const clearTray = useCallback(async () => {
     const removed = await guarded(() => clearScans(), 'Clear scans')
     if (!removed?.length) return
+    for (const scan of removed) scanner.forgetHit(scan.card.id)
     haptic(settings().haptics ? 10 : 0)
     toast(`Cleared ${removed.length} ${removed.length === 1 ? 'scan' : 'scans'}`, 'success', {
       label: 'Undo',
@@ -293,7 +297,7 @@ export function ScanView({ active }: { active: boolean }) {
         guarded(() => restoreScans(removed), 'Undo')
       },
     })
-  }, [toast])
+  }, [scanner, toast])
 
   /**
    * Read every card in one image.

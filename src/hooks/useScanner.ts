@@ -10,7 +10,7 @@ import {
   type Region,
 } from '../lib/camera'
 import { isAbort } from '../lib/fetchJson'
-import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
+import { forgetScanCard, identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { stopOcr, warmOcr } from '../lib/ocr'
 import { settings } from '../lib/settings'
 import { analyzeFrame, frameHash } from '../lib/vision'
@@ -421,6 +421,11 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
       } else {
         stillSinceRef.current = null
         focusRef.current.blockedSince = 0
+        // A real motion burst is the card being taken away or swapped — which
+        // is exactly when a dropped card becomes scannable again. Nothing else
+        // clears this: a timer would just be a slower way to bring the card
+        // back on its own.
+        if (suppressedRef.current.size && analysis.motion > MOTION_STILL * 2.5) suppressedRef.current.clear()
         if (prev.status !== 'searching' && analysis.motion > MOTION_STILL * 2.5) {
           updates.status = 'searching'
           updates.hit = prev.status === 'found' && sensing ? prev.hit : null
@@ -504,8 +509,16 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
               manual,
             })
           }
-          if (outcome.ok) {
+          if (outcome.ok && suppressedRef.current.has(outcome.card.id) && !manual) {
+            // The card the user just dropped, still under the lens. Not a
+            // miss — nothing failed — so the scanner goes back to looking
+            // rather than reporting one. A manual tap overrides: asking for
+            // this frame to be read again is asking for its answer.
             failureRef.current = freshFailureState()
+            patch({ status: 'searching', hit: null, miss: null, detail: null })
+          } else if (outcome.ok) {
+            failureRef.current = freshFailureState()
+            suppressedRef.current.delete(outcome.card.id)
             patch({ status: 'found', hit: outcome, miss: null, detail: null })
             onHitRef.current(outcome)
           } else if (outcome.reason === 'api') {
@@ -608,7 +621,32 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
     patch({ hit: null, miss: null, status: 'searching' })
   }, [patch])
 
+  /**
+   * Stop re-filing a card the user just threw away.
+   *
+   * The card is usually still lying under the lens, so the very next attempt
+   * identifies it again — from cache, in milliseconds — records it again and
+   * puts it straight back in the tray. From the outside the removal simply
+   * did not work. So a dropped card is forgotten by the frame cache (a real
+   * look next time, not the same stored answer) and held back until the scene
+   * changes, which is the honest signal that a different card is being shown.
+   *
+   * Deliberately keyed on the CARD, not the frame: the whole problem is that
+   * the frame keeps changing slightly — a hand-held card jitters into a new
+   * hash every attempt — while the answer stays the same.
+   */
+  const suppressedRef = useRef(new Set<string>())
+  const forgetHit = useCallback(
+    (cardId: string) => {
+      suppressedRef.current.add(cardId)
+      forgetScanCard(cardId)
+      if (stateRef.current.hit?.card.id === cardId) patch({ hit: null, status: 'searching' })
+    },
+    [patch],
+  )
+
   const rescan = useCallback(() => {
+    suppressedRef.current.clear()
     lastAttemptRef.current = 0
     stillSinceRef.current = null
     focusRef.current.blockedSince = 0
@@ -695,5 +733,5 @@ export function useScanner(onHit: (hit: Extract<IdentifyOutcome, { ok: true }>) 
 
   useEffect(() => stop, [stop])
 
-  return { ...state, busy, videoRef, start, stop, toggleTorch, dismissHit, rescan, scanNow, pauseSensing, grabFrame }
+  return { ...state, busy, videoRef, start, stop, toggleTorch, dismissHit, forgetHit, rescan, scanNow, pauseSensing, grabFrame }
 }
