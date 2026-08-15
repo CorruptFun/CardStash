@@ -48,7 +48,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `npm run test:social` — the hosted-social RLS harness against a real Supabase
   project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
   after any migration touching `binders`, `friendships`, `trade_offers` or
-  `inbox`.
+  `inbox`. `npm run test:cardsource` is the same shape for `card_data` — run it
+  after applying `0013` and after any migration touching the card index; it is
+  what proves the anon-read / authenticated-write asymmetry actually holds,
+  which no schema read can show.
 - `npm run test:unit` — node tests (corner parsing, name candidates, card
   patches, harness stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the

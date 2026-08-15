@@ -264,6 +264,13 @@ the local copy immediately.
 Two switches, never one: `cardSourceLookup` (on) and `cardSourceShare` (off),
 the same split as `socialConfigured()` vs `socialPublishing()`.
 
+`npm run test:cardsource` (`tests/harness/cardsource-rls.mjs`) proves the
+grants against the live project with real JWTs — that `anon` can read and
+cannot write, that neither role can touch the tables directly, that
+`submitted_by` never comes back, and that a re-submission updates one row
+rather than adding a second. Run it after applying `0013` and after any
+migration touching the index; a schema read cannot show any of it.
+
 ## The adapter contract
 
 Every source module exposes some subset of:
