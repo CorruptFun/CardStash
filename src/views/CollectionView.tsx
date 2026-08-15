@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatedNumber, CardImg, Empty, Modal } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
@@ -286,6 +287,37 @@ export function CollectionView() {
       ? `${selected.size} selected ${selected.size === 1 ? 'row' : 'rows'}`
       : `${shown.length} ${shown.length === 1 ? 'row' : 'rows'} on screen`
 
+  /**
+   * How tall the floating bulk bar actually is, published to CSS so the grid
+   * can reserve exactly that much room underneath itself.
+   *
+   * The reservation used to be a constant in `.screen--bulk`, and the bar
+   * outgrew it as soon as it started wrapping — 87px at 390px wide, 125px at
+   * 320px against 130px reserved for bar + tab bar + margin — which left the
+   * last row of cards permanently under the bar with nothing left to scroll.
+   * A measurement can't drift from the bar the way a constant did, and it also
+   * survives a longer label or another button being added to the row.
+   */
+  const barUp = editMode && selected.size > 0
+  const bulkRef = useRef<HTMLDivElement | null>(null)
+  const [bulkHeight, setBulkHeight] = useState(0)
+  useEffect(() => {
+    const node = bulkRef.current
+    if (!node) {
+      setBulkHeight(0)
+      return
+    }
+    const observer = new ResizeObserver(() => setBulkHeight(node.getBoundingClientRect().height))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [barUp])
+  // Left unset — so `.screen--bulk` uses its fallback — only in the frame
+  // between the bar mounting and its first measurement. No selection means no
+  // bar and nothing to reserve.
+  const bulkReserve = {
+    '--bulkbar-h': barUp ? (bulkHeight ? `${Math.ceil(bulkHeight)}px` : undefined) : '0px',
+  } as CSSProperties
+
   const exportCsv = async () => {
     const scope = exportScope(all, shown, editMode, selected)
     downloadFile(`cardstock-${scope.name}-${ymd()}.csv`, collectionToCsv(scope.rows), 'text/csv')
@@ -477,7 +509,10 @@ export function CollectionView() {
   }
 
   return (
-    <div className={`screen safe-top ${editMode ? 'screen--bulk' : ''}`}>
+    <div
+      className={`screen safe-top ${editMode ? 'screen--bulk' : ''}`}
+      style={bulkReserve}
+    >
       <header className="collhead">
         <div className="collhead__value">
           <span className="collhead__label">Collection value</span>
@@ -590,8 +625,8 @@ export function CollectionView() {
           />
         ))}
       </div>
-      {editMode && selected.size > 0 && (
-        <div className="bulkbar">
+      {barUp && (
+        <div className="bulkbar" ref={bulkRef}>
           <span className="bulkbar__count">{selected.size} selected</span>
           <span className="bulkbar__qty">
             <button

@@ -49,6 +49,17 @@ interface UiState {
 
 let toastSeq = 1
 
+/**
+ * How long a toast waits before it leaves.
+ *
+ * An Undo is decided in about a second — the user either meant the add or
+ * did not — so six seconds of a bar parked over the tab bar was read as the
+ * app being stuck rather than as a grace period. Four is still four times
+ * the decision, and a swipe or the × on the toast ends it sooner (Toasts.tsx).
+ */
+const ACTION_TOAST_MS = 4200
+const PLAIN_TOAST_MS = 3200
+
 export const uiStore = createStore<UiState>((set, get) => ({
   sheet: null,
   openSheet: (sheet) => set({ sheet }),
@@ -57,7 +68,7 @@ export const uiStore = createStore<UiState>((set, get) => ({
   toast: (text, kind = 'info', action, ms) => {
     const id = toastSeq++
     set({ toasts: [...get().toasts, { id, text, kind, action }] })
-    setTimeout(() => get().dismissToast(id), ms ?? (action ? 6000 : 3200))
+    setTimeout(() => get().dismissToast(id), ms ?? (action ? ACTION_TOAST_MS : PLAIN_TOAST_MS))
   },
   dismissToast: (id) => set({ toasts: get().toasts.filter((toast) => toast.id !== id) }),
   searchPrefill: null,

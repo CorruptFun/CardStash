@@ -4,9 +4,9 @@
 
 | Screen | File | What it does |
 | ------ | ---- | ------------ |
-| **Scan** | `views/ScanView.tsx` | The camera. Game filter chips, Packs (sealed) toggle, Collect toggle, torch. A reticle with live "sensing/locking" feedback, the result chip (name · set · price · finish cycler), the "what the scanner saw" diagnostics door, and the recent-scan tray. Also owns the start gate and the iOS permission explainer, the **photo upload** control (`UploadButton`) and the **Page** pill for binder/multi-card scanning — both entry points check `entitlement.ts`, and both land on a **review screen** where the user confirms every row before anything is written. A page files ~9 cards on one tap, so nothing is added silently; each row offers a full-budget re-read. |
+| **Scan** | `views/ScanView.tsx` | The camera. Game filter chips, Packs (sealed) toggle, Collect toggle, torch. A reticle with live "sensing/locking" feedback, the result chip (name · set · price · finish cycler), the "what the scanner saw" diagnostics door, and the recent-scan tray. Three misses in a row raise a dismissible prompt offering the photo upload instead — a still photo reads better than a moving frame — and any hit resets the run, so a scanner that works never shows it. Also owns the start gate and the iOS permission explainer, the **photo upload** control (`UploadButton`) and the **Page** pill for binder/multi-card scanning — both entry points check `entitlement.ts`, and both land on a **review screen** where the user confirms every row before anything is written. A page files ~9 cards on one tap, so nothing is added silently; each row offers a full-budget re-read. |
 | **Search** | `views/SearchView.tsx` | Debounced multi-game search over the enabled games, accepting a prefill handed over from a failed scan. |
-| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, price refresh, CSV import/export and JSON backup/restore. |
+| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, price refresh, CSV import/export and JSON backup/restore. The tools row (filter · sort · **Edit** · Data) is sticky and opaque so the way into multi-select survives any scroll position; see the bulk bar note below. |
 | **Decks** | `views/DecksView.tsx` | Deck list and deck detail: board grouping by type, mana curve / colour bar / type bars, owned-vs-missing costing, rules warnings, add-cards modal (search or from your collection), rename, cover, decklist copy. |
 | **AI builder** | `views/BuilderView.tsx` | The Gemini deck builder: game/format/style/budget, optional "build around these" seed cards, live-search-grounded meta research, parsed decklists that can be created as real decks. |
 | **Friends** | `views/FriendsView.tsx` | Your shareable binder (for-trade count and value), the friends list with want-match badges, the trades list, import/paste, and the live-sync panel. |
@@ -14,6 +14,16 @@
 | **Trade** | `views/TradeView.tsx` | One trade: both sides priced, the difference line, accept/decline/reply-link, and "book it into my collection". |
 | **Ingest** | `views/IngestView.tsx` | The `#/x?d=…` landing screen. Previews a profile or trade before saving; a **reply** link applies itself immediately, because the link *is* the answer. |
 | **Settings** | `views/SettingsView.tsx` | Card games (enable/disable), scanning (collect mode, haptics), AI & API keys (Gemini key/model + test, pokemontcg.io key), data (demo seed, export, erase), diagnostics (local insights, share toggle, endpoint/token), about (version). |
+
+### Toasts
+
+A toast leaves on its own after 3.2s, or 4.2s when it carries an action. Six
+seconds was the old figure and it read as the app being stuck: an Undo is
+decided in about a second, so the rest was a bar parked over the tab bar. Two
+ways out arrived with the shorter timer — a **sideways swipe** (pointer events,
+so mouse and touch both work) and a **× button**, which is the one a keyboard
+or a screen reader can reach. The swipe only takes the pointer *after* 8px of
+travel, or the capture would swallow every tap on Undo.
 
 The **card bottom sheet** (`views/CardSheet.tsx`) is the app's other main
 surface, reachable from every screen. It shows art, prices with a comps table
@@ -39,7 +49,7 @@ A vanilla zustand store, read through `useUi(selector)`:
 | Slice | Purpose |
 | ----- | ------- |
 | `sheet: SheetRequest \| null` | What the card sheet is open on: the card, optionally the collection row it came from, optionally a target deck, a preselected finish (the scanner's foil reading), and an `origin` used for analytics attribution. |
-| `toasts` | `toast(text, kind, action?, ms?)` — 3.2s default, 6s with an action. |
+| `toasts` | `toast(text, kind, action?, ms?)` — 3.2s default, 4.2s with an action; swipeable and closeable (see below). |
 | `searchPrefill` | Hand-off from a failed scan to the search screen. |
 | `builderSeeds` | Cards handed to the AI builder to design around. |
 
@@ -157,6 +167,21 @@ names the mode when exactly one is on, a badge counts them when more are, and
 the pill takes an active state. The label used to be hidden below 430px, back
 when three pills fought for the row — that rule is gone, and reinstating it
 would hide exactly the state that most needs showing.
+
+### The collection's floating bulk bar
+
+`.bulkbar` is `position: fixed` above the tab bar, so the grid has to reserve
+its height or the last row of cards sits under it with nothing left to scroll.
+That reservation was a constant in `.screen--bulk`, and the bar outgrew it as
+soon as it started wrapping to two rows on a phone (87px at 390px wide, 125px
+at 320px, against 130px reserved for bar *and* tab bar *and* margin).
+`CollectionView` now measures the real bar with a `ResizeObserver` and
+publishes `--bulkbar-h`, which `.screen--bulk` adds to its padding — a
+measurement cannot drift from the bar the way a constant did, and it survives
+another button being added to the row.
+
+The bar wraps rather than scrolling sideways on purpose: Remove is the last
+control in it and must not sit off the edge of a scroller nobody notices.
 
 ## Mobile behaviours worth knowing
 

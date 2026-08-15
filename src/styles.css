@@ -666,11 +666,19 @@ button {
   font-weight: 460;
   animation: toast-in var(--t-3) var(--ease-out);
   pointer-events: auto;
+  /* Horizontal drags belong to the swipe-to-dismiss gesture; vertical ones
+     still scroll whatever is behind the toast. */
+  touch-action: pan-y;
+  transition:
+    transform var(--t-2) var(--ease-out),
+    opacity var(--t-2) var(--ease-out);
 }
-.toast--success svg {
+/* Direct children only: the status glyph is the toast's, the × belongs to the
+   dismiss button and must not inherit a green "success" tint. */
+.toast--success > svg {
   color: var(--up);
 }
-.toast--error svg {
+.toast--error > svg {
   color: var(--down);
 }
 .toast__text {
@@ -690,6 +698,22 @@ button {
 }
 .toast__action:hover {
   background: var(--ink-200);
+}
+/* Deliberately quiet: the swipe is the fast way out and this is the one that
+   works for a keyboard, a screen reader or a shaky hand. 30px of target
+   around a 13px glyph. */
+.toast__close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -6px -6px 0;
+  border-radius: var(--r-0);
+  color: var(--paper-3);
+}
+.toast__close:hover {
+  color: var(--paper);
 }
 @keyframes toast-in {
   0% {
@@ -1756,6 +1780,14 @@ button {
 .scan__ioshint svg {
   vertical-align: -1px;
 }
+/* The upload offer reuses the iOS hint's panel — the two share one slot over
+   the viewfinder and never show together — and only adds a row of actions
+   where that one has a single Got it. */
+.scan__uploadtip .scan__tipbtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 /* Install nudge — floats just above the tab bar on every screen but the
  * camera, so it never covers the scan chip or the viewfinder. */
 .installtip {
@@ -2663,6 +2695,10 @@ button {
 .gamefilter--on em {
   color: var(--paper-2);
 }
+/* Sticky AND opaque, and above the bulk bar. This row is the only way into
+   multi-select, so it has to survive every scroll position: the gradient it
+   used to carry faded to transparent over its lower fifth, so card art scrolled
+   through the controls, and its z-index sat below the bulk bar's. */
 .colltools {
   display: flex;
   gap: 6px;
@@ -2670,9 +2706,32 @@ button {
   padding-bottom: var(--s3);
   position: sticky;
   top: 0;
-  background: linear-gradient(to bottom, var(--ink-000) 78%, transparent);
-  z-index: 10;
+  background: var(--ink-000);
+  z-index: 46;
   padding-top: var(--s1);
+}
+/* The screen's own top padding is scrollable space ABOVE the row — without a
+   backdrop of its own, cards slide up through it and sit over the controls. */
+.colltools:before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: calc(var(--sat) + var(--s3));
+  background: var(--ink-000);
+}
+/* The soft edge the gradient used to give, moved below the row rather than
+   eaten out of it. */
+.colltools:after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--s2);
+  background: linear-gradient(to bottom, var(--ink-000), transparent);
+  pointer-events: none;
 }
 .busybar {
   display: flex;
@@ -2689,6 +2748,13 @@ button {
   letter-spacing: 0.05em;
   color: var(--paper-2);
 }
+/* One rule, not two: this used to be declared here as a single nowrap row that
+   scrolled sideways, and again 1500 lines further down with `flex-wrap: wrap`,
+   which is what actually shipped. Wrapping is the right call — Remove is the
+   last control and must not sit off the edge of a scroller nobody notices — so
+   the wrap lives here and the second declaration is gone.
+   The height that wrap produces (87px at 390px wide, 125px at 320px) is what
+   `.screen--bulk` has to reserve; see there. */
 .bulkbar {
   position: fixed;
   left: 50%;
@@ -2696,10 +2762,13 @@ button {
   bottom: calc(var(--nav-h) + var(--sab) + var(--s4));
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  max-width: calc(100vw - var(--s4));
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - var(--s6));
   overflow-x: auto;
-  padding: 8px 8px 8px var(--s4);
+  padding: 8px var(--s3);
   border-radius: var(--r-1);
   background: var(--ink-100);
   border: 1px solid var(--rule-strong);
@@ -3704,8 +3773,14 @@ button {
 .cardcell .cardimg__fbname {
   display: none;
 }
+/* The bulk bar is `position: fixed`, so the grid has to reserve its height or
+   the last row of cards ends up under it with nothing left to scroll. This
+   used to reserve a constant, and the bar outgrew it the moment it started
+   wrapping to two rows on a phone — so `--bulkbar-h` is measured off the real
+   bar in CollectionView and the reservation follows whatever it wraps to. The
+   fallback covers the frame between the class landing and the first measure. */
 .screen--bulk {
-  padding-bottom: calc(var(--nav-h) + var(--sab) + var(--s12) + var(--s6));
+  padding-bottom: calc(var(--nav-h) + var(--sab) + var(--s4) + var(--bulkbar-h, 96px) + var(--s6));
 }
 .screen--docked {
   padding-bottom: calc(var(--nav-h) + var(--sab) + var(--s12) + var(--s4));
@@ -4195,14 +4270,6 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.bulkbar {
-  width: max-content;
-  max-width: calc(100vw - var(--s6));
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-  padding-left: var(--s3);
 }
 .bulkbar__count {
   flex: 0 0 auto;

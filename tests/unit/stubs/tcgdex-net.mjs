@@ -65,7 +65,7 @@ export async function fetchJson(url) {
   requested.push(url)
   const u = new URL(url)
   if (u.hostname === 'api.pokemontcg.io') {
-    throw new Error('HTTP 503 for stubbed pokemontcg.io (primary is dead)')
+    throw Object.assign(new Error('HTTP 503 for stubbed pokemontcg.io (primary is dead)'), { status: 503 })
   }
   if (u.hostname !== 'api.tcgdex.net') throw new Error(`tcgdex-net stub: unexpected host ${u.hostname}`)
   const [, , lang, kind, id] = u.pathname.split('/') // /v2/<lang>/<kind>[/<id>]
@@ -77,12 +77,12 @@ export async function fetchJson(url) {
   if (kind === 'sets' && id) {
     const brief = JA_SETS.find((s) => s.id === id)
     if (lang === 'ja' && brief) return { ...brief, cards: JA_SET_CARDS[id] ?? [] }
-    throw new Error(`HTTP 404 for ${url}`)
+    throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   }
   if (kind === 'cards' && id) {
     const card = lang === 'ja' ? JA_CARDS[id] : lang === 'en' ? EN_CARDS[id] : null
     if (card) return card
-    throw new Error(`HTTP 404 for ${url}`)
+    throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   }
   if (kind === 'cards' && !id) {
     const name = (u.searchParams.get('name') ?? '').toLowerCase()
@@ -94,4 +94,9 @@ export async function fetchJson(url) {
 
 export function isAbort() {
   return false
+}
+
+/** Mirrors fetchJson's real export: the status rides on the rejection. */
+export function httpStatus(err) {
+  return typeof err?.status === 'number' ? err.status : null
 }

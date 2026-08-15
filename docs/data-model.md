@@ -100,6 +100,16 @@ Readers filter to `currency === 'USD'` — one line, one currency.
 Capped at 30 rows (`SCAN_TRAY_LIMIT`). Re-scanning the card already at the head
 refreshes that row instead of stacking a duplicate tile.
 
+Removing a scan only clears the tile — a card collect mode already filed stays
+filed, and is removed in Collection. What the tray *shows* is narrower than
+what it stores: `ScanView` hides a scan whose card has a collection row touched
+at or after `at`, so a card you have since filed stops offering itself for a
+second add, while a card you already owned before the scan (a price check)
+keeps its tile. The rule is derived from the two tables by the live query, not
+stamped on the record, so undoing the add brings the tile back and no second
+copy of the fact can drift. Collect mode is exempt: it files every confident
+scan itself, so the filter would empty the tray on every hit.
+
 ### Caches
 
 - `CatalogCache` (`catalogs`, keyed by game) — a whole TCGplayer catalog plus

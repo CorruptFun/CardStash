@@ -64,7 +64,7 @@ export async function fetchJson(url) {
   if (kind === 'cards' && id) {
     const card = lang === 'en' ? DEX_CARDS[id] : null
     if (card) return card
-    throw new Error(`HTTP 404 for ${url}`)
+    throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   }
   if (kind === 'cards') {
     const name = (u.searchParams.get('name') ?? '').toLowerCase()
@@ -72,10 +72,15 @@ export async function fetchJson(url) {
   }
   if (kind === 'sets' && !id) return lang === 'en' ? [CHAOS_RISING] : []
   if (kind === 'sets' && id === 'me04' && lang === 'en') return { ...CHAOS_RISING, cards: [DEX_BRIEFS[2]] }
-  if (kind === 'sets') throw new Error(`HTTP 404 for ${url}`)
+  if (kind === 'sets') throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   throw new Error(`pokemon-stale stub: unexpected url ${url}`)
 }
 
 export function isAbort() {
   return false
+}
+
+/** Mirrors fetchJson's real export: the status rides on the rejection. */
+export function httpStatus(err) {
+  return typeof err?.status === 'number' ? err.status : null
 }

@@ -58,6 +58,18 @@ const IOS_PWA = CAMERA_REPROMPTS_EACH_ACQUIRE
 /** Collect mode: dedupe rapid re-scans of the same card. */
 const REPEAT_WINDOW_MS = 2500
 
+/**
+ * Misses in a row before the screen offers the photo path.
+ *
+ * Three, because one miss is a card that wasn't in frame yet and two is a hand
+ * still settling — a run of three is the phone, not the user: a lens that
+ * won't focus this close, a sleeve throwing the shop's ceiling light back, a
+ * frame that is never still. A still photo is a better read than a moving one,
+ * and the upload control is already right there but reads as an obscure icon.
+ * Any hit resets the run, so a scanner that works never says this.
+ */
+const MISSES_BEFORE_UPLOAD_TIP = 3
+
 class CollectQueue {
   private recent: { cardId: string; at: number } | null = null
 
@@ -239,6 +251,9 @@ export function ScanView({ active }: { active: boolean }) {
   /** The finished page, waiting on the review screen. Nothing is added until then. */
   const [pageCards, setPageCards] = useState<PageCard[] | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
+  /** Consecutive misses, and whether the user has waved off the tip they earn. */
+  const [missRun, setMissRun] = useState(0)
+  const [uploadTipOff, setUploadTipOff] = useState(false)
   const pageAbortRef = useRef<AbortController | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
@@ -251,7 +266,38 @@ export function ScanView({ active }: { active: boolean }) {
     [config.collectMode, config.haptics],
   )
   const scanner = useScanner(onHit, scanMode)
-  const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
+  /**
+   * The tray is a to-do list, not a receipt: a scan whose card has landed in
+   * the collection SINCE it was read is done with, and leaving the tile up is
+   * what got the same card filed twice.
+   *
+   * "Since" carries the rule. The comparison is against the collection row's
+   * own clock, so a card that was already owned before the scan still shows —
+   * checking the price of something you own is the tray's other job — and
+   * removing the card again (or undoing the add) brings the tile straight
+   * back, because the live query re-runs on the collection write. Deriving it
+   * from the two tables rather than stamping the scan record is what makes
+   * that true: there is no second copy of the fact to drift.
+   *
+   * Collect mode is exempt. It files every confident scan itself, so this
+   * filter would empty the tray on every hit and leave the mode with no trace
+   * of what it read — and the double-add it guards against cannot happen
+   * there, because nobody is tapping to add.
+   */
+  const tray = useLiveQuery(async () => {
+    const scans = await db.scans.orderBy('at').reverse().limit(12).toArray()
+    if (!scans.length || config.collectMode) return scans
+    const owned = await db.collection
+      .where('cardId')
+      .anyOf([...new Set(scans.map((scan) => scan.cardId))])
+      .toArray()
+    const filedAt = new Map<string, number>()
+    for (const item of owned) {
+      const at = item.updatedAt ?? item.addedAt
+      if (at > (filedAt.get(item.cardId) ?? 0)) filedAt.set(item.cardId, at)
+    }
+    return scans.filter((scan) => (filedAt.get(scan.cardId) ?? 0) < scan.at)
+  }, [config.collectMode])
   const visible = active && !sheetOpen
 
   /**
@@ -481,6 +527,13 @@ export function ScanView({ active }: { active: boolean }) {
     if (visible) warmOcr()
   }, [visible])
 
+  /* The run behind the upload tip. The dep is the status itself, so each entry
+   * into 'nomatch' counts once however long the scanner sits there. */
+  useEffect(() => {
+    if (scanner.status === 'nomatch') setMissRun((run) => run + 1)
+    else if (scanner.status === 'found') setMissRun(0)
+  }, [scanner.status])
+
   /* The scanner lit the torch itself (sustained dark scene) — say so, once
    * per lighting, so the sudden light isn't a mystery. */
   const autoTorchAnnounced = useRef(false)
@@ -583,6 +636,18 @@ export function ScanView({ active }: { active: boolean }) {
    * allows the site permanently, per launch (unfixably) for Home-Screen
    * apps. Say so once, with whatever recourse the context actually has. */
   const iosHint = scanning && (IOS_BROWSER || IOS_PWA) && !config.iosCameraHintShown
+  /* The photo offer, earned by a run of misses. It shares the iOS hint's slot,
+   * so it waits its turn rather than stacking two panels over the viewfinder,
+   * and it stays off the screen entirely when upload isn't on offer (page mode
+   * has its own shutter, and the entitlement seam may switch upload off). */
+  const uploadTip =
+    scanning &&
+    !iosHint &&
+    !pageMode &&
+    !uploadBusy &&
+    !uploadTipOff &&
+    missRun >= MISSES_BEFORE_UPLOAD_TIP &&
+    isEntitled('photo-upload')
 
   return (
     <div className="scan">
@@ -777,6 +842,33 @@ export function ScanView({ active }: { active: boolean }) {
                 onRetry={tapRescan}
                 onDetails={() => setDebugOpen(true)}
               />
+            </div>
+          )}
+          {uploadTip && (
+            <div className="scan__ioshint scan__uploadtip" role="status">
+              <p>
+                Not locking on? A still photo reads better than a moving frame — <b>upload one</b> and it goes through
+                the same reader.
+              </p>
+              <span className="scan__tipbtns">
+                <button
+                  className="chip__searchbtn"
+                  onClick={() => {
+                    setUploadTipOff(true)
+                    fileRef.current?.click()
+                  }}
+                >
+                  <Icon name="upload" size={13} /> Upload a photo
+                </button>
+                <button
+                  className="chip__searchbtn"
+                  onClick={() => {
+                    setUploadTipOff(true)
+                  }}
+                >
+                  Not now
+                </button>
+              </span>
             </div>
           )}
           {iosHint && (

@@ -65,6 +65,27 @@ Notable behaviour:
   borderless/extended/showcase/retro frame treatment and foil — for when the
   collector number wasn't legible and the fuzzy match landed on the base
   printing.
+- **Every request goes through the `scryfall()` queue** — one in flight, a
+  `MIN_REQUEST_GAP_MS` floor between starts. Scryfall asks all clients for
+  50–100ms of spacing and answers 429 with a block that outlives the burst
+  that earned it. Nothing here spaced requests, and a scan session is the
+  opposite of spaced (a lookup per OCR candidate, per band, per orientation),
+  so a user working through a stack could earn a block and then be told a card
+  in their hand "isn't in the database" — which came back on its own later,
+  the signature of a temporary block. The gap is measured from each request's
+  START, so a request slower than the gap has already paid it: measured on the
+  scan matrix, the queue changed **zero cells** and did not move mean cell
+  time. The queue must never propagate a rejection, or one failed lookup would
+  reject everything behind it.
+- **Retries are opt-in, and only user-facing calls opt in** (`retries` in
+  `fetchJson`: 429 and 5xx only, honouring a clamped `Retry-After`). Search
+  and the printings picker retry because someone is watching the screen; the
+  scan matchers do not, because a retry there is spent out of the shared
+  lookup budget every other game is waiting on.
+- **404 is an answer, not a fault**, and `httpStatus()` is how that is told
+  apart from a throttle. The old test was `err.message.includes('404')`, which
+  would read a 404 out of any response body that mentioned one — and left a
+  rate-limited search reporting itself to the user as `HTTP 429: {json}`.
 
 ### Pokémon — `pokemon.ts`
 
