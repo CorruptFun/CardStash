@@ -14,8 +14,16 @@ Everything the user creates lives in browser storage on their device:
 - localStorage `cardstock-settings` — preferences **including the user's own API
   keys**, and `cardstock-version`.
 
-There is no user account. `requestPersistence()` at boot asks the browser not to
-evict the data. The user's escape hatches are the JSON backup, the CSV export,
+**Signed in, there is also a copy on our server, and it is not optional.** The
+vault (`lib/cloud.ts`) backs the collection up automatically — see decision 15b.
+It is encrypted with a key minted server-side and held in a table no role can
+read directly, which defends a leak of the vault table alone; it is **not**
+end-to-end, and anyone with full database access could decrypt a collection. It
+is described that way everywhere rather than implied to be private from us.
+Signed out, none of this runs and the paragraph below is the whole story.
+
+There is no requirement to have an account. `requestPersistence()` at boot asks
+the browser not to evict the data. The user's escape hatches are the JSON backup, the CSV export,
 and Settings → Erase everything (`clearAllData()`; the analytics DB is cleared
 separately by `clearAnalytics()`).
 

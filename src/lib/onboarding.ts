@@ -21,11 +21,13 @@
  * | ---- | --------------- | ------------------ |
  * | `signin` | no account | an identity that survives losing the device |
  * | `handle` | account, no handle | being findable, and receiving trades |
- * | `backup` | neither vault nor Drive | cards that outlive the device |
+ * | `backup` | signed in, no Drive copy | a second copy in storage they own |
  *
- * `backup` is deliberately last: it is the only one with a consequence that
- * cannot be undone (a forgotten passphrase is unrecoverable by design), so it
- * is asked for once someone has cards worth protecting rather than on launch.
+ * `backup` is deliberately last, and since decision 15b it is also the mildest:
+ * signing in already backs the collection up automatically, so this step is no
+ * longer "you could lose everything" but "you may want a copy we do not hold".
+ * Overstating it would be the exact failure this file warns about — a warning
+ * the user can disprove is one they learn to dismiss.
  */
 
 import { isSignedIn } from './authsession'
@@ -52,10 +54,11 @@ export function nextConnectStep(): ConnectStep | null {
   if (!isSignedIn()) return 'signin'
   const config = settings()
   if (!config.socialHandle) return 'handle'
-  // Either route counts as backed up: the vault (a key check exists for this
-  // account) or Drive. Requiring the vault specifically would nag people who
-  // chose the backup that cannot lock them out.
-  if (!config.cloudKeyCheck && !config.driveBackup) return 'backup'
+  // The automatic vault no longer counts here, because since 15b EVERY signed-in
+  // user has one — testing for it would mean this step never fires, or fires for
+  // everyone until their first sync lands. What is left worth nudging about is a
+  // copy in storage the user owns, which is Drive.
+  if (!config.driveBackup) return 'backup'
   return null
 }
 

@@ -331,6 +331,12 @@ sync a prerequisite of that plan, not an alternative to it.
 
 ### 15. The cloud vault is encrypted on the device, and that is not negotiable
 
+> **SUPERSEDED 2026-08-15 by [15b](#15b-backup-happens-automatically-and-the-key-is-ours-supersedes-15).** The
+> reasoning below still describes the cryptography accurately; what it got wrong
+> was assuming people would set a passphrase. Zero of them did, and one lost a
+> collection to that. The key is server-minted now, and the honest name for what
+> ships is encryption at rest — not end-to-end.
+
 **Why.** Decision 14 established that one device holding everything is a real
 cost, and that iOS makes it acute. Fixing it means a server, which contradicts
 decision 1 — so the contradiction is paid for as narrowly as possible: the
@@ -590,6 +596,61 @@ delivery confirmation being required rather than optional. Or wanting an open
 marketplace — that is not a bigger version of this, it is a different product
 with listing moderation, seller reputation and counterfeit disputes attached,
 and the friends-only scope is what keeps the current design honest.
+
+### 15b. Backup happens automatically, and the key is ours (supersedes 15)
+
+**Context.** Decision 15 said the vault key is derived from a passphrase on the
+device and called that not negotiable. It was right about the cryptography and
+wrong about people. On 2026-08-15 this project held **zero** vault rows — not a
+low number, none at all, across every user who had ever signed in — and that
+same day a user lost a real collection to iOS storage eviction while the backup
+that would have saved it sat behind a passphrase they had never set.
+
+**Decision (2026-08-15).** Backup is automatic for anyone signed in. The key is
+minted server-side on first use (`get_or_create_vault_key()`, migration 0009)
+and there is nothing for the user to set, remember, or lose.
+
+**Why the passphrase had to go, specifically.** Not because it was weak — because
+it could not be a DEFAULT. A passphrase with no reset is unrecoverable by
+construction, so switching it on for everybody would have converted "some people
+have no backup" into "some people are permanently locked out of theirs". The
+only safe default is a key we can reissue, and a key we can reissue is a key we
+hold.
+
+**What this is, stated so nobody has to infer it.** Encryption at rest with a
+key we hold. It is **not** end-to-end and must never be described as something
+the server cannot read.
+
+- It DOES defend a leak of `vaults` alone — a dumped table, a stray backup file,
+  a mistaken policy. Ciphertext without `vault_keys` is noise.
+- It DOES isolate users: `get_or_create_vault_key()` takes no user-id argument
+  (there is deliberately no such overload) and reads `auth.uid()` only. No role
+  can `select` from `vault_keys` — not `anon`, not `authenticated`, not the
+  owner of the row.
+- It does NOT stop anyone with full database access decrypting a collection.
+
+**Why not plaintext, since we can read it either way.** Because the two failure
+modes are not the same size. Full database compromise is one event we would know
+about; a leaked table, a misconfigured grant or an errant backup file are
+ordinary and quiet. Separating key from ciphertext costs one table and turns the
+common accident into a non-event.
+
+**What survives from 15.** The merge is still pure and still the hard part
+(`cloudmerge.ts`), sanitizers still run over anything decoded even though we
+wrote it, and the JSON export still exists as the copy that needs no account at
+all. Only the key's provenance changed.
+
+**Costs.** We can read collections; the privacy page says so plainly rather than
+implying otherwise. Automatic sync also means a device that has been away pulls
+and pushes without being asked, which is a network cost users on metered
+connections did not opt into — hence the debounce, and hence it never runs for
+signed-out users at all.
+
+**What would make this wrong.** Collections turning out to hold something people
+genuinely need hidden from us — notes are the risk, not card names — which would
+argue for encrypting a subset under a real passphrase and leaving the rest
+automatic. Or a jurisdiction making us a data controller for inventory in a way
+that plaintext-to-us triggers and E2E would not.
 
 ### 20. Diagnostics report to the app's own project, and consent is a separate fact from the switch
 

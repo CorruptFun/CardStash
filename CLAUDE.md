@@ -85,9 +85,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
-  contacts Google), and the encrypted cloud vault (`cloud.ts` — Supabase auth +
-  pull-merge-push, dynamically imported; `crypto.ts` — the AES-GCM envelope the
-  server cannot read; `cloudmerge.ts` — the pure device-merge; `cloudconfig.ts`
+  contacts Google), and the automatic backup vault (`cloud.ts` — Supabase auth +
+  pull-merge-push, dynamically imported, driven by `autobackup.ts`; `crypto.ts`
+  — the AES-GCM envelope, encrypted with a **server-minted key** (0009), so it
+  is encryption at rest and NOT end-to-end — never describe it as unreadable by
+  us (decision 15b); `cloudmerge.ts` — the pure device-merge; `cloudconfig.ts`
   — project URL/publishable key). **These two overlap**: Drive is one-way
   backup to storage the user owns, the vault is multi-device sync through a
   project we run. Both are opt-in and both are dormant unless configured; the
@@ -186,8 +188,9 @@ index, so a friends-only binder is never globally matchable — `publish_binder(
 rebuilds row and index in one call to keep that true at every instant.
 
 `binders` is plaintext and that is deliberate: a friend's app must *read* it, so
-it cannot be E2E-encrypted like `vaults`. The two are separate tables, separate
-opt-ins, and `erase_social()` leaves `vaults` alone. Never widen what is
+it is plaintext where `vaults` is ciphertext. Neither is end-to-end any more —
+`vaults` is encrypted with a key we hold (15b) — but the two remain separate
+tables with separate lifecycles, and `erase_social()` leaves `vaults` alone. Never widen what is
 published beyond what the user chose.
 
 **A handle is claimed once and never changes hands** (migration 0010, decision
@@ -224,7 +227,9 @@ with `?welcome=0`.
 
 **Never write "your data isn't saved" in that copy.** It is false — cards are
 in IndexedDB — and signing in does not back anything up either; the vault needs
-a passphrase. `nextConnectStep()` returns `signin | handle | backup` and each
+a passphrase — that is now stale: signing in DOES back you up (15b), so the
+`backup` step only remains for people who want a second copy in their own Drive.
+`nextConnectStep()` returns `signin | handle | backup` and each
 has copy naming what is actually missing. A warning users can disprove gets
 dismissed reflexively for the rest of the product's life.
 

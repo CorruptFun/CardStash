@@ -36,10 +36,14 @@ const COPY: Record<ConnectStep, { title: string; body: string; cta: string; href
     cta: 'Pick a handle',
     href: '#/friends',
   },
+  // Since 15b, signing in DOES back you up — so this step is no longer "you
+  // have no backup", it is "you have one copy and it is ours". Keeping the old
+  // alarm would be the cardinal sin this file already warns about: a warning
+  // the user can disprove.
   backup: {
-    title: 'Your cards are not backed up yet',
-    body: 'Signing in proved who you are — it does not copy anything off this device. Set a passphrase to sync your collection, or switch on Drive backup, and a lost phone stops meaning a lost collection.',
-    cta: 'Set up backup',
+    title: 'Want a second copy you own?',
+    body: 'Your collection already backs itself up to your account. Drive backup adds a copy in storage that belongs to you, which is worth having if you would rather not depend on us alone.',
+    cta: 'Add Drive backup',
     href: '#/settings',
   },
 }
