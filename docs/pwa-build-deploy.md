@@ -132,6 +132,21 @@ maskable 512, apple-touch). `index.html` carries the iOS meta tags
 (`apple-mobile-web-app-capable`, black-translucent status bar, app title) and
 `theme-color: #0a0908`.
 
+**Those five files are generated — don't hand-edit them.** `npm run icons`
+(`scripts/make-icons.mjs`) rasterizes all of them from a single `markSvg()`
+function in that script, through headless Chromium (playwright-core, already
+present for the scan harness, so no new dependency; set `CHROMIUM_PATH` the
+same way the harnesses want it). `npm run icons:check` fails if any output is
+stale, which is the guard worth wiring into CI.
+
+The mark is one holographic card, face on, on black — no lens, no second card.
+It was a card-behind-a-magnifier until v0.17.1; the lens turned to mud at 32px
+and made the app read as a search tool rather than a collection. Three framings
+come out of the same drawing: rounded for the favicon and the Android icons,
+square with a smaller card for `maskable-512` (launchers crop it, so nothing
+may sit outside the centre 80%), and square for apple-touch (iOS applies its
+own squircle — double-rounding it is the classic mistake).
+
 ## Installing, and why it is a data-durability feature
 
 Installing is not a nicety here — for a meaningful share of users it is the

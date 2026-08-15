@@ -27,6 +27,17 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M8.5 3.9 17 3a2 2 0 0 1 2.2 1.8l1 11.2" />
     </>
   ),
+  /* The brand mark — ONE card, at the real 63:88 ratio, matching the launcher
+     icon (`scripts/make-icons.mjs`). Deliberately not `cards`: that one is the
+     Collection nav glyph and says "a stack of them", which is a different
+     claim. Keep the two in step — if the icon's composition changes, this
+     changes with it. */
+  logo: (
+    <>
+      <rect x="6.2" y="3.9" width="11.6" height="16.2" rx="1.9" />
+      <rect x="8.2" y="6" width="7.6" height="6.8" rx="1" />
+    </>
+  ),
   decks: (
     <>
       <path d="m12 3 9 4.7-9 4.7-9-4.7L12 3Z" />

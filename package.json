@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "deploy": "bash scripts/deploy.sh",
+    "icons": "node scripts/make-icons.mjs",
+    "icons:check": "node scripts/make-icons.mjs --check",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "test:scan": "node tests/harness/run-matrix.mjs",
     "test:scanui": "node tests/harness/drive-scan-ui.mjs",

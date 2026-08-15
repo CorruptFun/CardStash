@@ -137,7 +137,7 @@ export function Welcome({ onDone }: { onDone: () => void }) {
     <div className="welcome" role="dialog" aria-modal="true" aria-label="Set up Cardstock">
       <div className="welcome__inner">
         <div className="welcome__mark foilglare" aria-hidden="true">
-          <Icon name="cards" size={30} />
+          <Icon name="logo" size={30} />
         </div>
 
         {stage === 'signin' && (
