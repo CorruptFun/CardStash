@@ -126,26 +126,70 @@ function sessionFrom(body: Record<string, unknown>): CloudSession {
   }
 }
 
+/**
+ * The one in-flight refresh, shared by every caller.
+ *
+ * WITHOUT THIS, OPENING THE APP SIGNED YOU OUT. Refresh tokens rotate: the
+ * server accepts a given one once and rejects it thereafter. Opening Friends
+ * fires `listRequests()`, `matchWants()` and `listOrders()` at the same moment,
+ * and each independently called `freshToken()`. With an expired access token
+ * all three raced to redeem the SAME refresh token — the first won, the losers
+ * got a 400, and the 400 handler below called `signOut()`. A perfectly good
+ * session was destroyed by its own app being busy, and the user was asked for
+ * their email again as if they had never signed up.
+ */
+let refreshing: Promise<string> | null = null
+
+/**
+ * Does this response mean the session is genuinely finished, as opposed to the
+ * server being unhappy for a moment?
+ *
+ * Only a definitive rejection of the token itself may sign someone out. A 500,
+ * a 502 or a rate limit says nothing about whether the refresh token is valid,
+ * and treating those as "your session is over" turns a blip on their train
+ * journey into a re-signup.
+ */
+function isTokenRejection(status: number, body: string): boolean {
+  if (status !== 400 && status !== 401) return false
+  return /invalid|expired|revoked|not_found|already/i.test(body)
+}
+
 /** A valid access token, refreshing first if this one is close to expiry. */
 export async function freshToken(): Promise<string> {
   const current = loadSession()
   if (!current) throw new CloudError('Not signed in')
   if (Date.now() < current.expiresAt) return current.accessToken
+  // Everyone who arrives while a refresh is in flight waits on that one rather
+  // than starting a second and invalidating the first.
+  if (refreshing) return refreshing
 
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-    method: 'POST',
-    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: current.refreshToken }),
-  })
-  if (!res.ok) {
-    // A refresh token is single-use and expires; a failure here means the
-    // session is genuinely over, so clear it rather than retry forever.
-    signOut()
-    throw new CloudError(await readError(res, 'Your session expired — sign in again'))
+  refreshing = (async () => {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: current.refreshToken }),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      if (isTokenRejection(res.status, detail)) {
+        // Genuinely over: the server has rejected the token itself.
+        signOut()
+        throw new CloudError('Your session expired — sign in again')
+      }
+      // Transient. Leave the session alone so the next call can try again;
+      // whatever asked for a token simply fails this once.
+      throw new CloudError('Could not reach your account — check your connection')
+    }
+    const next = sessionFrom((await res.json()) as Record<string, unknown>)
+    saveSession({ ...next, email: next.email || current.email, userId: next.userId || current.userId })
+    return next.accessToken
+  })()
+
+  try {
+    return await refreshing
+  } finally {
+    refreshing = null
   }
-  const next = sessionFrom((await res.json()) as Record<string, unknown>)
-  saveSession({ ...next, email: next.email || current.email, userId: next.userId || current.userId })
-  return next.accessToken
 }
 
 /* --------------------------------------------------------------------- auth */
