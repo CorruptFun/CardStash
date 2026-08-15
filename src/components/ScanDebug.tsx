@@ -35,6 +35,14 @@ function eventLine(event: TraceEvent): string {
       : `edition: collector line not legible${event.foil ? ' · foil sheen' : ''}`
   if (stage === 'crop') return `card region: ${event.applied ? `tightened to ${pct(event.w as number)}×${pct(event.h as number)}` : 'kept full frame'}`
   if (stage === 'cache') return event.hit ? `cache: same frame → ${event.card}` : 'cache: same frame as a recent miss'
+  // The cloud stages, spelled out: this panel is how anyone answers "is it
+  // sending a frame on every scan?" without instrumenting a build. `skipped`
+  // is the rationed case — the deadline came round but a raced call had gone
+  // out too recently to spend another.
+  if (stage === 'cloud-race') return event.skipped ? 'cloud: deadline hit, call rationed (no upload)' : 'cloud: frame sent'
+  if (stage === 'cloud-read') return event.name ? `cloud read: “${event.name}”${event.number ? ` · ${event.number}` : ''}` : 'cloud read: nothing legible'
+  if (stage === 'cloud-reject')
+    return `cloud rejected: “${event.read}” → ${event.card ?? 'no match'}${event.score != null ? ` (score ${event.score})` : ''}`
   return stage
 }
 
