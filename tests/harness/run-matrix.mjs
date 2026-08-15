@@ -46,6 +46,24 @@ const args = Object.fromEntries(
     return m ? [m[1], m[2] ?? true] : [a, true]
   }),
 )
+
+/**
+ * `--gemini` turns on the opt-in cloud rescue for the run, using a REAL key and
+ * REAL API traffic — the only non-stub egress this harness ever allows.
+ *
+ * The key comes from the environment, never from a flag: an argv value lands in
+ * shell history and in the process table. Cost is a fraction of a cent per
+ * rescued frame, but a full matrix is hundreds of misses, so this is off by
+ * default and the run prints what it spent.
+ */
+const cloudKey = args.gemini ? (process.env.GEMINI_API_KEY ?? '').trim() : ''
+/** Empty = whatever the app pins as CLOUD_SCAN_MODEL; set it to A/B a model. */
+const cloudModel = typeof args['gemini-model'] === 'string' ? args['gemini-model'] : ''
+let cloudCalls = 0
+if (args.gemini && !cloudKey) {
+  console.error('--gemini needs GEMINI_API_KEY in the environment (not as a flag — argv leaks into history).')
+  process.exit(2)
+}
 const list = (v) => (typeof v === 'string' && v.length ? v.split(',') : null)
 
 function findChromium() {
@@ -371,6 +389,15 @@ async function main() {
     await context.route('**/*', async (route) => {
       const url = route.request().url()
       if (url.startsWith(`http://127.0.0.1:${PORT}/`) || url.startsWith(`http://localhost:${PORT}/`)) return route.continue()
+      // The ONE host allowed off the stub network, and only when --gemini gave
+      // us a real key. There is no useful way to stub a cloud rescue: a canned
+      // answer would measure the fixture, not the model. So this route is real
+      // traffic, it costs real money (~$0.0004 a call), and it is off unless
+      // asked for — which is why every other host still aborts.
+      if (cloudKey && url.startsWith('https://generativelanguage.googleapis.com/')) {
+        cloudCalls++
+        return route.continue()
+      }
       const hit = stubs.handle(url, route.request())
       if (hit) return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body })
       return route.abort('failed')
@@ -404,6 +431,8 @@ async function main() {
                 imageUrl: cell.imageUrl,
                 degradation: cell.degradation,
                 hint: cell.hint,
+                cloudKey,
+                cloudModel,
                 game: cell.fixture.game,
                 photo: cell.photo ?? false,
                 stack: Number(args.stack) || 1,
@@ -457,7 +486,12 @@ async function main() {
       const url = (f) => `/tests/harness/photos/${clip.dir}/${f.file}`
       const one = async (urls) => {
         try {
-          return await page.evaluate((c) => window.__harness.runFrames(c), { imageUrls: urls, hint: clip.game })
+          return await page.evaluate((c) => window.__harness.runFrames(c), {
+            imageUrls: urls,
+            hint: clip.game,
+            cloudKey,
+            cloudModel,
+          })
         } catch (err) {
           return { outcome: { ok: false, reason: 'exception', message: String(err).slice(0, 200) }, ms: 0 }
         }
@@ -557,6 +591,7 @@ async function main() {
       binders: binderResults,
       clips: clipResults,
       stubCalls: stubs.stats.calls,
+      cloud: cloudKey ? { model: cloudModel, calls: cloudCalls } : null,
       unknownHosts: [...new Set(stubs.stats.unknown)],
       cells: results,
     }
@@ -606,6 +641,26 @@ async function main() {
       )
       console.log(
         `\n=== binder pages: ${t.detected} boxes · identified ${t.identified}/${t.truth} · WRONG ${t.wrong} ===`,
+      )
+    }
+    if (cloudKey) {
+      // Print the spend. A rescue only fires on a local miss, so this number is
+      // also the honest count of frames the on-device pipeline could not read.
+      // Per-call cost is measured, not guessed: a 1600px card bills ~1,115
+      // input tokens (1,100 image + 15 prompt) and ~53 output.
+      const PRICE = {
+        'gemini-3.1-flash-lite': [0.25, 1.5],
+        'gemini-3.5-flash-lite': [0.3, 2.5],
+        'gemini-3.7-flash': [0.75, 3.75],
+        'gemini-3.6-flash': [0.75, 3.75],
+        'gemini-3.5-flash': [1.5, 9.0],
+      }
+      // Empty cloudModel means the app's pinned CLOUD_SCAN_MODEL (gemini.ts).
+      const [inUsd, outUsd] = PRICE[cloudModel || 'gemini-3.1-flash-lite'] ?? [0.25, 1.5]
+      const each = (1115 / 1e6) * inUsd + (53 / 1e6) * outUsd
+      console.log(
+        `\n=== cloud rescue: ${cloudCalls} call(s) to ${cloudModel || '(app default)'}` +
+          ` · ~$${(cloudCalls * each).toFixed(4)} ($${each.toFixed(5)}/call) ===`,
       )
     }
     if (report.unknownHosts.length) console.log(`  unstubbed hosts hit: ${report.unknownHosts.join(', ')}`)

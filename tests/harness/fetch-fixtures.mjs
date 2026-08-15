@@ -244,6 +244,18 @@ async function pokemon() {
   ]) {
     await universe(name)
   }
+  // The filmed clips (tests/harness/photos/manifest.json → clips). These five
+  // read PERFECTLY and still grade as misses, for lesson 32's reason: the stub
+  // has no hydrated card to answer with, so the frame is scored against an
+  // empty universe. Without them the clip battery measures the fixture set on
+  // exactly the cards the suspect-answer trigger exists for — "Team Rocket's
+  // Crobat ex" is a possessive-prefix ex, the single hardest shape in lesson
+  // 31's third case.
+  await universe('crobat', (c) => /crobat\s*ex$/i.test(String(c.name)))
+  await universe('giacomo')
+  await universe('scoop up cyclone')
+  await universe('deoxys')
+  await universe('leafeon', (c) => /leafeon\s*vstar$/i.test(String(c.name)))
   await universe('blastoise', (c) => /blastoise[\s-]*ex$/i.test(String(c.name)))
   await universe('charizard', (c) => String(c.localId) === '11' && /xy12|evolutions/i.test(String(c?.set?.id ?? '')))
   await universe('machamp', (c) => /^machamp$/i.test(String(c.name)))

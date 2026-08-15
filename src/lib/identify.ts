@@ -1,3 +1,6 @@
+// Sync + tiny: just reads whether a session exists in localStorage. The cloud
+// modules it would otherwise pull in stay behind the dynamic import below.
+import { isSignedIn } from './authsession'
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
 import { isAbort } from './fetchJson'
@@ -104,7 +107,12 @@ export interface IdentificationMeta {
   setCode?: string | null
   number?: string | null
   confidence: number
-  via: 'ocr' | 'cache'
+  /**
+   * Which path answered. `cloud` is the opt-in Gemini rescue and is worth
+   * distinguishing everywhere it surfaces: it is the only one that cost money
+   * and the only one that sent a frame off the device.
+   */
+  via: 'ocr' | 'cache' | 'cloud'
   /** The physical copy showed a foil/holo sheen (on-device detector). */
   foil?: boolean
 }
@@ -321,6 +329,30 @@ const TURNED_MATCH_THRESHOLD = 0.95
  * re-derive per attempt instead of being re-served as certainty.
  */
 const CORNER_CONFIDENCE = 0.7
+
+/**
+ * The bar a CLOUD read's name must clear — far above the 0.66 a local read
+ * needs, and above the 0.82 short-read bar too.
+ *
+ * The asymmetry is the point. A local candidate is one of eight guesses mined
+ * out of noisy OCR, so the thresholds are tuned to let a mangled-but-real name
+ * through. A cloud read of a legible card comes back essentially exact — the
+ * Krookodile frame that defeated every local pass returned "Krookodile ex"
+ * with its collector line. So a FUZZY cloud answer is not a degraded read, it
+ * is the model guessing, and letting a guess squeak past a low bar would
+ * reintroduce the wrong-card class through a new door.
+ */
+const CLOUD_MATCH_THRESHOLD = 0.9
+
+/**
+ * Confidence for a cloud-rescued identification. Below a local exact name hit
+ * (1.0), because the evidence is one model's reading rather than a matched
+ * name plus an independently printed line; above CORNER_CONFIDENCE. Above the
+ * 0.75 cache-write gate on purpose — unlike a corner-only ID this answer is
+ * stable for a given frame, and re-deriving it would pay for the same API call
+ * twice on a frame the user is still holding in view.
+ */
+const CLOUD_CONFIDENCE = 0.85
 
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
@@ -823,6 +855,143 @@ async function identifyViaOcr(
   }
 
   // One orientation is the normal case and reads exactly as it always did.
+  /**
+   * Last resort: read the frame in the cloud (see gemini.ts). Opt-in, own key.
+   *
+   * The answer is NOT trusted on its own. A multimodal model returns confident
+   * wrong answers exactly like the local matcher does — and worse, it hands
+   * back no intermediate evidence (band text, collector line, rules box) for
+   * the existing guards to bite on. So the guard is built from what the model
+   * IS asked for: the name and the printed collector number, which must belong
+   * to the same real card.
+   *
+   * - The name must clear `CLOUD_MATCH_THRESHOLD` (0.9), well above the 0.66
+   *   a local read needs. A cloud read of a legible card is essentially exact;
+   *   anything fuzzy here is the model guessing, and a guess that squeaks past
+   *   a low bar is the wrong-card class arriving through a new door.
+   * - When a number was read it PINS the printing, the same way
+   *   `refineFromCorner` lets two printed numbers outrank one fuzzy name.
+   *   `relatedNames` guards the swap so the pin can only pick a different
+   *   printing of the same card, never a different card.
+   *
+   * Confidence 0.85: below a local exact name hit (1.0) because the evidence
+   * is one model's reading of the whole card rather than a matched name plus a
+   * corroborating printed line, and above the collector-only path (0.7).
+   * Deliberately under the 0.75 cache-write gate? No — above it, because unlike
+   * a corner-only ID this answer is stable for the same frame and re-deriving
+   * it would mean paying for the same API call twice.
+   */
+  const cloudIdentify = async (reading: Reading): Promise<IdentifyOutcome | null> => {
+    // Two routes to the same answer, tried in this order:
+    //   1. HOSTED — a subscriber's scan, read by our own edge function with a
+    //      key that never ships to the client. Entitlement and the monthly
+    //      allowance are the SERVER's call; nothing is pre-checked here beyond
+    //      being signed in at all, because a client-side entitlement check is a
+    //      suggestion and only adds a way to be locally wrong about it.
+    //   2. BYO KEY — the user's own Gemini key, explicitly switched on. Still
+    //      supported and unmetered: someone paying Google directly costs us
+    //      nothing, and it is the only route for a user who wants no account.
+    // `cloudScanRescue` gates BOTH routes, and that is a privacy decision
+    // rather than a UI one. Keying the hosted route on `isSignedIn()` alone —
+    // as the first cut did — uploads a failed frame from every signed-in user,
+    // including ones with no subscription, who then get a 403 and nothing
+    // else. The image left the device to achieve exactly nothing. Sending a
+    // camera frame anywhere has to be something the user switched on, and
+    // paying for a tier is not the same act as consenting to the upload.
+    if (!config.cloudScanRescue) return null
+    const hosted = isSignedIn()
+    const byo = !!config.geminiKey
+    if (!hosted && !byo) return null
+    bail()
+    // Dynamic import, but be honest about what it buys: gemini.ts is ALREADY in
+    // the main bundle (BuilderView and SettingsView import it statically), so
+    // this saves no download — unlike drive.ts and cloud.ts, which really are
+    // code-split. What it does buy is keeping authsession/cloudconfig out of
+    // the scan path until a rescue actually runs.
+    const { readCardHosted, readCardViaGemini } = await import('./gemini')
+    // Deliberately NOT config.geminiModel on the BYO path — that one belongs to
+    // the deck builder. Empty override falls through to the pinned
+    // CLOUD_SCAN_MODEL; the hosted path pins its model server-side, because a
+    // client-chosen model is a client-chosen bill.
+    const read =
+      (hosted ? await readCardHosted(reading.canvas, signal).catch(() => null) : null) ??
+      (byo
+        ? await readCardViaGemini(reading.canvas, config.geminiKey, config.cloudScanModel || undefined, signal).catch(
+            () => null,
+          )
+        : null)
+    if (!read) {
+      traceEvent('cloud-read', { name: null })
+      return null
+    }
+    traceEvent('cloud-read', {
+      name: read.name,
+      number: read.number ?? null,
+      total: read.printedTotal ?? null,
+      setCode: read.setCode ?? null,
+    })
+    const best = await bestMatchAcrossGames(read.name, games, {
+      pokemonKey: config.pokemonKey,
+      timeoutMs,
+    }).catch(() => null)
+    if (!best || best.score < CLOUD_MATCH_THRESHOLD) {
+      traceEvent('cloud-reject', {
+        read: read.name,
+        card: best?.card.name ?? null,
+        score: best ? Number(best.score.toFixed(3)) : null,
+      })
+      return null
+    }
+    // Pin the printing with the model's OWN collector line before judging the
+    // name. This ordering is load-bearing, not tidiness: measured, the name
+    // lookup alone answered "Pikachu ex" for a card the model had transcribed
+    // perfectly as "Pikachu" 002/015, because `bestMatchAcrossGames` ranks by
+    // `nameScore`, which forgives a missing suffix by design and parks a bare
+    // species at ~0.95 (guard invariant 8). The number is what separates them.
+    let card = best.card
+    if (read.number) {
+      const pinned = await matchGame(card.game, read.name, read.setCode, read.number, {
+        pokemonKey: config.pokemonKey,
+      }).catch(() => null)
+      if (pinned && relatedNames(pinned.name, card.name)) card = pinned
+    }
+    // Now judge the WHOLE printed name, with `similarity` rather than
+    // `nameScore` — the same narrowing TURNED_MATCH_THRESHOLD applies, for the
+    // same reason. A cloud read is not a degraded guess to be forgiven; it is a
+    // claimed exact transcription, so there is nothing to forgive and the
+    // forgiveness is precisely what manufactures the wrong card. Measured on
+    // the pikachu clip: `nameScore` let "Pikachu" become "Pikachu ex" five
+    // times; `similarity` scores that pairing 0.78 and refuses it.
+    if (similarity(read.name, card.name) < CLOUD_MATCH_THRESHOLD) {
+      traceEvent('cloud-reject', {
+        read: read.name,
+        card: card.name,
+        score: Number(similarity(read.name, card.name).toFixed(3)),
+        why: 'name',
+      })
+      return null
+    }
+    traceEvent('cloud-accept', {
+      card: card.name,
+      game: card.game,
+      score: Number(best.score.toFixed(3)),
+      edition: card.setCode ?? null,
+    })
+    return {
+      ok: true,
+      card,
+      identification: {
+        game: card.game,
+        name: read.name,
+        setCode: read.setCode ?? card.setCode,
+        number: read.number ?? card.number,
+        confidence: CLOUD_CONFIDENCE,
+        via: 'cloud',
+        foil: detectFoil(reading.canvas) ? true : undefined,
+      },
+    }
+  }
+
   // When the frame looked sideways and the collector line couldn't settle
   // which way up it is, the alternatives are read in turn — names across all
   // of them first, because a band read on the right way up beats a magnified
@@ -841,6 +1010,16 @@ async function identifyViaOcr(
       if (hit) return hit
     }
   }
+
+  // Every local pass has failed. If — and only if — the user supplied their own
+  // Gemini key AND opted in, read the frame in the cloud as a last resort.
+  //
+  // This is the one place a camera frame may leave the device, and it is
+  // deliberately the place where the alternative is telling the user "no". The
+  // frames that succeed locally never reach here, so opting in does not put
+  // ordinary scanning on the network.
+  const cloud = await cloudIdentify(readings[0])
+  if (cloud) return cloud
 
   // Auto mode never sweeps the catalog-backed games — each would pull a whole
   // TCGplayer catalog per lookup — so a Riftbound (or One Piece, SWU, Digimon,

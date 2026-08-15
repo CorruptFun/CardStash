@@ -49,9 +49,30 @@ export interface Settings {
   cloudSyncedAt: number
   /** Sync after collection writes rather than only on demand. */
   cloudAuto: boolean
-  /** Powers the AI deck builder only — scanning is fully on-device. */
+  /**
+   * Powers the AI deck builder, and — only when `cloudScanRescue` is on — the
+   * last-resort cloud read for a card the on-device pipeline could not identify.
+   */
   geminiKey: string
   geminiModel: string
+  /**
+   * Send a frame the local pipeline FAILED on to Gemini, as a last resort.
+   *
+   * Off by default and useless without `geminiKey`, so the shipped default is
+   * unchanged: scanning is on-device, works offline and on first launch, and no
+   * image leaves the device. Turning this on is the user electing to send the
+   * frames that already missed — never the ones that succeeded — to their own
+   * API key. Two switches, deliberately: a key alone (set for the deck builder)
+   * must not start uploading camera frames.
+   */
+  cloudScanRescue: boolean
+  /**
+   * Override the scan rescue's model. Empty = the pinned `CLOUD_SCAN_MODEL`,
+   * which is deliberately NOT `geminiModel`: the deck builder and the scanner
+   * want different models, and tuning one must not silently change the other's
+   * cost per use.
+   */
+  cloudScanModel: string
   pokemonKey: string
   diagShare: boolean
   diagEndpoint: string
@@ -116,6 +137,8 @@ export const useSettings = create<Settings>()(
       cloudAuto: true,
       geminiKey: '',
       geminiModel: DEFAULT_GEMINI_MODEL,
+      cloudScanRescue: false,
+      cloudScanModel: '',
       pokemonKey: '',
       diagShare: false,
       diagEndpoint: DEFAULT_DIAG_ENDPOINT,
