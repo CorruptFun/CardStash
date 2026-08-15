@@ -134,10 +134,27 @@ export function SettingsView() {
           </div>
           <Toggle on={config.haptics} onChange={(haptics) => config.set({ haptics })} label="Haptics" />
         </div>
+        <div className="setrow">
+          <div className="setrow__text">
+            <span>Cloud rescue</span>
+            <em>
+              Send a card this device can’t settle to be read in the cloud. One photo, only for that card — scans that
+              work here never leave. Off by default.
+            </em>
+          </div>
+          <Toggle
+            on={config.cloudScanRescue}
+            onChange={(cloudScanRescue) => config.set({ cloudScanRescue })}
+            label="Cloud rescue"
+          />
+        </div>
         <p className="setsec__note">
-          Scanning runs fully on this device: text recognition reads the card name and the collector line (so the exact
+          Scanning runs on this device: text recognition reads the card name and the collector line (so the exact
           edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
           engine downloads ~12 MB once and is cached for offline use.
+          {config.cloudScanRescue
+            ? ' Cloud rescue is on, so the cards this device can’t read — and the few it reads in a way known to be unreliable — are sent as a single photo to be identified. It needs either a subscription or your own Gemini key below; without one, scanning simply carries on locally.'
+            : ' With cloud rescue off, no image ever leaves this device.'}
         </p>
       </section>
       <CloudSync />
@@ -145,7 +162,8 @@ export function SettingsView() {
         <h3>AI & API keys</h3>
         <p className="setsec__note">
           Keys are stored only on this device and sent only to their own service. The Gemini key powers the AI deck
-          builder and nothing else — scanning never uses it. Only add one if you want AI-built decks:{' '}
+          builder, and — only if you switch on Cloud rescue above — the cards this device can’t read. Add one if you
+          want AI-built decks or cloud rescue without a subscription:{' '}
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
             get a free key here <Icon name="external" size={12} />
           </a>

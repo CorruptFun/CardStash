@@ -44,21 +44,44 @@ The copy says so.
 | `tcgcsv.com` | catalog games, sealed products | nothing but the path (static files) | as above |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | `generativelanguage.googleapis.com` | AI deck builder run | the prompt: game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"**; the user's key in a header | fully opt-in (needs a key) |
+| `generativelanguage.googleapis.com` | a scan the local pipeline could not read or answered suspiciously, **while `cloudScanRescue` is on and a Gemini key is set** | that one camera frame as a JPEG, plus the user's key in a header | off by default |
+| the Cardstock `scan-card` function | the same rescue, for a signed-in subscriber with no key of their own | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default |
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
 | the user's sync server | while `syncOn` | binder payload, trade/reply payloads, the device token | off by default |
 | the diagnostics endpoint | while `diagShare` **and** a token are set | redacted event batches + a random device id + app version | off by default |
 
-**No image ever leaves the device.** Card identification is Tesseract and canvas
-maths locally; the APIs are only queried by name, set and number. Keep it that
-way — this is why the OCR engine is self-hosted rather than CDN-loaded.
+**No image leaves the device unless the user switches on the cloud rescue.**
+Identification is Tesseract and canvas maths locally, and the card APIs are only
+ever queried by name, set and number — that is the whole pipeline for every user
+who leaves `cloudScanRescue` off, which is the default and is why the OCR engine
+is self-hosted rather than CDN-loaded.
+
+The rescue is the one exception, and it is narrow by construction:
+
+- **It is off until the user turns it on.** Being signed in is not consent, and
+  neither is paying: `cloudScanRescue` gates the hosted route and the
+  bring-your-own-key route alike, because sending a camera frame somewhere is a
+  different act from subscribing to a tier.
+- **It uploads one frame, and only a frame the local pipeline could not settle.**
+  Either every local pass failed, or the local answer is one of the specific
+  shapes known to be confidently wrong (a bare Pokémon species that has a
+  suffixed sibling in the catalog — the "Krookodile" that is really a
+  Krookodile ex). Scans that succeed locally never reach it, so opting in does
+  not put ordinary scanning on the network.
+- **The frame is sent, read, and not kept.** The hosted route holds the model key
+  server-side so it never ships to a client; it records that a scan was spent
+  against the month's allowance, not the picture or what was in it.
+
+Everything else on this page still holds: the scan trace that carries real card
+text stays on-device (see below), and analytics never learn what was scanned.
 
 ## Keys
 
 | Key | Stored | Sent to | Used for |
 | --- | ------ | ------- | -------- |
-| Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, nothing else |
+| Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, and — only while `cloudScanRescue` is on — the scan rescue |
 | pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
 | Diagnostics token | `settings.diagToken` | the user's configured endpoint only, as a bearer token | authorizing telemetry upload |
 | Sync device token | `settings.syncToken` (minted locally) | the user's configured sync server only | proving ownership of the profile id |

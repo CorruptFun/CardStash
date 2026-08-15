@@ -13,26 +13,50 @@
  * lessons 32 and 34-38). Gating it would quietly degrade free scanning for
  * everyone who never buys anything.
  *
- * Entitlement has no authority in this architecture yet, and that is a real
- * decision rather than an oversight: the deployed app is a static gh-pages
- * bundle with no backend, and `server/` is a sync box the user hosts
- * themselves, so it can never be the authority on whether that same user has
- * paid. CLAUDE.md lays out the three honest options. Whichever is chosen, two
- * properties are not negotiable — scanning keeps working offline, and
- * analytics stay content-free.
+ * Entitlement now HAS an authority, and it is the third of CLAUDE.md's three
+ * options: a first-party backend (decision 2a). It is deliberately not this
+ * file. The Supabase project that already carries the vault and hosted social
+ * holds the `entitlements` table, the monthly meter, and the model key that
+ * costs money; `scan-card` checks all three before it calls anything. That is
+ * the only arrangement in which the answer cannot simply be edited in devtools.
+ *
+ * Two properties stayed non-negotiable through that change, and still are:
+ * scanning keeps working offline with no account, and analytics stay
+ * content-free regardless of subscription state.
  */
 
-export type PaidFeature = 'photo-upload' | 'page-scan'
+export type PaidFeature = 'photo-upload' | 'page-scan' | 'cloud-scan'
 
 /**
- * Flip a feature to `true` and it becomes the paid tier's. Deliberately a
- * plain table and not a settings flag: nothing reads a stored entitlement yet,
- * and inventing storage for one would be picking an answer to the question
- * above by accident.
+ * Which features THIS CLIENT refuses on its own. Flip one to `true` and the
+ * entry points stop offering it.
+ *
+ * `cloud-scan` is false, and that is not an oversight — it is the difference
+ * between the two kinds of paid feature this app now has:
+ *
+ *   * `photo-upload` and `page-scan` cost US nothing to run. If they are ever
+ *     gated, this table is the gate, and it is soft by nature: a flag in a
+ *     static bundle is one devtools tab from being true, which is a price
+ *     worth paying for a feature that works offline. Whether they become paid
+ *     at all is still an open product decision — that is why they are here and
+ *     still false.
+ *   * `cloud-scan` spends a real API key on a real bill, so it cannot be
+ *     defended from the client at all. `scan-card` checks entitlement and the
+ *     monthly allowance itself, with the service role, and answers 403/429 to
+ *     anyone who is not owed a scan. Pre-checking it here would add no
+ *     security and one new way to be locally WRONG — refusing a subscriber
+ *     whose row this device has not seen yet, or refusing the bring-your-own
+ *     -key user who owes us nothing because they pay Google directly.
+ *
+ * So `cloud-scan` is listed to say that it IS a paid feature and that the
+ * decision has a home, while the enforcement stays where it can be enforced.
+ * The switch a user actually holds is `cloudScanRescue` in settings, and that
+ * one is about consent to upload rather than about payment.
  */
 const GATED: Record<PaidFeature, boolean> = {
   'photo-upload': false,
   'page-scan': false,
+  'cloud-scan': false,
 }
 
 export function isEntitled(feature: PaidFeature): boolean {
