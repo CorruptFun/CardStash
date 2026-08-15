@@ -88,6 +88,21 @@ wrong card at the wrong price.
 Failure stages, read from the pipeline's own trace: `ocr-noread`,
 `ocr-misread`, `match-none`, `match-low`, `wrong-card`, `api-error`.
 
+**Printings are graded separately, and a pass can still be wrong.** `graded()`
+asks only for the name, deliberately — but "right card, wrong edition" is its
+own failure (a different price on a card the user is told they own), and it was
+invisible here until a user reported one. `printingOf()` compares the fixture's
+printed collector number against the identified card's for every cell that
+passed, and the run prints `=== printings: n/m … WRONG k ===` with each
+offender's wanted-vs-got. Cells that pass but land on the wrong edition are
+marked `~` rather than `✓`. It is reported apart from the pass rate on purpose:
+it is not a scanning failure, it is a pricing one, and it is fixed in the match
+layer rather than in OCR. Against a `--baseline` it **warns** (`PRINTINGS
+DOWN`) instead of failing the run: it is a ratio over only the cells that
+passed, so one flapping cell moves numerator and denominator together, and a
+flaky gate on a secondary axis would train everyone to ignore the primary one.
+Confirm a move over two runs, as with every other number here.
+
 Standard degradation battery (all deterministic, seeded): `clean`,
 `small-offset`, `soft-focus`, `rot+5`, `rot-5`, `perspective`, `glare`,
 `lowlight`, `worst`. Opt-in extras, kept out of the standard set so per-game

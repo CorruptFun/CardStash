@@ -175,7 +175,33 @@ re-identifying the same card sitting on the table. Rules that matter:
 8. **Refine** — on any name hit, `refineFromCorner` re-reads the collector line
    and upgrades to the exact edition. `relatedNames` guards the swap: the
    corner-pinned card must be similar (≥ 0.7) or a normalized prefix relation, so
-   "Tauros" → "Tauros ex" is allowed but an unrelated card is not.
+   "Tauros" → "Tauros ex" is allowed but an unrelated card is not. Three rules
+   here are load-bearing, all of them added after a real report of "right card,
+   wrong version":
+   - **A Pokémon read is verified on the printed SET SIZE, inside
+     `matchPokemon`** (see `docs/card-data.md`), not on the number here. The
+     two halves of a fraction fail independently — "70/203" is a mangled
+     number beside a clean total, and the total alone correctly pins the set —
+     so a `collectorEq` veto at this layer turns right answers into wrong ones.
+     MTG and Yu-Gi-Oh check their own because a collector number and a passcode
+     are self-checking in a way a Pokémon fraction's halves are not.
+   - **`PRINTING_RIDES_ON_THE_LINE` games get a deep corner tier.** For most
+     games the line refines a printing the name already narrowed; for Pokémon
+     it *decides* it, since one species name answers to twenty years of
+     reprints priced decades apart. When the cheap passes (one wide strip, two
+     binarized slivers at 3×) find no fraction, `REFINE_DEEP_PASSES` more run
+     over the sole-evidence *and* retry regions at 5×, in both polarities —
+     but never its sparse segmentation, the slow half, because the user is
+     still watching "Identifying…". Hinted mode only: in the auto fan-out this
+     retry would spend the budget every other game is waiting on, for a line
+     auto mode has no rescue for anyway.
+   - **`RAW_BOTTOM_BANDS` are read against the raw frame, on their own
+     budget.** Every other region is mapped through the *detected* card
+     region, so a crop whose floor lands inside the card moves the line out of
+     all of them at once — measured on a Base Set Charizard, crop bottom 0.93,
+     "4/102" printed at 0.96. Two bands (left for modern, right for vintage
+     Pokémon and MTG) with `RAW_BAND_PASSES` reserved for them, because on the
+     shared budget the region loops spend everything before reaching them.
 
 ### Budgets
 
@@ -190,6 +216,9 @@ Three independent budgets keep a miss from cooking the phone:
   from cache.
 - **Sole-evidence corner sweep**: 5 magnified passes (2 when the OCR budget is
   already spent).
+- **Refine deep tier**: 4 more magnified passes, and only for a hinted scan of
+  a game whose edition hangs on the line, and only once the cheap passes have
+  already come back empty.
 
 ### Language independence — the collector-line path
 

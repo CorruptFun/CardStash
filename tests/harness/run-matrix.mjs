@@ -118,6 +118,29 @@ function graded(expected, outcome) {
 }
 
 /**
+ * Did the pipeline land on the right PRINTING of the right card?
+ *
+ * `graded()` deliberately asks only for the name — a wrong card is the failure
+ * that matters most, and every threshold in the pipeline is tuned against it.
+ * But "right name, wrong printing" is its own failure, and it was invisible
+ * here: a Pokémon name carries dozens of editions across twenty years, their
+ * prices differ by orders of magnitude, and the one the name lookup returns is
+ * whichever the catalog happened to list first. Reported by the fixture's
+ * printed collector number, which is exactly what the collector line should
+ * have pinned; only cells that PASSED are graded, and only when both sides
+ * carry a number, so a catalog with no number for its card reads as ungraded
+ * rather than wrong.
+ */
+function printingOf(expected, outcome) {
+  if (!outcome?.ok) return null
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/^0+(?=\d)/, '').trim()
+  const want = norm(expected.number)
+  const got = norm(outcome.number)
+  if (!want || !got) return null
+  return want === got ? 'right' : 'wrong'
+}
+
+/**
  * Grade a binder page against an unordered MULTISET of names.
  *
  * A page is a different kind of ground truth from a card and must never be
@@ -456,6 +479,7 @@ async function main() {
           }
           const pass = graded(cell.fixture, result.outcome)
           const stage = pass ? 'pass' : failureStage(cell.fixture, result)
+          const printing = pass ? printingOf(cell.fixture, result.outcome) : null
           results.push({
             game: cell.fixture.game,
             key: cell.fixture.key,
@@ -464,11 +488,13 @@ async function main() {
             hint: cell.hint,
             pass,
             stage,
+            printing,
+            ...(printing === 'wrong' ? { wanted: `${cell.fixture.setCode ?? '?'} #${cell.fixture.number}` } : {}),
             ms: result.ms,
             outcome: result.outcome,
             trace: result.trace,
           })
-          const mark = pass ? '✓' : '✗'
+          const mark = pass ? (printing === 'wrong' ? '~' : '✓') : '✗'
           console.log(
             `  ${mark} ${cell.fixture.game}/${cell.fixture.key} · ${cell.degradation} · ${cell.hint}` +
               ` → ${result.outcome.ok ? result.outcome.name : `${stage}${result.outcome.readName ? ` (read “${result.outcome.readName}”)` : ''}`}` +
@@ -573,10 +599,14 @@ async function main() {
     // --- report -------------------------------------------------------------
     const byGame = {}
     for (const r of results) {
-      const g = (byGame[r.game] ??= { pass: 0, total: 0, stages: {}, byDegradation: {} })
+      const g = (byGame[r.game] ??= { pass: 0, total: 0, stages: {}, byDegradation: {}, printingRight: 0, printingGraded: 0 })
       g.total++
       if (r.pass) g.pass++
       else g.stages[r.stage] = (g.stages[r.stage] ?? 0) + 1
+      if (r.printing) {
+        g.printingGraded++
+        if (r.printing === 'right') g.printingRight++
+      }
       const d = (g.byDegradation[r.degradation] ??= { pass: 0, total: 0 })
       d.total++
       if (r.pass) d.pass++
@@ -617,6 +647,28 @@ async function main() {
     for (const [game, g] of Object.entries(byGame)) {
       const stages = Object.entries(g.stages).sort((a, b) => b[1] - a[1])
       if (stages.length) console.log(`  ${game} failures: ${stages.map(([s, n]) => `${s}×${n}`).join(', ')}`)
+    }
+    // Right card, wrong edition — the class `pass` cannot see. Reported apart
+    // from the pass rate on purpose: it is not a scanning failure, it is a
+    // PRICING failure, and it is fixed in the match layer rather than in OCR.
+    const printingGraded = results.filter((r) => r.printing)
+    if (printingGraded.length) {
+      const wrong = printingGraded.filter((r) => r.printing === 'wrong')
+      console.log(
+        `\n=== printings: ${printingGraded.length - wrong.length}/${printingGraded.length} identified cells landed on` +
+          ` the right edition · WRONG ${wrong.length} ===`,
+      )
+      const byKey = new Map()
+      for (const r of wrong) {
+        const at = `${r.game}/${r.key}`
+        const row = byKey.get(at) ?? { got: new Set(), want: r.wanted, n: 0 }
+        row.got.add(`${r.outcome.setCode ?? '?'} #${r.outcome.number ?? '?'}`)
+        row.n++
+        byKey.set(at, row)
+      }
+      for (const [at, row] of byKey) {
+        console.log(`  ${at} ×${row.n}: wanted ${row.want}, got ${[...row.got].join(', ')}`)
+      }
     }
     if (clipResults.length) {
       const t = clipResults.reduce(
@@ -694,6 +746,20 @@ async function main() {
         if (now + 1e-9 < then) {
           console.error(`REGRESSION: ${game} ${(then * 100).toFixed(0)}% → ${(now * 100).toFixed(0)}%${shared ? ' (shared keys)' : ''}`)
           bad = true
+        }
+        // Editions warn rather than fail. The metric is real but noisy — it is
+        // a ratio over only the cells that PASSED, so one flapping cell moves
+        // both its numerator and its denominator — and a flaky gate on a
+        // secondary axis would train everyone to ignore the primary one.
+        if (b.printingGraded && g.printingGraded) {
+          const nowP = g.printingRight / g.printingGraded
+          const thenP = b.printingRight / b.printingGraded
+          if (nowP + 1e-9 < thenP) {
+            console.error(
+              `PRINTINGS DOWN: ${game} ${b.printingRight}/${b.printingGraded} → ${g.printingRight}/${g.printingGraded}` +
+                ` (warning, not a gate — confirm over two runs)`,
+            )
+          }
         }
       }
     }

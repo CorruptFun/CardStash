@@ -89,6 +89,28 @@ sorts ascending on purpose.
 `DEX_COLLECTOR_LANGS = ['en','ja']` drives the collector sweep;
 `DEX_NAME_LANGS = ['de','fr','es','it','pt']` drives localized-name resolution.
 
+**The staleness has a second victim: the EDITION.** A Pokémon name answers to
+twenty years of reprints, so when the printed line does not reach the match
+layer, the answer is whichever printing the catalog listed first — measured on
+the matrix, 16 of 43 identified Pokémon cells, a Base Set Charizard among them,
+reported as a Celebrations promo. Two rules exist because of that:
+
+- **`matchPokemon` fails closed on the printed set size.** When a
+  `printedTotal` was read and neither catalog knows a set of that size, every
+  remaining candidate *contradicts* the card in frame, so it returns null
+  rather than a printing at another printing's price — the same rule
+  `mtgBySetNumber` has always held. `dexMatch` applies it one level down, but
+  refuses only when **both** printed halves miss: TCGdex's `cardCount.official`
+  and a card's printed denominator do drift, and the number is the harder
+  evidence.
+- **`pokemonPrintings` merges TCGdex's editions in** (`dexExtraPrintings`,
+  bounded, newest first, TCG Pocket filtered out by the `^[ab]\d` set-id rule
+  the fixture fetcher uses). Without it the sheet's "Printings & variants" list
+  — where a user goes precisely when the scan picked the wrong edition — could
+  not contain a card printed after the primary went stale, so a wrong guess on
+  a current set was uncorrectable in-app. English set ids are shared between
+  the two catalogs (`swsh8-168`), which is what makes the subtraction exact.
+
 ### YGOPRODeck (Yu-Gi-Oh) — `ygo.ts`
 
 `db.ygoprodeck.com/api/v7/cardinfo.php` with `name=` (exact), `fname=`

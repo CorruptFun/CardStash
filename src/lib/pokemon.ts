@@ -319,7 +319,17 @@ async function dexMatch(
   const total = printedTotal ? Number(printedTotal) : NaN
   const sized = Number.isFinite(total) ? fulls.filter((raw: any) => Number(raw?.set?.cardCount?.official) === total) : []
   const ranked = sized.length ? sized : fulls
-  return dexToCard(ranked[ranked.length - 1])
+  const best = ranked[ranked.length - 1]
+  // The collector line is what was READ off the card; an answer agreeing with
+  // neither half of it is a name match wearing the line's evidence. Both
+  // halves must miss before this refuses, which keeps every printing whose
+  // NUMBER matched — TCGdex's `cardCount.official` and the denominator a card
+  // actually prints do drift apart, and the number is the harder evidence.
+  const digits = plainDigits(number)
+  const numberFits = !digits || plainDigits(best?.localId) === digits
+  const sizeFits = !Number.isFinite(total) || Number(best?.set?.cardCount?.official) === total
+  if (!numberFits && !sizeFits) return null
+  return dexToCard(best)
 }
 
 /**
@@ -505,6 +515,15 @@ export async function matchPokemon(
       // beats the primary's wrong-set guess.
       const dex = await dexMatch(name, number, printedTotal).catch(() => null)
       if (dex) return dex
+      // Neither catalog knows a set that size, so EVERY remaining candidate
+      // contradicts the line printed on the card in frame. Answering with one
+      // anyway is how "right card, wrong edition" happens: the name is a
+      // Pokémon's, twenty years of reprints answer to it, and the one on top
+      // is whichever the stale catalog listed first — at a price that belongs
+      // to a different piece of cardboard. Fail closed, exactly as
+      // `mtgBySetNumber` has since the overhaul; the caller keeps its own
+      // name match rather than being handed a printing dressed as confirmed.
+      return null
     }
   }
   if (setCode) {
@@ -602,6 +621,45 @@ export async function pokemonById(id: string, apiKey?: string): Promise<Card | n
   }
 }
 
+/** How many TCGdex-only printings the variants list may hydrate. */
+const DEX_EXTRA_PRINTING_BUDGET = 10
+
+/**
+ * Pokémon TCG *Pocket* (the mobile game) shares the TCGdex index, but its
+ * digital cards are not printings of anything — no paper, no market price.
+ * Same rule the fixture fetcher applies: their set ids start with a letter
+ * then a digit (`A1`, `A2b`, `B1`).
+ */
+function isPaperDexId(id: string): boolean {
+  return !/^[ab]\d/i.test(id.split('-')[0] ?? '')
+}
+
+/**
+ * The printings the PRIMARY doesn't have.
+ *
+ * pokemontcg.io has gone stale, so every set past its last update is missing
+ * from this list — and this list is exactly where a user goes when the scan
+ * landed on the wrong edition. For a card printed in a set the primary never
+ * indexed, the sheet could not be corrected AT ALL: the copy in their hand
+ * was not among the options. TCGdex shares the primary's English set ids
+ * (`swsh8-168`), so its briefs subtract cleanly against the rows already
+ * found; only the leftovers are hydrated, newest (the pools keep their tail)
+ * first, and bounded — opening the sheet must not fan out thirty requests.
+ */
+async function dexExtraPrintings(name: string, target: string, rows: any[], signal?: AbortSignal): Promise<Card[]> {
+  const have = new Set(rows.map((raw: any) => String(raw?.id ?? '')))
+  const briefs = (await dexBriefs(name, signal)).filter(
+    (brief) =>
+      normalizeName(String(brief.name)) === target && !have.has(String(brief.id)) && isPaperDexId(String(brief.id)),
+  )
+  if (!briefs.length) return []
+  const pool = briefs.slice(-DEX_EXTRA_PRINTING_BUDGET).reverse()
+  const fulls = await Promise.all(
+    pool.map((brief) => fetchJson(`${DEX_API}/cards/${brief.id}`, { signal, timeoutMs: 10_000 }).catch(() => null)),
+  )
+  return fulls.filter((raw: any) => raw?.id).map((raw: any) => dexToCard(raw))
+}
+
 /** Every printing of a card name across sets, newest set first. */
 export async function pokemonPrintings(name: string, apiKey?: string, signal?: AbortSignal): Promise<Card[]> {
   const clean = stripQuotes(name)
@@ -610,5 +668,8 @@ export async function pokemonPrintings(name: string, apiKey?: string, signal?: A
   // The phrase query also matches supersets ("Pikachu" → "Pikachu V") — keep
   // exact names only, those are the true reprints.
   const target = normalizeName(name)
-  return rows.filter((raw: any) => normalizeName(String(raw.name ?? '')) === target).map(toCard)
+  const primary = rows.filter((raw: any) => normalizeName(String(raw.name ?? '')) === target).map(toCard)
+  // Newest first, and what the primary is missing is precisely the newest.
+  const extra = await dexExtraPrintings(clean, target, rows, signal).catch(() => [] as Card[])
+  return [...extra, ...primary]
 }
