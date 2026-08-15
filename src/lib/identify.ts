@@ -16,7 +16,7 @@ import {
   type CornerRead,
 } from './corner'
 import { GAME_LABEL, LIGHT_MATCH_GAMES } from './games'
-import { psaLookup, psaToParsed } from './psa'
+import { psaLookup, psaToParsed, PSA_AVAILABLE } from './psa'
 import { parseSlabLabel } from './slab'
 import { sportsCard, sportsCompLink, MIN_SPORTS_CONFIDENCE } from './sports'
 import { parseSportsText } from './sportsparse'
@@ -443,9 +443,8 @@ async function identifyFromSlabText(
 
   let parsed = parseSportsText(lines)
   let via: 'psa' | 'ocr' = 'ocr'
-  const token = settings().psaToken
-  if (grade.cert && grade.company === 'PSA' && token.trim()) {
-    const outcome = await psaLookup(grade.cert, token, signal)
+  if (grade.cert && grade.company === 'PSA' && PSA_AVAILABLE) {
+    const outcome = await psaLookup(grade.cert, signal)
     traceEvent('psa', outcome.ok ? { ok: true, subject: outcome.cert.subject } : { ok: false, reason: outcome.reason })
     if (outcome.ok) {
       parsed = psaToParsed(outcome.cert)

@@ -56,7 +56,6 @@ export function SettingsView() {
   const toast = useUi((s) => s.toast)
   const [showGeminiKey, setShowGeminiKey] = useState(false)
   const [showPokemonKey, setShowPokemonKey] = useState(false)
-  const [showPsaToken, setShowPsaToken] = useState(false)
   const [showDiagToken, setShowDiagToken] = useState(false)
   const [confirmErase, setConfirmErase] = useState(false)
   const [testingKey, setTestingKey] = useState(false)
@@ -233,42 +232,6 @@ export function SettingsView() {
             </button>
           </div>
           <em className="setfield__hint">Optional — raises the Pokémon rate limit.</em>
-        </div>
-        <div className="setfield">
-          <label htmlFor="psa-token">
-            <span>PSA API token</span>
-            <KeyState set={!!config.psaToken} />
-          </label>
-          <div className="setfield__row">
-            <input
-              id="psa-token"
-              name="psa-api-token"
-              className={`input ${showPsaToken ? '' : 'input--masked'}`}
-              type="text"
-              value={config.psaToken}
-              placeholder="from psacard.com/publicapi"
-              onChange={(e) => config.set({ psaToken: e.target.value.trim() })}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              data-1p-ignore=""
-              data-lpignore="true"
-              data-bwignore=""
-            />
-            <button
-              className="iconbtn"
-              onClick={() => setShowPsaToken(!showPsaToken)}
-              aria-label="Show token"
-              aria-pressed={showPsaToken}
-            >
-              <Icon name="eye" size={17} />
-            </button>
-          </div>
-          <em className="setfield__hint">
-            Optional — resolves a scanned slab’s cert number to the exact card. Free, about 100 lookups a day. Slab
-            scanning works without it; with no token nothing is ever sent to PSA.
-          </em>
         </div>
       </section>
       {/* Renders nothing — not an empty heading — when the build has no OAuth client id. */}

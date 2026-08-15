@@ -24,9 +24,10 @@ storage all work from there.
   and builds the card from that, entirely on-device. Value is your own figure,
   next to a one-tap eBay sold-comps link built from every attribute it read.
 - **Graded slabs** — scan a PSA, BGS, SGC or CGC holder and it reads the label:
-  company, grade, qualifier and cert number. Add a free PSA API token and the
-  cert resolves to the exact card. Grades work on every game, not just sports —
-  a PSA 10 is tracked as its own copy and never merges with your raw one.
+  company, grade, qualifier and cert number. On PSA holders the cert resolves to
+  the exact card automatically — no key to bring, nothing to set up. Grades work
+  on every game, not just sports — a PSA 10 is tracked as its own copy and never
+  merges with your raw one.
 - **Collection** — portfolio value, 30-day insights, cost basis / P&L, movers,
   CSV import/export, JSON backups.
 - **Decks** — build by hand from search or your collection, assign cards you own

@@ -66,7 +66,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   `lorcast.ts` for Lorcana, `tcgcsv.ts` — a day-cached TCGplayer catalog for
   Riftbound/One Piece/Star Wars/Digimon/Gundam — unified in `cardsearch.ts`),
   the AI deck builder (`gemini.ts` — the app's ONLY Gemini use; scanning must
-  stay fully on-device), on-device OCR + collector-line reading (`ocr.ts`,
+  stay fully on-device), sports cards + graded slabs (`sportsparse.ts` and
+  `slab.ts` — both pure and node-tested, `sports.ts`, and `psa.ts` for cert
+  lookup on OUR compiled-in `VITE_PSA_TOKEN`, dormant when a build has none),
+  on-device OCR + collector-line reading (`ocr.ts`,
   `corner.ts`), scan pipeline (`identify.ts`, `vision.ts` — includes the foil
   sheen detector, `camera.ts`), sealed-product scanning (`sealed.ts`, backed
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
@@ -193,6 +196,29 @@ dismissed reflexively for the rest of the product's life.
   door on the Friends screen.
 - **`server/` and `lib/sync.ts` are deleted** (the app had no users, so no
   compatibility path was carried). Don't reintroduce a second live tier.
+
+## Sports cards have no catalog
+
+Sports is the one category with no data source: no free API publishes the set
+of printed sports cards, so `sportsparse.ts` reads the identity off the card
+and `sports.ts` SYNTHESIZES the `Card`. That inverts the failure mode — a TCG
+misread picks the wrong real card, a sports misread invents one — so three
+guards are load-bearing and must not erode: the `MIN_SPORTS_CONFIDENCE` floor,
+closed vocabularies rather than open guessing, and **sports never joining the
+auto-mode sweep** (`sweepable` in `identify.ts`). Sports cards carry no prices
+at all; value is the collector's `CollectionItem.marketValue`. See decision 17.
+
+Grades live on `CollectionItem`, never on `Card`, for every game — see decision
+18. `slab.ts` owns `sanitizeGrade`, reused by the backup and social paths.
+
+**`psa.ts` uses our key, not the user's.** It is compiled in from
+`VITE_PSA_TOKEN` and there is no Settings field. Two things follow that are
+easy to forget: the token is READABLE in the static bundle (unlike the Google
+client id and Supabase key, nothing else backstops it), and its ~100/day free
+quota is now shared across all users rather than per-person. Certs cache for
+months and a 429 stands lookups down for hours. The real fix is a proxy holding
+the token server-side — point `VITE_PSA_ENDPOINT` at one and nothing else
+changes.
 
 ## Planned paid tier — binder scanning and photo upload
 

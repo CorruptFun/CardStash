@@ -6,23 +6,38 @@
  * PSA graded — year, brand, subject, card number, grade, sport, population.
  * That turns a slab scan from "we read some words" into an exact card.
  *
- * It is strictly an ENHANCEMENT and never a dependency:
+ * The token is **ours**, compiled in from `VITE_PSA_TOKEN`, so cert lookup
+ * works out of the box with nothing for the user to configure. An empty value
+ * makes the whole module dormant — the same shape `drive.ts` uses for its
+ * OAuth client id — and slab scanning still works off the printed label.
  *
- * - A token is the user's own, entered in Settings, exactly like `pokemonKey`.
- *   With no token this module never runs and never contacts PSA, so a user
- *   who does not opt in makes no request — the same rule Drive and the vault
- *   follow.
- * - Every failure is non-fatal. The slab label alone already yields the grade,
- *   the cert and usually the whole card, so a refused, rate-limited or
- *   unreachable API downgrades the scan rather than breaking it.
+ * It is strictly an ENHANCEMENT and never a dependency: the label alone
+ * already yields the grade, the cert and usually the whole card, so a refused,
+ * rate-limited or unreachable API downgrades the scan rather than breaking it.
  *
- * Two caveats worth knowing before debugging this in the wild. PSA's free tier
- * is about 100 calls a day, which is why results are cached hard and lookups
- * only ever fire on an explicit slab scan. And the API is not documented as
- * CORS-enabled for browser origins: if PSA does not send the header, this call
- * fails in the page no matter how good the token is. That is why the failure
- * path is a first-class outcome here rather than an afterthought — see
- * `PsaOutcome`.
+ * ## Read this before relying on it
+ *
+ * Unlike the other two values this app compiles in, **a PSA token is not
+ * designed to be public.** The Google OAuth client id is protected by its
+ * origin allowlist and the Supabase publishable key by row-level security;
+ * both are safe in a bundle because something else is the actual boundary. A
+ * bearer token has no such backstop: it ships in a static gh-pages bundle,
+ * anyone can read it out, and it authorises calls against our PSA account.
+ *
+ * The practical consequence is the quota. PSA's free tier is roughly 100 calls
+ * a DAY for the account, now shared across every user of the app rather than
+ * per-person, so it is exhausted by ordinary traffic long before it is
+ * exhausted by abuse. Two mitigations live here — certs are cached for months
+ * (`CERT_TTL_MS`) so a re-scan is free, and a 429 stops all further calls for
+ * `QUOTA_COOLDOWN_MS` instead of hammering a dead quota — but neither changes
+ * the arithmetic. Moving the token behind a proxy that holds it server-side
+ * and rate-limits per user is the real fix; this module is written so that is
+ * a one-constant change to `ENDPOINT`.
+ *
+ * One more caveat for debugging in the wild: the API is not documented as
+ * CORS-enabled for browser origins. If PSA does not send the header, the call
+ * fails in the page no matter how valid the token is. That is why the failure
+ * path is a first-class outcome here — see `PsaOutcome`.
  */
 
 import { db, kvGet, kvPut } from './db'
@@ -31,9 +46,33 @@ import { detectBrand, detectProduct } from './sportsparse'
 import type { ParsedSportsCard } from './sportsparse'
 import type { Sport } from './types'
 
-const ENDPOINT = 'https://api.psacard.com/publicapi/cert/GetByCertNumber'
+const env = (import.meta.env ?? {}) as Record<string, string | undefined>
+
+/**
+ * Our PSA token, compiled in at build time. Empty means the build ships
+ * without cert lookup and this module never contacts PSA at all.
+ */
+const PSA_TOKEN: string = (env.VITE_PSA_TOKEN ?? '').trim()
+
+/** Whether this build can resolve certs. */
+export const PSA_AVAILABLE: boolean = Boolean(PSA_TOKEN)
+
+/**
+ * Swap this for a proxy of ours that holds the token server-side and the
+ * exposure problem in the module comment goes away — nothing else changes.
+ */
+const ENDPOINT = (env.VITE_PSA_ENDPOINT ?? 'https://api.psacard.com/publicapi/cert/GetByCertNumber').replace(/\/+$/, '')
+
 /** A cert's grade never changes, so a hit is good essentially forever. */
 const CERT_TTL_MS = 180 * 86_400_000
+/**
+ * How long a quota refusal stands everyone down. PSA's limit is daily, but
+ * pinning this to midnight would assume their reset boundary; a few hours is
+ * long enough to stop pointless traffic and short enough to recover the same
+ * day. Slab scanning is unaffected either way — only cert resolution pauses.
+ */
+const QUOTA_COOLDOWN_MS = 6 * 3_600_000
+const QUOTA_KEY = 'psa-quota-block'
 
 export interface PsaCert {
   cert: string
@@ -52,7 +91,11 @@ export interface PsaCert {
 
 export type PsaOutcome =
   | { ok: true; cert: PsaCert }
-  | { ok: false; reason: 'no-token' | 'not-found' | 'unauthorized' | 'rate-limited' | 'unreachable'; message: string }
+  | {
+      ok: false
+      reason: 'not-configured' | 'not-found' | 'unauthorized' | 'rate-limited' | 'unreachable'
+      message: string
+    }
 
 /**
  * Field names come back from PSA in more than one casing depending on the
@@ -152,17 +195,25 @@ function cacheKey(cert: string): string {
  * every failure mode is reported rather than thrown so the scan path can just
  * carry on with what the label said.
  */
-export async function psaLookup(cert: string, token: string, signal?: AbortSignal): Promise<PsaOutcome> {
+export async function psaLookup(cert: string, signal?: AbortSignal): Promise<PsaOutcome> {
   const trimmed = cert.replace(/\D/g, '')
   if (!trimmed) return { ok: false, reason: 'not-found', message: 'No certification number to look up' }
-  if (!token.trim()) return { ok: false, reason: 'no-token', message: 'Add a PSA API token in Settings to resolve certs' }
+  if (!PSA_TOKEN) return { ok: false, reason: 'not-configured', message: 'This build has no PSA cert lookup' }
 
   const cached = await kvGet<PsaCert>(cacheKey(trimmed), CERT_TTL_MS).catch(() => null)
   if (cached) return { ok: true, cert: cached }
 
+  // The quota is one shared allowance, so once it is gone it is gone for
+  // everyone — keep making the request and every slab scan pays the latency
+  // of a call that cannot succeed.
+  const blocked = await kvGet<boolean>(QUOTA_KEY, QUOTA_COOLDOWN_MS).catch(() => null)
+  if (blocked) {
+    return { ok: false, reason: 'rate-limited', message: 'Cert lookup is at its daily limit — the label was still read' }
+  }
+
   try {
     const payload = await fetchJson(`${ENDPOINT}/${encodeURIComponent(trimmed)}`, {
-      headers: { Authorization: `bearer ${token.trim()}` },
+      headers: { Authorization: `bearer ${PSA_TOKEN}` },
       timeoutMs: 10_000,
       signal,
     })
@@ -176,10 +227,13 @@ export async function psaLookup(cert: string, token: string, signal?: AbortSigna
     if (isAbort(err)) return { ok: false, reason: 'unreachable', message: 'PSA lookup timed out' }
     const message = err instanceof Error ? err.message : String(err)
     if (/HTTP 401|HTTP 403/.test(message)) {
-      return { ok: false, reason: 'unauthorized', message: 'PSA rejected the token — check it in Settings' }
+      // Ours, not theirs — the user has nothing to fix, so do not send them
+      // looking for a setting that no longer exists.
+      return { ok: false, reason: 'unauthorized', message: 'Cert lookup is unavailable right now' }
     }
     if (/HTTP 429/.test(message)) {
-      return { ok: false, reason: 'rate-limited', message: 'PSA daily lookup limit reached — the label was still read' }
+      kvPut(QUOTA_KEY, true).catch(() => {})
+      return { ok: false, reason: 'rate-limited', message: 'Cert lookup is at its daily limit — the label was still read' }
     }
     // A CORS refusal surfaces here as an opaque network failure. Naming it is
     // the difference between a user thinking their token is wrong and knowing
@@ -193,4 +247,5 @@ export async function clearPsaCache(): Promise<void> {
   const rows = await db.cache.toCollection().primaryKeys()
   const certs = rows.filter((key): key is string => typeof key === 'string' && key.startsWith('psa-cert-'))
   if (certs.length) await db.cache.bulkDelete(certs)
+  await db.cache.delete(QUOTA_KEY)
 }
