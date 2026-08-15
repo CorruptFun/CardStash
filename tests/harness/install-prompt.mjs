@@ -2,6 +2,14 @@
  * Verifies the install banner's real behaviour in the built bundle: it must
  * appear for a user with a real collection, on both the Chromium and iOS
  * routes, and must stay hidden in every case where it would be noise.
+ *
+ * Runs against whatever `dist/` holds, and two different bundles ship from
+ * this tree. With VITE_GOOGLE_CLIENT_ID set — CI's deploy build, and what a
+ * local .env.local usually gives you — the banner offers a Drive backup as
+ * the primary iOS action and rewrites the restore step to match; without it
+ * the downloaded file is the only backup there is. The iOS section reads
+ * which one it is off the banner and asserts the matching copy and actions,
+ * so both configurations are covered and neither is the "wrong" build.
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -16,9 +24,9 @@ if (!existsSync(join(REPO, 'dist', 'index.html'))) {
   console.error('No dist/ — run `npm run build` first.')
   process.exit(2)
 }
-// --host 127.0.0.1: vite's default binds the loopback *name*, which resolves
-// to ::1 on some machines, and the probe below then times out against
-// 127.0.0.1 and reports the server never started. Same fix as its siblings.
+// --host 127.0.0.1: on a machine where `localhost` resolves to ::1, vite's
+// default bind leaves the v4 probe below (and the browser) knocking on a
+// closed door, and the harness blames the server for never coming up.
 const server = spawn('node', [join(REPO, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { cwd: REPO, stdio: 'ignore' })
 process.on('exit', () => { try { server.kill('SIGTERM') } catch {} })
 
@@ -34,6 +42,23 @@ const executablePath = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium'
 const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] })
 const results = []
 const check = (name, pass, detail = '') => { results.push({ name, pass, detail }); console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`) }
+const summarise = () => {
+  const failed = results.filter(r => !r.pass)
+  console.log(`\n${results.length - failed.length}/${results.length} passed`)
+  process.exit(failed.length ? 1 : 0)
+}
+
+// A harness that dies mid-run prints no tally, which reads like a harness that
+// was never run — and the thing most likely to kill it is a locator that
+// matches two nodes because the bundle under test isn't the one the assertion
+// was written against. That is a finding about the UI, so report it as a
+// failure and still print the tally.
+for (const fatal of ['uncaughtException', 'unhandledRejection']) {
+  process.on(fatal, err => {
+    check('harness ran to completion', false, String(err?.message ?? err).split('\n')[0])
+    summarise()
+  })
+}
 
 // Chromium fires beforeinstallprompt off engagement heuristics that headless
 // never satisfies, so replay a faithful synthetic one: preventDefault-able,
@@ -53,7 +78,7 @@ async function seeded(ctx, { ios = false } = {}) {
     const t = m.text()
     if (m.type() === 'error' && !/Failed to load resource|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|net::/.test(t)) errs.push(t)
   })
-  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0&demo=1#/collection`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&demo=1#/collection`, { waitUntil: 'load' })
   await page.waitForTimeout(2500)
   if (!ios) await page.evaluate(FIRE_BIP)
   await page.waitForTimeout(500)
@@ -91,6 +116,20 @@ async function seeded(ctx, { ios = false } = {}) {
   const { page, errs } = await seeded(ctx, { ios: true })
   const shown = await page.locator('.installtip').isVisible().catch(() => false)
   const body = await page.locator('.installtip').innerText().catch(() => '')
+
+  // Which bundle is this? Every button below is addressed by what it says
+  // rather than by its class, because Drive reshuffles the classes: the file
+  // backup is `.installtip__go` on its own and `.installtip__dismiss` once
+  // Drive outranks it, so a class selector either points at the wrong button
+  // or matches two of them and takes the run down with it.
+  const banner = page.locator('.installtip')
+  const driveButton = banner.getByRole('button', { name: /Back up (to Drive|again)/i })
+  const fileButton = banner.getByRole('button', { name: /Save (a file|again)/i })
+  const dismissButton = banner.getByRole('button', { name: /^(Not now|Done)$/i })
+  const drive = (await driveButton.count().catch(() => 0)) > 0
+  const build = drive ? 'Drive build (VITE_GOOGLE_CLIENT_ID set)' : 'file-only build (no VITE_GOOGLE_CLIENT_ID)'
+  console.log(`      · dist/ under test: ${build}`)
+
   check('ios: banner shows with no beforeinstallprompt', shown)
   check('ios: gives Share -> Add to Home Screen steps', /Add to Home Screen/.test(body) && /Share/.test(body))
   // The load-bearing one: a Home Screen web app gets storage partitioned away
@@ -98,31 +137,31 @@ async function seeded(ctx, { ios = false } = {}) {
   // collection the banner exists to protect.
   check('ios: warns the installed app starts empty', /starts empty/i.test(body))
   check('ios: says storage is separate from Safari', /separate storage/i.test(body))
-  // Which route back it names depends on the bundle — "Collection → Import"
-  // without Drive, "Settings → Restore from Drive" with it. Assert that it
-  // names one, not which: this harness runs against both builds.
-  check('ios: tells them how to get the backup back after installing', /Import|Restore from Drive/i.test(body), body.slice(0, 120))
-  // The primary iOS action must be a BACKUP, never the install — the exact
-  // label depends on whether Drive is configured ("Back up to Drive" vs
-  // "Save a file"), so assert the intent, not the wording.
-  const primary = await page.locator('.installtip__go').first().innerText().catch(() => '')
-  check('ios: offers a backup as the primary action, not the install', /back up|save a file|save backup/i.test(primary), primary)
+  // The last step has to name the route this build actually has. Sending a
+  // Drive user to import a file nobody told them to save is the same dead end
+  // as sending a file user to a Drive restore that isn't in their Settings.
+  check('ios: names the restore step this build can deliver', drive ? /Restore from Drive/i.test(body) : /Import/.test(body), build)
+  // The primary action is a backup in both builds — which backup differs, that
+  // it outranks the install does not.
+  const primary = await page.locator('.installtip__go').innerText().catch(() => '')
+  check('ios: offers the backup as the primary action', drive ? /Back up to Drive/i.test(primary) : /Save a file/i.test(primary), primary || 'no primary action')
+  // Drive must never be the only way out: someone who won't sign in to Google
+  // still needs a backup, and the file is the one that needs no account.
+  check('ios: keeps the account-free file backup on offer', await fileButton.isVisible().catch(() => false))
   check('ios: no console errors', errs.length === 0, errs.join(' | '))
 
-  // The backup must actually produce a file — the whole iOS flow depends on it.
+  // The backup must actually produce a file — the whole iOS flow depends on
+  // it. Deliberately the file button and never the Drive one: clicking Drive
+  // injects Google's script and opens a real OAuth flow, which is neither
+  // this harness's business nor something a dummy client id can finish.
   const pending = page.waitForEvent('download', { timeout: 10000 }).catch(() => null)
-  // Target the file route explicitly: the Drive button, when configured, sits
-  // in the same primary slot but uploads instead of downloading.
-  await page.getByRole('button', { name: /save a file|save backup|save again/i }).first().click()
+  await fileButton.click()
   const dl = await pending
   const name = dl ? dl.suggestedFilename() : ''
   check('ios: Save backup downloads a real backup file', /^cardstock-backup-.*\.json$/.test(name), name || 'no download fired')
   check('ios: banner stays up after saving (install is step two)', await page.locator('.installtip').isVisible().catch(() => false))
 
-  // By label, never by class: `installtip__dismiss` is secondary *styling*, not
-  // the dismiss action. With Drive configured the file-backup button moves into
-  // that same class and the selector matches two nodes.
-  await page.getByRole('button', { name: /^(Done|Not now)$/ }).click()
+  await dismissButton.click()
   await page.waitForTimeout(300)
   check('ios: dismiss hides it', !(await page.locator('.installtip').isVisible().catch(() => false)))
   await page.reload({ waitUntil: 'load' })
@@ -135,7 +174,7 @@ async function seeded(ctx, { ios = false } = {}) {
 {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] })
   const page = await ctx.newPage()
-  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/collection`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/collection`, { waitUntil: 'load' })
   await page.waitForTimeout(1500)
   check('below the threshold: no banner', !(await page.locator('.installtip').isVisible().catch(() => false)))
   await ctx.close()
@@ -150,7 +189,7 @@ async function seeded(ctx, { ios = false } = {}) {
     const mm = window.matchMedia.bind(window)
     window.matchMedia = q => (q.includes('standalone') ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : mm(q))
   })
-  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0&demo=1#/collection`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&demo=1#/collection`, { waitUntil: 'load' })
   await page.waitForTimeout(2500)
   check('installed (standalone): no banner', !(await page.locator('.installtip').isVisible().catch(() => false)))
   await ctx.close()
@@ -160,13 +199,11 @@ async function seeded(ctx, { ios = false } = {}) {
 {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] })
   const page = await ctx.newPage()
-  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0&demo=1#/scan`, { waitUntil: 'load' })
+  await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&demo=1#/scan`, { waitUntil: 'load' })
   await page.waitForTimeout(2000)
   check('scan view: banner never covers the camera', !(await page.locator('.installtip').isVisible().catch(() => false)))
   await ctx.close()
 }
 
 await browser.close()
-const failed = results.filter(r => !r.pass)
-console.log(`\n${results.length - failed.length}/${results.length} passed`)
-process.exit(failed.length ? 1 : 0)
+summarise()
