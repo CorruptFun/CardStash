@@ -169,10 +169,17 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0007 — social is 0000–0004), not
+`supabase/migrations/` (0000–0012 — social is 0000–0004), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
+
+A new table states its own grants, `revoke all` first, then grants back exactly
+what it needs (0011–0012). Supabase's default privileges hand `anon` and
+`authenticated` privileges nobody asked for, and a revoke that *names*
+privileges only takes back the ones you thought of — Postgres 17 added MAINTAIN
+and `information_schema.role_table_grants` cannot see it, so audit
+`pg_class.relacl` when the question is "does this grant anything at all".
 
 **The CLI on a dev machine may be signed in as the wrong account.** If every
 project-scoped call answers `does not have the necessary privileges`, that is
