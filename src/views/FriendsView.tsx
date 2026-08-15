@@ -39,6 +39,7 @@ import {
   requestFriend,
   socialConfigured,
   syncSocialNow,
+  updateDisplayName,
   type FriendRequest,
   type PendingRequests,
   type WantMatch,
@@ -270,11 +271,24 @@ export function FriendsView() {
         <h3>My binder</h3>
         <div className="profilecard">
           <div className="profilecard__row">
+            {/* Typing edits the local name; leaving the field pushes it to the
+                directory. The handle beside it never moves, so this is the one
+                thing about a hosted identity that a person can still change —
+                and until it went up, a friend request showed whatever name was
+                current on the day the handle was claimed. */}
             <input
               className="input"
               type="text"
               value={config.profileName}
               onChange={(e) => config.set({ profileName: e.target.value })}
+              onBlur={(e) => {
+                const name = e.target.value.trim()
+                if (!name || !socialConfigured()) return
+                updateDisplayName(name).catch(() => {
+                  /* offline — the binder carries the name too, and the next
+                     edit tries again. Not worth a toast. */
+                })
+              }}
               placeholder="Your name"
               maxLength={40}
               aria-label="Your display name"

@@ -95,6 +95,14 @@ async function cleanup() {
       headers: { apikey: SECRET, Authorization: `Bearer ${SECRET}` },
     }).catch(() => {})
   }
+  // `handle_claims` deliberately does NOT cascade — a deleted account retires
+  // its handle forever (0010). That is right for a person and wrong for a test
+  // account, so this run's handles are swept explicitly. Without it every run
+  // against the real project would permanently burn five names.
+  await fetch(`${URL_BASE}/rest/v1/handle_claims?handle=like.*${stamp}`, {
+    method: 'DELETE',
+    headers: { apikey: SECRET, Authorization: `Bearer ${SECRET}` },
+  }).catch(() => {})
 }
 
 const stamp = Date.now()
@@ -138,17 +146,80 @@ try {
   await rpc(carol.token, 'set_profile', { p_handle: `carol${stamp}`, p_display_name: 'Carol' })
   await rpc(dave.token, 'set_profile', { p_handle: `dave${stamp}`, p_display_name: 'Dave' })
 
-  const dupe = await rpc(bob.token, 'set_profile', { p_handle: `alice${stamp}`, p_display_name: 'Impostor' })
+  // These have to be asked by someone who has claimed NOTHING yet. Since 0010
+  // a caller who already has a handle is refused for that reason first — the
+  // name they asked for stops mattering — so asking bob would prove only that
+  // permanence works, and silently stop testing what it says on the label.
+  const frank = await makeUser(`frank+${stamp}@probe.test`)
+  const dupe = await rpc(frank.token, 'set_profile', { p_handle: `alice${stamp}`, p_display_name: 'Impostor' })
   check('a taken handle is refused', JSON.stringify(dupe.body).includes('handle_taken'), JSON.stringify(dupe.body))
-  const reserved = await rpc(bob.token, 'set_profile', { p_handle: 'support', p_display_name: 'Nope' })
+  const reserved = await rpc(frank.token, 'set_profile', { p_handle: 'support', p_display_name: 'Nope' })
   check('a reserved handle is refused', JSON.stringify(reserved.body).includes('handle_reserved'), JSON.stringify(reserved.body))
-  const malformed = await rpc(bob.token, 'set_profile', { p_handle: 'No Spaces!', p_display_name: 'Nope' })
+  const malformed = await rpc(frank.token, 'set_profile', { p_handle: 'No Spaces!', p_display_name: 'Nope' })
   check('a malformed handle is refused', JSON.stringify(malformed.body).includes('bad_handle'), JSON.stringify(malformed.body))
+  const stillNone = await rest(carol.token, `/profiles?user_id=eq.${frank.id}&select=handle`)
+  check('...and none of those left a half-made profile', (stillNone.body ?? []).length === 0, JSON.stringify(stillNone.body))
 
   const resolve = await rest(carol.token, `/profiles?handle=eq.alice${stamp}&select=handle,display_name`)
   check('any signed-in user resolves a handle', resolve.status === 200 && resolve.body?.length === 1, JSON.stringify(resolve.body))
   const anonDir = await rest(PUBLISHABLE, '/profiles?select=handle')
   check('anonymous cannot read the directory', anonDir.status !== 200 || anonDir.body?.length === 0, `${anonDir.status}`)
+
+  // A handle that can come to mean a second person is an impersonation
+  // primitive — `request_friend` resolves one at the moment it is called. These
+  // are the guards from migration 0010, and the reason the welcome screen no
+  // longer offers the field to someone who already has one.
+  console.log('\n\x1b[1m1b. A handle is claimed once, and never recycled\x1b[0m')
+  const rename = await rpc(alice.token, 'set_profile', { p_handle: `alice2${stamp}`, p_display_name: 'Alice' })
+  check('MY OWN HANDLE CANNOT BE CHANGED', JSON.stringify(rename.body).includes('handle_locked'), JSON.stringify(rename.body))
+  const rename3 = await rpc(alice.token, 'set_profile', { p_handle: `bob${stamp}`, p_display_name: 'Alice' })
+  check("...not even to someone else's, which is refused as locked, not taken", JSON.stringify(rename3.body).includes('handle_locked'), JSON.stringify(rename3.body))
+  const stillMine = await rest(alice.token, `/profiles?user_id=eq.${alice.id}&select=handle`)
+  check('...and the refusal left it exactly as it was', stillMine.body?.[0]?.handle === `alice${stamp}`, JSON.stringify(stillMine.body))
+  const freed = await rpc(bob.token, 'handle_available', { p_handle: `alice2${stamp}` })
+  check('...so the name it would have freed was never freed', freed.body === 'ok', JSON.stringify(freed.body))
+
+  const rename2 = await rest(alice.token, `/profiles?user_id=eq.${alice.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ handle: `alice3${stamp}` }),
+  })
+  check('A DIRECT PATCH CANNOT CHANGE IT EITHER', rename2.status >= 400, `${rename2.status} ${JSON.stringify(rename2.body)}`)
+
+  const renamed = await rpc(alice.token, 'set_profile', { p_handle: `alice${stamp}`, p_display_name: 'Alice Renamed' })
+  check('re-sending my own handle edits the display name', renamed.status === 200, `${renamed.status} ${JSON.stringify(renamed.body)}`)
+  const named = await rpc(alice.token, 'set_display_name', { p_display_name: 'Alice' })
+  check('set_display_name changes the name with no handle at all', named.status === 200 && (Array.isArray(named.body) ? named.body[0] : named.body)?.display_name === 'Alice', JSON.stringify(named.body))
+  const noProfile = await rpc(dave.token, 'set_display_name', { p_display_name: '' })
+  check('set_display_name refuses an empty name', JSON.stringify(noProfile.body).includes('bad_display_name'), JSON.stringify(noProfile.body))
+
+  const avail = await rpc(bob.token, 'handle_available', { p_handle: `free${stamp}` })
+  check("handle_available says 'ok' for a free one", avail.body === 'ok', JSON.stringify(avail.body))
+  const availTaken = await rpc(bob.token, 'handle_available', { p_handle: `alice${stamp}` })
+  check("handle_available says 'taken' before anyone commits to it", availTaken.body === 'taken', JSON.stringify(availTaken.body))
+  const availMine = await rpc(bob.token, 'handle_available', { p_handle: `bob${stamp}` })
+  check("handle_available says 'mine' for my own", availMine.body === 'mine', JSON.stringify(availMine.body))
+  const availReserved = await rpc(bob.token, 'handle_available', { p_handle: 'support' })
+  check("handle_available says 'reserved'", availReserved.body === 'reserved', JSON.stringify(availReserved.body))
+  const availBad = await rpc(bob.token, 'handle_available', { p_handle: 'No Spaces!' })
+  check("handle_available says 'bad'", availBad.body === 'bad', JSON.stringify(availBad.body))
+  const availAnon = await rpc(PUBLISHABLE, 'handle_available', { p_handle: `free${stamp}` })
+  check('anonymous cannot probe the handle space', availAnon.status >= 400, `${availAnon.status}`)
+  // The ledger is the uniqueness authority and holds handles whose owners are
+  // gone. Readable, it would be a dump of who used to be here.
+  const ledger = await rest(carol.token, '/handle_claims?select=handle,user_id')
+  check('the claim ledger refuses a direct read', ledger.status >= 400 || (ledger.body ?? []).length === 0, `${ledger.status} ${JSON.stringify(ledger.body)}`)
+
+  // Erasing your social presence deletes the profile row. The ledger keeps the
+  // claim, so the name does not go back on the shelf — and comes back to you.
+  const erin = await makeUser(`erin+${stamp}@probe.test`)
+  await rpc(erin.token, 'set_profile', { p_handle: `erin${stamp}`, p_display_name: 'Erin' })
+  await rpc(erin.token, 'erase_social', {})
+  const erinGone = await rest(carol.token, `/profiles?handle=eq.erin${stamp}&select=handle`)
+  check('erasing removes the profile row', (erinGone.body ?? []).length === 0, JSON.stringify(erinGone.body))
+  const grab = await rpc(frank.token, 'set_profile', { p_handle: `erin${stamp}`, p_display_name: 'Impostor' })
+  check('AN ERASED HANDLE IS STILL NOT UP FOR GRABS', JSON.stringify(grab.body).includes('handle_taken'), JSON.stringify(grab.body))
+  const reclaim = await rpc(erin.token, 'set_profile', { p_handle: `erin${stamp}`, p_display_name: 'Erin' })
+  check('...but its owner gets it back', reclaim.status === 200, `${reclaim.status} ${JSON.stringify(reclaim.body)}`)
 
   console.log('\n\x1b[1m2. The visibility rule\x1b[0m')
   const alicePub = await rpc(alice.token, 'publish_binder', {

@@ -47,10 +47,25 @@ create table if not exists public.handle_claims (
 );
 
 alter table public.handle_claims enable row level security;
--- No policy and no grant, exactly like `reserved_handles`: this table answers
--- questions only through the definer functions below. Direct read would turn
--- "which handles are retired" into a dump, and direct write would be the hole
--- this migration exists to close.
+-- No policy and no grant to `authenticated`, exactly like `reserved_handles`:
+-- this table answers questions only through the definer functions below.
+-- Direct read would turn "which handles are retired" into a dump, and direct
+-- write would be the hole this migration exists to close.
+--
+-- `service_role` is the exception, and only because the RLS harness creates
+-- throwaway accounts on the REAL project: deleting those users retires their
+-- handles forever (`on delete set null`), so every run would burn a few names
+-- permanently unless the harness can sweep them. The secret key can already do
+-- anything; this only makes the cleanup expressible through PostgREST.
+revoke all on public.handle_claims from public, anon, authenticated;
+grant select, delete on public.handle_claims to service_role;
+-- The revoke above is not ceremonial. Supabase's default privileges hand
+-- `authenticated` REFERENCES/TRIGGER/TRUNCATE on every new table in `public`,
+-- which survives a `revoke insert, update, delete` and leaves a table that is
+-- documented as unreachable holding a grant that could empty it. PostgREST
+-- never issues TRUNCATE, so this is latent rather than live — but "no grant"
+-- should be true rather than nearly true. Every other table in this project
+-- still carries the default; that is a separate sweep.
 
 -- Every handle already in use is claimed by whoever is holding it now.
 insert into public.handle_claims (handle, user_id, claimed_at)
@@ -251,7 +266,7 @@ create trigger profiles_handle_permanent
 -- PATCHed this table — `socialcloud.ts` reads it and calls `set_profile` to
 -- write — so removing the grant breaks no cached client. `erase_social()` is
 -- `security definer` and runs as the owner, so its delete is unaffected.
-revoke insert, update, delete on public.profiles from authenticated;
+revoke insert, update, delete, truncate on public.profiles from authenticated;
 grant  select on public.profiles to authenticated;
 
 revoke execute on function public.set_profile(text, text)      from public, anon;

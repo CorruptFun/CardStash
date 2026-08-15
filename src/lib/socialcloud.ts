@@ -154,13 +154,47 @@ function adoptIdentity(profile: SocialProfile): SocialProfile {
   return profile
 }
 
-/** Claim or change my handle. Caches it so the UI renders without a fetch. */
+export const normalizeHandle = (handle: string): string =>
+  handle.trim().toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_]/g, '')
+
+/**
+ * Claim my handle. **One per account, permanently** — see migration 0010.
+ *
+ * Re-sending the handle I already have is how the display name is changed by
+ * an older client, and the server still allows exactly that; sending a
+ * *different* one raises `handle_locked` rather than renaming me. Never call
+ * this to "fix" a handle: check `loadMyProfile()` first and don't offer the
+ * field at all if one comes back.
+ */
 export async function claimHandle(handle: string, displayName: string): Promise<SocialProfile> {
   const row = await call<ProfileRow | ProfileRow[]>('set_profile', {
-    p_handle: handle.trim().toLowerCase().replace(/^@/, ''),
+    p_handle: normalizeHandle(handle),
     p_display_name: displayName,
   })
   return adoptIdentity(toProfile(Array.isArray(row) ? row[0] : row))
+}
+
+/** Whether a handle can still be claimed — asked while the user types. */
+export type HandleStatus = 'ok' | 'mine' | 'taken' | 'reserved' | 'bad'
+
+/**
+ * Ask the server whether a handle is free.
+ *
+ * `lookupHandle` is not a substitute: it reads `profiles`, which knows nothing
+ * about handles that were claimed and then erased. Those are still spoken for,
+ * and finding that out at the moment of claiming — after being told the name
+ * was permanent — is the worst possible time.
+ */
+export async function checkHandle(handle: string): Promise<HandleStatus> {
+  const clean = normalizeHandle(handle)
+  if (clean.length < 3) return 'bad'
+  return await call<HandleStatus>('handle_available', { p_handle: clean })
+}
+
+/** Change the name friends see. The handle it sits beside never moves. */
+export async function updateDisplayName(name: string): Promise<SocialProfile> {
+  const row = await call<ProfileRow | ProfileRow[]>('set_display_name', { p_display_name: name.trim() })
+  return toProfile(Array.isArray(row) ? row[0] : row)
 }
 
 /** My stored profile, or null if I have never claimed a handle. */
@@ -170,6 +204,33 @@ export async function loadMyProfile(): Promise<SocialProfile | null> {
   const rows = await rest<ProfileRow[]>(`/profiles?user_id=eq.${me}&select=user_id,handle,display_name`)
   if (!rows?.length) return null
   return adoptIdentity(toProfile(rows[0]))
+}
+
+/**
+ * Pull the account's handle down onto a device that has never seen it.
+ *
+ * `socialHandle` is a localStorage cache, so a brand-new device has none even
+ * when the account has had one for a year — and everything that asks "are they
+ * set up?" (`nextConnectStep`, the nudge, the welcome screen) reads that cache.
+ * Without this, signing in on a second phone looks exactly like never having
+ * claimed a handle, which is precisely the mistake that used to rename people.
+ *
+ * Runs at most once per session: on success the cache is filled, and a null
+ * result means this account genuinely has no handle, which re-asking every
+ * 25 seconds would not change.
+ */
+let hydrating: Promise<unknown> | null = null
+
+export function hydrateIdentity(): Promise<unknown> {
+  if (hydrating) return hydrating
+  if (!CLOUD_AVAILABLE || !isSignedIn() || settings().socialHandle) return Promise.resolve(null)
+  hydrating = loadMyProfile().catch(() => {
+    // Offline or a blip — let the next tick try again rather than spending the
+    // rest of the session believing this account has no handle.
+    hydrating = null
+    return null
+  })
+  return hydrating
 }
 
 export async function lookupHandle(handle: string): Promise<SocialProfile | null> {
@@ -484,6 +545,10 @@ export async function matchWants(keys: string[]): Promise<WantMatch[]> {
 export async function eraseSocial(): Promise<void> {
   await call('erase_social', {})
   lastPublishedHash = null
+  // The handle is cleared locally because the profile row is gone — but it is
+  // still RESERVED to this account server-side (0010), so coming back means
+  // reclaiming the same name rather than finding a stranger wearing it.
+  hydrating = null
   settings().set({ socialOn: false, socialHandle: '', socialCursor: 0, socialAt: 0 })
 }
 
@@ -523,7 +588,15 @@ let loopTimer: ReturnType<typeof setInterval> | null = null
 export function startSocialLoop(): void {
   if (loopTimer || typeof window === 'undefined') return
   const tick = () => {
-    if (document.visibilityState !== 'visible' || !socialConfigured()) return
+    if (document.visibilityState !== 'visible') return
+    // Ahead of the configured check, because on a device that has only just
+    // signed in this is what makes that check true. Signing in on a new phone
+    // is meant to be all it takes.
+    if (!settings().socialHandle) {
+      void hydrateIdentity()
+      return
+    }
+    if (!socialConfigured()) return
     syncSocialNow().catch(() => {
       /* offline or refused — the next tick tries again */
     })

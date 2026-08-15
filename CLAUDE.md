@@ -190,6 +190,25 @@ it cannot be E2E-encrypted like `vaults`. The two are separate tables, separate
 opt-ins, and `erase_social()` leaves `vaults` alone. Never widen what is
 published beyond what the user chose.
 
+**A handle is claimed once and never changes hands** (migration 0010, decision
+21). `set_profile()` writes it once and raises `handle_locked` on any later
+change; the `handle_claims` ledger — never deleted from — is the uniqueness
+authority, so an erased account keeps its name reserved and a *deleted* one
+retires it forever (`on delete set null`, not cascade). `authenticated` has no
+INSERT/UPDATE/DELETE on `profiles`; the RPCs are the only door and a trigger
+backs them up. Display names stay editable via `set_display_name()`.
+
+This existed because the flow got it wrong, not just the schema: the welcome
+screen used to ask for a handle after **every** sign-in, prefilled from the
+email, so signing in on a second phone renamed you and freed the name your
+friends had saved. Two client rules follow and must not erode — **look up the
+profile before ever offering the handle field** (`checkForProfile` in
+`Welcome.tsx`; a returning account goes to "Welcome back, @rae"), and
+**`hydrateIdentity()` pulls the handle onto a new device**, because
+`socialHandle` is a localStorage cache and every "are they set up?" check reads
+it. There is no separate sign-up: an email address *is* the account, one per
+address, and `SignIn.tsx` must never grow a "Create account" branch.
+
 **Two switches, not one.** `socialConfigured()` (signed in + handle) and
 `socialPublishing()` (+ `socialOn`) are different questions on purpose:
 claiming a handle publishes no cards and only makes you reachable; putting the

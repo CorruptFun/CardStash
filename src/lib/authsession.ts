@@ -195,6 +195,18 @@ export async function freshToken(): Promise<string> {
 /* --------------------------------------------------------------------- auth */
 
 /**
+ * The address as the account will be keyed by it.
+ *
+ * GoTrue lowercases and keeps one user per address, so "Rae@Example.com" and
+ * "rae@example.com" are already the same account — but the code is requested
+ * with one string and verified with another, and the two must agree or the
+ * verify is rejected for an address that never asked for a code. Doing it here
+ * also means the confirmation screen shows the address the account actually
+ * has, rather than whatever capitalisation the keyboard produced.
+ */
+export const normalizeEmail = (email: string): string => email.trim().toLowerCase()
+
+/**
  * Email a six-digit code. No redirect anywhere, which is why this is the
  * path that works identically in Safari and in an iOS Home Screen app —
  * see the OAuth caveat on `startGoogleSignIn`.
@@ -209,7 +221,7 @@ export async function sendEmailCode(email: string): Promise<void> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
     method: 'POST',
     headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, create_user: true }),
+    body: JSON.stringify({ email: normalizeEmail(email), create_user: true }),
   })
   if (!res.ok) throw new CloudError(await readError(res, 'Could not send the code'))
 }
@@ -218,7 +230,7 @@ export async function verifyEmailCode(email: string, code: string): Promise<Clou
   const res = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
     method: 'POST',
     headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, token: code, type: 'email' }),
+    body: JSON.stringify({ email: normalizeEmail(email), token: code, type: 'email' }),
   })
   if (!res.ok) throw new CloudError(await readError(res, 'That code was not accepted'))
   const next = sessionFrom((await res.json()) as Record<string, unknown>)

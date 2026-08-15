@@ -249,6 +249,34 @@ stranger. `set_profile()` normalises, validates `^[a-z0-9_]{3,24}$`, and
 refuses the `reserved_handles` list (`support`, `admin`, `cardstock`, …) so
 nobody can impersonate the product inside a trade proposal.
 
+**`handle_claims`** — every handle ever claimed, never deleted from. Since
+0010 this, not `profiles`, is the uniqueness authority, and **a handle is
+permanent**: `set_profile()` writes it once and refuses every later change with
+`handle_locked`, so from then on it only ever updates `display_name` (or use
+`set_display_name()`, which needs no handle at all). `authenticated` has lost
+INSERT/UPDATE/DELETE on `profiles` — the RPCs are the only door — and a trigger
+refuses a handle update even from the owner. Read decision 21 before touching
+any of it; the short version is that `request_friend()` resolves a handle at the
+moment it is called, so a handle that can come to mean a second person is an
+impersonation primitive.
+
+Two consequences that surprise people:
+
+- **Erasing your social data does not free your handle.** `erase_social()`
+  drops the profile row; the ledger keeps the claim, so nobody else can take
+  the name and *you* get it back if you return.
+- **A deleted account retires its handle forever.** The ledger's FK is
+  `on delete set null`, so the row outlives the user with a null owner that
+  nothing can match. That is deliberate — see decision 21 — and it is why
+  `tests/harness/social-rls.mjs` sweeps its own throwaway handles rather than
+  letting each run burn five names on the real project.
+
+`handle_available()` answers `ok | mine | taken | reserved | bad` so the UI can
+say "@rae is taken" while someone types. It consults the ledger, so an erased
+handle reads as taken — which `lookupHandle` (a `profiles` read) would not
+know. Current handles are already enumerable through the directory by design;
+the only thing this adds is that a retired name reads as used.
+
 **`friendships`** — one row per *pair*, `requester`/`addressee`/`status`
 (`pending | accepted | blocked`). Directional columns because the UI needs
 "waiting on them" vs "needs your answer"; friendship itself is undirected, so
@@ -294,7 +322,10 @@ serves the vault and social both, and neither module owns the other's state.
 
 | Function | What it does |
 | -------- | ------------ |
-| `claimHandle` | `set_profile`, then adopts the account as this device's identity (below) |
+| `claimHandle` | `set_profile`, then adopts the account as this device's identity (below). Claims once — never call it to *change* a handle |
+| `checkHandle` | `handle_available`, asked while the user types, because a permanent choice must not be rejected after the tap |
+| `updateDisplayName` | `set_display_name` — the one part of a hosted identity that stays editable |
+| `hydrateIdentity` | pulls the handle onto a device that has never seen it. `socialHandle` is a localStorage cache, so without this a second device is indistinguishable from a new user |
 | `publishBinder` | `buildProfilePayload()` unchanged → `publish_binder` RPC, with a payload-hash skip so an unchanged binder is not rewritten |
 | `pullFriends` | revisions first, payloads only for what moved |
 | `drainInbox` | `id > cursor`, sanitize, record, advance, delete |

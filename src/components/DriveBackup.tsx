@@ -110,9 +110,12 @@ export function DriveBackup() {
   // button that cannot work.
   if (!isDriveConfigured()) return null
 
+  // NO <section> and NO heading of its own: this now renders INSIDE the Backup
+  // section's "Other backup options" disclosure (CloudSync.tsx). It used to be
+  // a peer section also titled "Backup", so Settings showed that word twice --
+  // the exact duplication this pass exists to remove.
   return (
-    <section className="setsec drivepanel">
-      <h3>Backup</h3>
+    <div className="drivepanel">
       {config.driveBackup ? (
         <>
           <div className="syncstate">
@@ -184,6 +187,6 @@ export function DriveBackup() {
           have the same row. It never empties your collection.
         </p>
       </Modal>
-    </section>
+    </div>
   )
 }

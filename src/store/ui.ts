@@ -93,9 +93,18 @@ export function useUi<T>(selector: (state: UiState) => T): T {
  * Run a DB write and surface failures as a toast instead of an unhandled
  * rejection — storage quota being the failure that actually happens on phones.
  */
+/**
+ * Every DB write from the UI comes through here, which makes it the one place
+ * that can notice "something changed" without thirty call sites remembering to
+ * say so. A successful write asks for a backup; `scheduleBackup()` debounces,
+ * so scanning a whole binder produces one push rather than one per card, and it
+ * is a no-op for signed-out users.
+ */
 export async function guarded<T>(work: () => Promise<T>, what = 'Save'): Promise<T | undefined> {
   try {
-    return await work()
+    const result = await work()
+    void import('../lib/autobackup').then((m) => m.scheduleBackup()).catch(() => {})
+    return result
   } catch (err: any) {
     const message = String(err?.message ?? err)
     const quota = err?.name === 'QuotaExceededError' || /quota/i.test(message)

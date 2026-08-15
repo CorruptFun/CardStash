@@ -25,7 +25,16 @@
 
 import { authHeaders, CloudError, freshToken, onSignOut, readError } from './authsession'
 import { SUPABASE_URL } from './cloudconfig'
-import { deriveKey, encryptJson, decryptJson, fromBase64, keyCheck, randomSalt, toBase64, type VaultEnvelope } from './crypto'
+import {
+  encryptJson,
+  decryptJson,
+  fromBase64,
+  importVaultKey,
+  keyFingerprint,
+  randomSalt,
+  toBase64,
+  type VaultEnvelope,
+} from './crypto'
 import { mergeBackups, type MergeReport } from './cloudmerge'
 import { exportBackup, importBackup, sanitizeBackup, type Backup } from './db'
 import { settings } from './settings'
@@ -86,20 +95,41 @@ async function fetchVault(): Promise<VaultRow | null> {
 }
 
 /**
- * Unlock with a passphrase. On a device that has never synced this mints a
- * salt; on one joining an existing vault it adopts the server's salt and
- * refuses a mismatched passphrase before downloading anything large.
+ * Get this account's vault key, minting it on first use, and hold it for the
+ * run. Replaces the old `unlock(passphrase)`.
+ *
+ * There is nothing for the user to do here, which is the entire point: the
+ * passphrase version had ZERO users across the whole project and somebody lost
+ * a real collection to browser eviction while a perfectly good backup route sat
+ * unused behind it. Read migration 0009 for what that costs — this is
+ * encryption at rest with a key the server holds, and it is not end-to-end.
+ *
+ * The salt stays in the envelope because the format has a slot for it, but it
+ * is now decorative: nothing is derived any more. It is left rather than
+ * removed so old envelopes keep their shape.
  */
-export async function unlock(passphrase: string): Promise<{ existing: boolean }> {
-  const row = await fetchVault()
-  const salt = row ? fromBase64(row.envelope.salt) : randomSalt()
-  const check = await keyCheck(passphrase, salt)
-  if (row && row.key_check !== check) {
-    throw new CloudError('That passphrase does not match the vault on this account')
-  }
-  vaultKey = await deriveKey(passphrase, salt)
-  settings().set({ cloudSalt: toBase64(salt), cloudKeyCheck: check })
-  return { existing: Boolean(row) }
+export async function ensureVaultKey(): Promise<CryptoKey> {
+  if (vaultKey) return vaultKey
+  const token = await freshToken()
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_or_create_vault_key`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: '{}',
+  })
+  if (!res.ok) throw new CloudError(await readError(res, 'Could not reach your backup'))
+  const raw = (await res.json()) as unknown
+  const base64 = typeof raw === 'string' ? raw : ''
+  if (!base64) throw new CloudError('The server did not return a usable key')
+  const key = await importVaultKey(base64)
+  vaultKey = key
+  // `cloudKeyCheck` keeps its old meaning -- "is this the key the ciphertext
+  // was written with" -- it is simply asked of a key now rather than a
+  // passphrase. Settings still uses it to answer "is backup set up".
+  settings().set({
+    cloudKeyCheck: await keyFingerprint(base64),
+    cloudSalt: settings().cloudSalt || toBase64(randomSalt()),
+  })
+  return key
 }
 
 export interface SyncOutcome {
@@ -144,8 +174,7 @@ function deviceLabel(): string {
  * concurrent write is answered by going round again with the newer base.
  */
 export async function syncNow(): Promise<SyncOutcome> {
-  if (!vaultKey) throw new CloudError('Unlock the vault with your passphrase first')
-  const key = vaultKey
+  const key = await ensureVaultKey()
   const salt = fromBase64(settings().cloudSalt || '')
   const check = settings().cloudKeyCheck
 

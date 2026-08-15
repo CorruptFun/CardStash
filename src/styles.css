@@ -5981,6 +5981,29 @@ button {
 
 /* --- hosted social ------------------------------------------------------- */
 
+/* The verdict under a handle field, asked for while the user types.
+   A handle is permanent (migration 0010), so "that one's taken" has to arrive
+   before the tap that commits to it — a red toast afterwards is a rejection of
+   a decision they cannot revise. Fixed height so an answer landing does not
+   shift the button out from under a thumb already on its way down. */
+.handlestatus {
+  margin: 0;
+  min-height: 16px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.handlestatus__hint {
+  color: var(--paper-3);
+}
+.handlestatus__ok {
+  color: var(--good);
+  font-weight: 500;
+}
+.handlestatus__no {
+  color: var(--bad);
+  font-weight: 500;
+}
+
 /* The "@" that prefixes a handle field. Sits outside the input so the caret
    never lands before it and the user cannot delete it. */
 .handleat {

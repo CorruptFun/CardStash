@@ -672,3 +672,66 @@ and the client change is one constant in `diagconfig.ts`. Or wanting per-user
 analytics, which this schema deliberately cannot answer and should not be
 retrofitted to; that is a different product with a different consent
 conversation attached.
+
+---
+
+### 21. A handle is claimed once and never changes hands
+
+**Context.** Identity has been the Supabase user since decision 16, and that
+part was sound: an email address maps to exactly one account, GoTrue enforces
+it, and signing in on a new device gets you back. The *handle* was not sound.
+`set_profile()` upserted on `user_id` and overwrote `handle`, so renaming
+released the old name for anyone to claim, and `erase_social()` deletes the
+profile row, which released it too. `authenticated` also held UPDATE on
+`profiles` with an `auth.uid() = user_id` policy, so a straight PATCH could do
+the same thing without going near the function — the rule in the RPC was not a
+rule at all.
+
+The client made it routine rather than theoretical. The welcome screen asked
+for a handle after **every** sign-in, prefilled from the email local-part,
+without checking whether the account already had one. A collector signing in on
+a second phone was shown "Pick a handle", tapped the only prominent button, and
+renamed themselves — releasing the name their friends had saved, mid-trade.
+
+**Decision (2026-08-15).** A handle is permanent. `set_profile()` refuses any
+change (`handle_locked`) and only ever writes `display_name` thereafter, and a
+`handle_claims` ledger — never deleted from — is the uniqueness authority
+instead of `profiles`. `supabase/migrations/0010_handle_permanence.sql`.
+
+**Why permanent rather than "changeable, old one retired".** Both close the
+impersonation hole, and retiring-on-rename is friendlier to typos. Permanence
+won on explainability: it is one sentence a new user can read at the moment of
+choosing ("claimed once, yours forever"), it needs no cooldown, no rename UI and
+no second copy explaining why an old handle will not come back, and it matches
+what collectors already expect from a trading platform's `@`. The cost is real
+and accepted — a typo is permanent, and repairing one is a maintainer task
+requiring the trigger to be disabled by hand.
+
+**A deleted account retires its handle forever.** `handle_claims.user_id` is
+`on delete set null`, not `on delete cascade`: when the auth user goes the row
+stays with a null owner, which nobody can match. "Nobody" is the only safe
+answer to who inherits @rae after Rae leaves — the whole point of the ledger is
+that a name never comes to mean a second person. Handle exhaustion is not a
+real cost at this scale. The RLS harness therefore sweeps its own throwaway
+handles explicitly, because a test account is exactly the case where the right
+answer is the opposite.
+
+**Enforced in three places on purpose.** The RPC refuses; `authenticated` loses
+INSERT/UPDATE/DELETE on `profiles` so the RPC is the only door; and a trigger
+refuses the update even from the table owner, so a later edit to the definer
+function cannot quietly undo it. Any one of them alone is a comment.
+
+**What the client had to change to make it true.** Enforcement stops the
+damage; it does not make the flow make sense. So: sign-in now *looks up the
+profile first* and a returning account goes to a "Welcome back, @rae" step with
+no handle field anywhere near it; the handle field asks the server for
+availability while the user types, because a permanent choice cannot be
+rejected after the tap; and `hydrateIdentity()` pulls the handle onto a device
+that has never seen it, since `socialHandle` is a localStorage cache and every
+"are they set up?" check reads it. Without that last one a second device looks
+identical to a new user — which is precisely the mistake that caused this.
+
+**What would reopen it.** Wanting renames after all: the ledger already makes
+that safe, so the change is a `rename_handle()` RPC that inserts the new claim
+while leaving the old row standing, plus copy that is honest about the old
+handle never coming back. Do not implement it by relaxing `set_profile`.

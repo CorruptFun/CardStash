@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installErrorHooks, installSessionTracking, installTelemetryFlusher } from './lib/analytics'
+import { installAutoBackup } from './lib/autobackup'
 import { db, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
 import { runAutoBackup } from './lib/drive'
@@ -98,6 +99,9 @@ async function boot(): Promise<void> {
   )
   pruneHistory().catch(() => {})
   installTelemetryFlusher()
+  // Backup runs itself from here on. Signed-out users are a no-op — there is no
+  // account to attach a vault to, which is the honest limit of the feature.
+  installAutoBackup()
   // Hosted social polls only once the user has claimed a handle, so a
   // local-only user — the default — makes no request to our server at all.
   // The loop re-checks on every tick, and only publishes if they also turned

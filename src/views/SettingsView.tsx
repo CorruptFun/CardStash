@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Modal, Toggle } from '../components/basics'
-import { DriveBackup } from '../components/DriveBackup'
 import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
@@ -144,8 +143,6 @@ export function SettingsView() {
         </p>
       </section>
       <CloudSync />
-      {/* Renders nothing — not an empty heading — when the build has no OAuth client id. */}
-      <DriveBackup />
       <section className="setsec">
         <h3>Data</h3>
         {/* Gone from here: "Demo data" and "Reset scanner cache". The first

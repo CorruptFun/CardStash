@@ -1,50 +1,68 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CLOUD_AVAILABLE } from '../lib/cloudconfig'
 import { useSettings } from '../lib/settings'
+import { relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
+import { DriveBackup } from './DriveBackup'
+import { Icon } from './Icon'
 import { SignIn } from './SignIn'
 
 /**
- * The Settings front door for the cloud vault.
+ * Backup, as ONE thing a user never configures.
  *
- * The happy path is three taps; the states around it are what actually decide
- * whether people keep their cards, so they are explicit rather than implied:
+ * This replaced a passphrase form, and the reason is worth keeping: across the
+ * whole project there were **zero** vaults. Not few — zero. Every user who had
+ * ever signed in still had exactly one copy of their collection, in browser
+ * storage, and on 2026-08-15 one of them lost it to iOS eviction. The old
+ * screen was not badly built; it was optional, and optional lost.
  *
- * - **Signed out** → sign in, via the shared `SignIn` component. The same
- *   account serves hosted social; this section is only about the vault.
- * - **Signed in, locked** → the passphrase. Copy differs on whether a vault
- *   already exists, because "set a passphrase" and "enter your passphrase"
- *   are different acts and conflating them is how people lock themselves out.
- * - **Unlocked** → sync, with the last result stated plainly.
+ * So there is no form here now. Sign in and it backs up. The key is minted
+ * server-side (migration 0009) and there is nothing to remember, which is the
+ * only way this could become the default — a passphrase with no reset cannot
+ * be, because forgetting it is unrecoverable by construction.
  *
- * `cloud.ts` is imported dynamically everywhere here so its chunk (and the
- * crypto and merge code it pulls in) is fetched only when someone actually
- * opens this section.
+ * Be honest in the copy, though: this is encryption at rest with a key we hold,
+ * NOT end-to-end. It is never described as something the server cannot read,
+ * because that would be a lie the user cannot check.
+ *
+ * The other routes still exist and still matter to some people — Drive puts a
+ * copy in storage the user owns outright, and the JSON export is the only one
+ * that works with no account at all. They live under **Advanced**, because a
+ * user who does not care should never have to choose, and one who does should
+ * not have to hunt.
+ *
+ * `cloud.ts` is imported dynamically so its chunk — crypto and the merge code —
+ * is fetched only when there is an account to use it.
  */
 
-type Stage = 'signedout' | 'locked' | 'ready'
+/** Long enough that a burst of scanning is one push, not thirty. */
+const AUTOSYNC_DEBOUNCE_MS = 20_000
 
 export function CloudSync() {
   const config = useSettings()
   const toast = useUi((s) => s.toast)
-  const [stage, setStage] = useState<Stage>('signedout')
-  const [passphrase, setPassphrase] = useState('')
-  const [existing, setExisting] = useState(false)
+  const [signedIn, setSignedIn] = useState(false)
+  const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [who, setWho] = useState<string | null>(null)
+  const [advanced, setAdvanced] = useState(false)
+  const kicked = useRef(false)
 
   useEffect(() => {
     if (!CLOUD_AVAILABLE) return
     void import('../lib/cloud').then((cloud) => {
-      // Gate on the session, not on the email: a Google sign-in arrives
-      // without one, and treating that as signed-out strands the user on this
-      // screen holding a valid session.
-      setWho(cloud.signedInAs())
-      setStage(cloud.isSignedIn() ? (cloud.hasVaultKey() ? 'ready' : 'locked') : 'signedout')
+      const on = cloud.isSignedIn()
+      setSignedIn(on)
+      setReady(true)
+      // First sync of the session, once, in the background. Failures are silent
+      // on purpose: this runs without being asked for, so it must never put an
+      // error in front of someone who came here to change a different setting.
+      if (on && !kicked.current) {
+        kicked.current = true
+        setTimeout(() => void cloud.syncNow().catch(() => {}), AUTOSYNC_DEBOUNCE_MS / 4)
+      }
     })
   }, [])
 
-  /** Every action funnels through here so one place owns busy + error copy. */
   const run = useCallback(
     async (work: () => Promise<void>) => {
       setBusy(true)
@@ -59,120 +77,82 @@ export function CloudSync() {
     [toast],
   )
 
-  const unlock = () =>
+  const syncNow = () =>
     run(async () => {
       const cloud = await import('../lib/cloud')
-      const result = await cloud.unlock(passphrase)
-      setExisting(result.existing)
-      setPassphrase('')
-      setStage('ready')
-      toast(result.existing ? 'Vault unlocked' : 'Vault created on this account', 'success')
+      const out = await cloud.syncNow()
+      const added = out.report?.added ?? 0
+      toast(added ? `Backed up — ${added} card${added === 1 ? '' : 's'} brought in from another device` : 'Backed up', 'success')
     })
 
-  const sync = () =>
-    run(async () => {
-      const cloud = await import('../lib/cloud')
-      const outcome = await cloud.syncNow()
-      const r = outcome.report
-      toast(
-        r && (r.added || r.updated)
-          ? `Synced — ${r.added} new, ${r.updated} updated from your other device`
-          : 'Synced — everything already matched',
-        'success',
-      )
-    })
+  if (!CLOUD_AVAILABLE || !ready) return null
 
-  const signOut = () =>
-    run(async () => {
-      const cloud = await import('../lib/cloud')
-      cloud.signOut()
-      setWho(null)
-      setStage('signedout')
-    })
+  if (!signedIn) {
+    return (
+      <section className="setsec">
+        <h3>Backup</h3>
+        <p className="setsec__note">
+          Your cards live on this device, and a phone you lose takes them with it — browsers also clear storage on their
+          own if you go a week or two without opening the app. Sign in and your collection backs itself up from then on.
+          Nothing to set up and no passphrase to remember.
+        </p>
+        <SignIn onSignedIn={() => setSignedIn(true)} />
+        <Advanced open={advanced} onToggle={() => setAdvanced(!advanced)} />
+      </section>
+    )
+  }
 
-  // No project configured (a fork that didn't set one) — say nothing rather
-  // than offer a button that cannot work.
-  if (!CLOUD_AVAILABLE) return null
-
-  const syncedAt = config.cloudSyncedAt ? new Date(config.cloudSyncedAt).toLocaleString() : null
-
+  const syncedAt = config.cloudSyncedAt
   return (
     <section className="setsec">
-      <h3>Cloud sync</h3>
-
-      {stage === 'signedout' && (
-        <>
-          <p className="setsec__note">
-            Sign in to keep your collection on more than one device — and to get it back if you lose this one. Your
-            cards are encrypted on this device first, so the server stores a blob it cannot read.
-          </p>
-          <SignIn
-            onSignedIn={(email) => {
-              setWho(email)
-              setStage('locked')
-            }}
-          />
-        </>
-      )}
-
-      {stage === 'locked' && (
-        <>
-          <p className="setsec__note">
-            Signed in{who ? <> as <b>{who}</b></> : ''}. Now choose the passphrase that encrypts your cards. It is
-            separate from your
-            login on purpose — without it, whoever runs the server could read every collection.
-          </p>
-          <p className="setsec__warn">
-            <b>Write it down.</b> It never leaves this device and nothing on the server can recover it. Lose the
-            passphrase and the vault is unreadable — that is the point, and it has no reset.
-          </p>
-          <div className="setrow cloudrow">
-            <input
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Your passphrase"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-            />
-            <button className="btn btn--ghost btn--sm" disabled={busy || passphrase.length < 8} onClick={unlock}>
-              {busy ? 'Working…' : 'Unlock'}
-            </button>
-          </div>
-          <p className="setsec__note">
-            At least 8 characters. On a second device, enter the same passphrase you used on the first.
-          </p>
-          <button className="btn btn--ghost btn--sm" disabled={busy} onClick={signOut}>
-            Sign out
-          </button>
-        </>
-      )}
-
-      {stage === 'ready' && (
-        <>
-          <p className="setsec__note">
-            Signed in{who ? <> as <b>{who}</b></> : ''}, vault unlocked.{' '}
-            {existing ? 'Merged with what was already stored.' : 'This device started the vault.'}
-          </p>
-          <div className="setrow">
-            <div className="setrow__text">
-              <span>Sync now</span>
-              <em>{syncedAt ? `Last synced ${syncedAt}` : 'Not synced yet'}</em>
-            </div>
-            <button className="btn btn--ghost btn--sm" disabled={busy} onClick={sync}>
-              {busy ? 'Syncing…' : 'Sync'}
-            </button>
-          </div>
-          <p className="setsec__note">
-            Syncing pulls whatever your other devices saved, merges it with what is here, and uploads the result — so
-            cards scanned in two places both survive. A card deleted on one device can come back from another that has
-            not synced yet.
-          </p>
-          <button className="btn btn--ghost btn--sm" disabled={busy} onClick={signOut}>
-            Sign out
-          </button>
-        </>
-      )}
+      <h3>Backup</h3>
+      <div className={`audience ${syncedAt ? 'audience--friends' : ''}`}>
+        <Icon name={syncedAt ? 'check' : 'refresh'} size={15} />
+        <span>
+          {syncedAt ? (
+            <>
+              Your collection is backed up — last saved {relativeAge(syncedAt)} ago. It updates itself as you scan.
+            </>
+          ) : (
+            <>Setting up your first backup…</>
+          )}
+        </span>
+      </div>
+      <p className="setsec__note">
+        Stored encrypted on our server so a lost phone is not a lost collection, and pulled back down automatically when
+        you sign in somewhere new. We hold the key, so treat it as a safety net rather than a secret — anything you
+        would not want us able to read does not belong in a card note.
+      </p>
+      <div className="setrow">
+        <div className="setrow__text">
+          <span>Back up now</span>
+          <em>Happens on its own; this just does it immediately.</em>
+        </div>
+        <button className="btn btn--ghost btn--sm" onClick={syncNow} disabled={busy}>
+          <Icon name="refresh" size={14} className={busy ? 'spin' : ''} /> {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      <Advanced open={advanced} onToggle={() => setAdvanced(!advanced)} />
     </section>
+  )
+}
+
+/**
+ * The routes most people never need. Drive is the one backup that lands in
+ * storage the user owns outright, which is why it survives rather than being
+ * deleted now that backup is automatic.
+ */
+function Advanced({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <details className="diagmore" open={open}>
+      <summary className="diagmore__head" onClick={(e) => (e.preventDefault(), onToggle())}>
+        Other backup options
+      </summary>
+      <DriveBackup />
+      <p className="setsec__note">
+        A copy in your own Google Drive, in a folder only this app can see. Or export a JSON file from the Collection
+        screen — that one needs no account at all and restores everything.
+      </p>
+    </details>
   )
 }

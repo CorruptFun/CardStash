@@ -9,6 +9,14 @@ import { useUi } from '../store/ui'
  * two places to get the iOS caveats wrong. Both mount it and act on the
  * callback.
  *
+ * **There is no separate sign-up.** An email address is the account: a code
+ * sent to an address that has one signs you in, and to an address that doesn't
+ * makes one (`create_user: true`). GoTrue keeps exactly one user per address,
+ * so nobody can end up with two accounts and nobody has to remember which
+ * button they pressed last time. Never add a "Create account" branch here —
+ * two doors to one room is how people convince themselves they need a second
+ * email, and a second email is a second collection.
+ *
  * An iOS Home Screen app is the one place the Google button cannot be trusted:
  * the OAuth round trip has a long history of surfacing in Safari rather than
  * returning to the app, and a session that lands in Safari lands in a
@@ -42,7 +50,8 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
   const sendCode = () =>
     run(async () => {
       const auth = await import('../lib/authsession')
-      await auth.sendEmailCode(email.trim())
+      await auth.sendEmailCode(email)
+      setEmail(auth.normalizeEmail(email))
       setSent(true)
       toast('Check your email for a six-digit code', 'success')
     })
@@ -50,10 +59,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
   const verify = () =>
     run(async () => {
       const auth = await import('../lib/authsession')
-      const session = await auth.verifyEmailCode(email.trim(), code.trim())
+      const session = await auth.verifyEmailCode(email, code.trim())
       setCode('')
       setSent(false)
-      onSignedIn(session.email || email.trim())
+      onSignedIn(session.email || auth.normalizeEmail(email))
     })
 
   const google = () =>
@@ -65,7 +74,10 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
   if (sent) {
     return (
       <>
-        <p className="setsec__note">Enter the six-digit code sent to {email}.</p>
+        <p className="setsec__note">
+          Enter the six-digit code sent to <b>{email}</b>. If you have used Cardstock before with this address, this
+          signs you back into that same account.
+        </p>
         <div className="setrow cloudrow">
           <input
             className="input"

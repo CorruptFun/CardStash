@@ -15,6 +15,7 @@ import {
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
+import { HandleField } from './HandleField'
 import { Icon } from './Icon'
 import { SignIn } from './SignIn'
 
@@ -43,6 +44,7 @@ export function SocialPanel() {
   const [profile, setProfile] = useState<SocialProfile | null>(null)
   const [ready, setReady] = useState(false)
   const [handle, setHandle] = useState('')
+  const [blocked, setBlocked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmErase, setConfirmErase] = useState(false)
 
@@ -145,27 +147,20 @@ export function SocialPanel() {
           Signed in{signedInAs() ? <> as <b>{signedInAs()}</b></> : ''}. Pick a handle — it is how friends find you, and
           it is the only thing about you that every signed-in collector can see.
         </p>
-        <div className="setrow cloudrow">
-          <span className="handleat">@</span>
-          <input
-            className="input"
-            value={handle}
-            onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-            placeholder="yourhandle"
-            maxLength={24}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            aria-label="Your handle"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && handle.length >= 3) claim()
-            }}
-          />
-          <button className="btn btn--primary btn--sm" disabled={busy || handle.length < 3} onClick={claim}>
-            {busy ? 'Claiming…' : 'Claim'}
-          </button>
-        </div>
-        <p className="setsec__note">Letters, numbers and underscores. 3–24 characters.</p>
+        <HandleField
+          value={handle}
+          onChange={setHandle}
+          onSubmit={claim}
+          onBlockedChange={setBlocked}
+          disabled={busy}
+        />
+        <button className="btn btn--primary btn--sm" disabled={busy || blocked || handle.length < 3} onClick={claim}>
+          {busy ? 'Claiming…' : 'Claim'}
+        </button>
+        <p className="setsec__note">
+          A handle is claimed <b>once</b> and is permanently yours — it can't be changed, and it never passes to another
+          collector. Your display name is separate and stays editable.
+        </p>
       </>
     )
   }
@@ -239,7 +234,11 @@ export function SocialPanel() {
         <div className="setrow">
           <div className="setrow__text">
             <span>Delete your account data?</span>
-            <em>Your handle, binder, friends and pending trades are removed from the server. Your encrypted vault backup is not touched.</em>
+            <em>
+              Your profile, binder, friends and pending trades are removed from the server. Your encrypted vault backup
+              is not touched — and <b>@{profile.handle}</b> stays reserved to you, so nobody else can take your name and
+              you get it back if you return.
+            </em>
           </div>
           <button className="btn btn--danger btn--sm" disabled={busy} onClick={erase}>
             Delete

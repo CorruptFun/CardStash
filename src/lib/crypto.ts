@@ -77,6 +77,33 @@ export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<C
   )
 }
 
+/**
+ * Import a server-minted raw key (base64 of 32 bytes).
+ *
+ * The counterpart to `deriveKey`, and the one the app actually uses now:
+ * backup happens without being asked for, so there is no passphrase to derive
+ * from. See migration 0009 for why that trade was made and exactly what it
+ * costs — this is encryption at rest with a key the server holds, not E2E.
+ */
+export async function importVaultKey(base64: string): Promise<CryptoKey> {
+  const raw = fromBase64(base64)
+  if (raw.length !== 32) throw new Error('Vault key must be 32 bytes')
+  return subtle().importKey('raw', raw as BufferSource, { name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
+  ])
+}
+
+/**
+ * A short digest of a key, for the `key_check` column. It answers "is this the
+ * same key the ciphertext was written with", which is the only question that
+ * column ever had — it just used to be asked of a passphrase.
+ */
+export async function keyFingerprint(base64: string): Promise<string> {
+  const digest = await subtle().digest('SHA-256', fromBase64(base64) as BufferSource)
+  return toBase64(new Uint8Array(digest)).slice(0, 24)
+}
+
 export async function encryptJson(value: unknown, key: CryptoKey, salt: Uint8Array): Promise<VaultEnvelope> {
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES))
   const plain = new TextEncoder().encode(JSON.stringify(value))
