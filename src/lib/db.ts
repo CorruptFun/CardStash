@@ -579,14 +579,31 @@ export async function applyCardUpdate(card: Card): Promise<void> {
 
 const SCAN_TRAY_LIMIT = 30
 
-export async function recordScan(card: Card): Promise<void> {
+/**
+ * File a scan in the tray, returning the row's id so the caller can mark it
+ * added once the copy actually lands in the collection.
+ *
+ * `read` is what the scanner saw on the physical copy — the finish it detected
+ * and a slab's grade. It rides along so the batch-add screen files the copy in
+ * frame rather than the printing's default; a re-scan that reads a finish
+ * replaces a previous blank one, but never clears a reading with nothing.
+ */
+export async function recordScan(card: Card, read: { finish?: Finish; grade?: GradeInfo } = {}): Promise<string> {
   // Re-scanning the card already at the head of the tray refreshes that row
   // instead of stacking a duplicate tile.
   const latest = await db.scans.orderBy('at').last()
+  let id: string
   if (latest?.cardId === card.id) {
-    await db.scans.update(latest.id, { at: Date.now(), card })
+    id = latest.id
+    await db.scans.update(id, {
+      at: Date.now(),
+      card,
+      finish: read.finish ?? latest.finish,
+      grade: read.grade ?? latest.grade,
+    })
   } else {
-    await db.scans.add({ id: uid(), cardId: card.id, at: Date.now(), card })
+    id = uid()
+    await db.scans.add({ id, cardId: card.id, at: Date.now(), card, finish: read.finish, grade: read.grade })
     const count = await db.scans.count()
     if (count > SCAN_TRAY_LIMIT) {
       const stale = await db.scans
@@ -597,6 +614,20 @@ export async function recordScan(card: Card): Promise<void> {
     }
   }
   await recordPricePoint(card)
+  return id
+}
+
+/**
+ * Mark tray rows as filed into the collection (or unmark them, which is what
+ * an undo of a batch add does). Best-effort by design: a row the tray has
+ * already aged out is simply not there to mark, and that must not fail the add
+ * that prompted it.
+ */
+export async function markScansAdded(ids: string[], added = true): Promise<void> {
+  if (!ids.length) return
+  await db.transaction('rw', db.scans, async () => {
+    for (const id of ids) await db.scans.update(id, { added })
+  })
 }
 
 /**

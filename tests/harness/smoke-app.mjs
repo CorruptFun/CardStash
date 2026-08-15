@@ -69,9 +69,13 @@ const fail = async (what) => {
  * ever stops working the whole file fails with a misleading error instead of
  * this one.
  */
+// Assert on the dialog, not its headline: the copy is rewritten routinely
+// (it has been "Connect an account" and "Sign in or create an account"), and a
+// stale string here fails the whole file with a misleading error.
+const welcome = page.locator('[role=dialog][aria-label="Set up Cardstock"]')
 await page.goto(`http://127.0.0.1:${PORT}/?nosw=1#/scan`, { waitUntil: 'load' })
 await page.waitForTimeout(600)
-if (!(await page.getByText('Connect an account').isVisible().catch(() => false))) {
+if (!(await welcome.isVisible().catch(() => false))) {
   await fail('first run did not show the welcome screen')
 }
 if (!(await page.getByText('Skip for now').isVisible().catch(() => false))) {
@@ -82,7 +86,7 @@ if (!(await page.getByText('Skip for now').isVisible().catch(() => false))) {
 // ?welcome=0: skip first-run onboarding (harness escape, see lib/onboarding.ts).
 await page.goto(`http://127.0.0.1:${PORT}/?nosw=1&welcome=0#/scan`, { waitUntil: 'load' })
 await page.waitForTimeout(600)
-if (await page.getByText('Connect an account').isVisible().catch(() => false)) {
+if (await welcome.isVisible().catch(() => false)) {
   await fail('?welcome=0 did not skip the welcome screen')
 }
 

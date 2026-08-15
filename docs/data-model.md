@@ -127,6 +127,18 @@ Readers filter to `currency === 'USD'` — one line, one currency.
 Capped at 30 rows (`SCAN_TRAY_LIMIT`). Re-scanning the card already at the head
 refreshes that row instead of stacking a duplicate tile.
 
+`finish` and `grade` are what the scanner READ off the physical copy, kept so
+the batch-add screen files the copy that was in frame rather than the printing's
+default; a re-scan that reads a finish replaces a blank one but never clears a
+reading with nothing. Both are absent on rows the tray already held when batch
+add landed.
+
+`added` means this scan has been filed — by Collect mode or by the batch screen.
+**The tray stays a log either way**: a filed row is not removed, it is marked,
+and the mark is what stops the batch screen offering the same copy a second
+time. Undoing either add clears it (`markScansAdded(ids, false)`), because a
+stale mark would silently refuse a card the user is entitled to re-file.
+
 ### Caches
 
 - `CatalogCache` (`catalogs`, keyed by game) — a whole TCGplayer catalog plus

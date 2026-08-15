@@ -105,7 +105,10 @@ try {
   page.on('pageerror', (err) => pageErrors.push(String(err).slice(0, 200)))
   const shot = async (name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, `scan-ui-${name}.png`) }) }
 
-  await page.goto(`http://127.0.0.1:${PORT}/index.html?nosw=1`)
+  // `welcome=0` for the reason onboarding.ts documents: a harness is a
+  // first-time visitor every run, and the welcome dialog is modal — it takes
+  // the taps meant for the scan screen's own controls.
+  await page.goto(`http://127.0.0.1:${PORT}/index.html?nosw=1&welcome=0`)
   await page.waitForSelector('.nav', { timeout: 30_000 })
   await page.evaluate(() => (location.hash = '#/scan'))
   await page.waitForTimeout(1000)
@@ -127,9 +130,17 @@ try {
   await page.waitForTimeout(800)
 
   console.log('\nPage mode — a binder page')
-  const pill = page.locator('button[aria-label="Scan a whole page of cards"]')
-  check(await pill.count() === 1, 'the Page pill is on the scan screen')
-  await pill.click()
+  // Page is not its own pill any more: the three mode pills collapsed into one
+  // "Modes" button opening a sheet of switches (`components/ScanModes.tsx`).
+  const modes = page.locator('button[aria-label^="Scan modes"]')
+  check(await modes.count() === 1, 'the Modes pill is on the scan screen')
+  await modes.click()
+  const pageSwitch = page.locator('.moderow button[role="switch"][aria-label="Page"]')
+  check(await pageSwitch.count() === 1, 'Page is one of the scan modes')
+  await pageSwitch.click()
+  await page.waitForTimeout(400)
+  // The sheet stays up over the scan screen; close it before picking a photo.
+  await page.keyboard.press('Escape').catch(() => {})
   await page.waitForTimeout(500)
   await page.setInputFiles('input[type=file]', join(PHOTOS, 'ygo-binder-horus.jpg'))
   check(await page.waitForSelector('.pagescan', { timeout: 30_000 }).then(() => true).catch(() => false), 'a progress overlay appears while the page is read')

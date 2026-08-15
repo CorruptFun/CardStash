@@ -1,6 +1,6 @@
 # Testing
 
-Four layers, each covering something the others structurally cannot.
+Layered, each covering something the others structurally cannot.
 
 | Layer | Command | Runtime | Needs fixtures? |
 | ----- | ------- | ------- | --------------- |
@@ -9,6 +9,8 @@ Four layers, each covering something the others structurally cannot.
 | Capture | `npm run test:capture` | headless Chromium, seconds | no |
 | Built-bundle smoke | `npm run build && node tests/harness/smoke-app.mjs` | headless Chromium, seconds | no |
 | Install banner | `npm run test:install` | headless Chromium, seconds | no |
+| Scan UI (upload + page review) | `npm run test:scanui` | headless Chromium, ~2 min | **yes** |
+| Batch add | `npm run test:batch` | headless Chromium, ~30s | no |
 
 ## The rule
 
@@ -190,6 +192,28 @@ console must stay clean. It catches wiring the type checker can't — JSX
 structure, store subscriptions, dead imports — in the artifact users actually
 get.
 
+## The two review screens (`test:scanui`, `test:batch`)
+
+Both drive the real app to a Dexie write, and between them they cover every
+path that files a card without the card sheet.
+
+`test:scanui` is the only check that a picked file reaches the pipeline, that
+the page-review screen shows what was found, and that confirming files exactly
+the ticked rows. It needs the matrix fixtures and a fake camera device. It also
+carries two traps worth knowing, because both once made it fail while the app
+was fine: the mode pills are **one** "Modes" button opening a sheet of switches,
+so the Page toggle is reached through that sheet, not a pill of its own; and the
+welcome dialog is modal and a harness is a first-time visitor on every run, so
+the page must be loaded with `?welcome=0`.
+
+`test:batch` covers batch add and needs neither fixtures nor a camera: what it
+checks starts *after* identification, so it seeds `db.scans` straight into
+IndexedDB from the demo collection's own cards and aborts every external
+request. The invariant is that what the screen shows and what gets filed are
+the same set in both directions — an unticked row must not land, and a row
+already filed by Collect mode must not arrive ticked again. Run it after
+touching the scan tray, `ScanBatch`, or `db.scans`.
+
 ## Live Supabase harnesses (`test:cloud`, `test:social`, `test:escrow`)
 
 Two harnesses that can only fail in production, so neither is in CI and both
@@ -273,6 +297,7 @@ npm run build && node tests/harness/smoke-app.mjs
 npm run test:capture        # only if camera.ts or the scan screen changed
 npm run test:camera         # ditto — camera on/off lifecycle, both platforms
 npm run test:install        # only if the install banner or its triggers changed
+npm run test:batch          # only if the scan tray, batch add or db.scans changed
 ```
 
 If the change touches `detectCardRegions` or anything multi-card, also run

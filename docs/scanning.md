@@ -33,6 +33,8 @@ ScanView ──▶ multiscan.ts ──┬──▶ vision.ts    (detectCardRegio
   (upload / Page pill)      └──▶ identify.ts  (each crop, reduced budget)
                                       │
                                       └──▶ review screen ──▶ user confirms
+
+every hit ──▶ db.scans (the tray) ──▶ batch add ──▶ user ticks ──▶ collection
 ```
 
 ## 1. The camera (`lib/camera.ts`)
@@ -384,6 +386,40 @@ Three constants carry the design:
   pass got wrong.
 
 `MAX_PAGE_CARDS` is 12.
+
+## 6a. Batch add — the tray as a review screen (`components/ScanBatch.tsx`)
+
+Single scanning has always logged every hit to `db.scans` and shown the last
+dozen as tiles. Batch add is that log with a tick beside every row: scan a
+stack, tap **Review** on the tray, then file the lot in one confirm.
+
+The screen is deliberately the same shell as `BinderReview` — same grid, same
+footer, same promise that the list in front of you is exactly what is about to
+be written — and the two are still separate components, because the rows are not
+the same thing. A page row owns a crop, a confidence and a re-read; a tray row
+is an already-confirmed hit the user watched land on the chip. That is the whole
+reason **batch rows arrive ticked and page rows mostly do not**: on a page the
+pipeline is vouching for a card nobody looked at, and on the tray the user
+already did. Restyling `.binderrow` restyles both screens on purpose.
+
+Three things it must keep doing:
+
+- **The × forgets a scan; it never removes a card.** Same rule the tray tile's
+  × has always had, said in the row's own toast.
+- **A filed row is marked, not hidden.** Collect mode and a previous batch both
+  set `added`, and those rows arrive visible, labelled "Already added" and
+  **off** — a second copy is an ordinary thing to want, it just must not be the
+  default. Without the mark the two paths silently double-file, which is the one
+  failure here nobody notices until the totals are wrong. Undoing either add
+  clears the mark.
+- **The count is the whole tray, not the tiles on screen.** The strip shows the
+  last dozen; the screen lists everything still logged, which is precisely the
+  case where the ones that scrolled off matter. The Review button is pinned
+  outside the horizontal scroller for the same reason — inside it, a full tray
+  pushed it off the right edge behind the fade.
+
+Opening it hands the camera back, exactly as the page-review screen does
+(`reviewOpen` in `ScanView`). `npm run test:batch` drives the whole flow.
 
 ### The entitlement seam
 

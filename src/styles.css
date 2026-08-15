@@ -1755,16 +1755,36 @@ button {
   letter-spacing: 0.005em;
   font-size: 12px;
 }
-.tray {
+/* The strip scrolls; the actions beside it must not. "Review 24" is the whole
+ * point of a full tray, and inside the scroller it sat off the right edge
+ * behind a fade — reachable only by swiping past every tile. */
+.trayband {
   position: absolute;
   left: 0;
   right: 0;
   bottom: calc(var(--nav-h) + var(--sab) + var(--s3));
   display: flex;
+  align-items: flex-start;
+  /* Above `.scan__gate` (6), which is opaque and full-bleed. A camera the user
+   * never granted does not mean an empty tray — the gate's own "Upload a photo
+   * instead" fills one — and under the gate the strip was not merely
+   * untappable but invisible, batch add with it. The gate already reserves
+   * this band in its bottom padding. */
+  z-index: 7;
+}
+.tray__actions {
+  flex: none;
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3) 10px 0;
+}
+.tray {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   gap: var(--s2);
   padding: var(--s2) var(--s3) 10px;
   overflow-x: auto;
-  z-index: 5;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(
     to right,
@@ -1835,6 +1855,16 @@ button {
 }
 .tray__clear:active {
   opacity: 0.65;
+}
+/* Review reads as the action and Clear as the afterthought — they sit side by
+ * side at the end of the strip, and one of them throws the session away. */
+.tray__clear--go {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--paper);
+  border-color: var(--paper);
+  color: var(--ink-000);
 }
 .tray__img {
   width: 100%;
@@ -5009,9 +5039,9 @@ button {
   padding-left: calc(var(--s3) + var(--sal));
   padding-right: calc(var(--s3) + var(--sar));
 }
-.tray {
-  padding-left: calc(var(--s3) + var(--sal));
-  padding-right: calc(var(--s3) + var(--sar));
+.trayband {
+  padding-left: var(--sal);
+  padding-right: var(--sar);
 }
 .modal-root {
   padding: calc(var(--s5) + var(--sat)) calc(var(--s5) + var(--sar)) calc(var(--s5) + var(--sab))
@@ -6352,6 +6382,45 @@ button {
   line-height: 1.5;
   color: var(--paper-2);
   text-align: center;
+}
+
+/* Select-all lives in the header, not the footer: the footer is where the
+ * irreversible button is, and a "None" that lands a thumb-width from
+ * "Add 24 cards" is the wrong thing to put beside it. */
+.binder__selectall {
+  flex: none;
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: var(--r-0);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-2);
+}
+.binder__selectall:active {
+  background: var(--surface-2);
+}
+
+/* Batch add reuses the review shell above (same grid, same confirm) and only
+ * adds what a tray row has and a page row does not: the "this one is already
+ * filed" state. Restyle `.binderrow` and you restyle both screens — that is
+ * intended, they are one pattern. */
+.batchrow--filed .binderrow__thumb,
+.batchrow--filed .binderrow__name {
+  opacity: 0.62;
+}
+.batchrow__filed {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 3px;
+  padding: 1px 6px;
+  border-radius: var(--r-0);
+  background: var(--up-fill);
+  font-family: var(--font-num);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--up);
 }
 
 /* --- Sports cards & grading ---------------------------------------------
