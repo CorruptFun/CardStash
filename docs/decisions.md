@@ -53,6 +53,25 @@ card — it is checked first that there is more than one frame to choose between
 and it is off inside page scans. A tie-break that refuses leaves the local
 answer exactly as it was.
 
+**What changed again (the head-start round).** The rescue used to run strictly
+last — after every band, every candidate lookup and the whole magnified
+collector sweep, which on a hard frame is the best part of twenty seconds. For
+a subscriber that is the wrong shape: the thing they pay for should race the
+local passes, not queue behind them. It now starts on a **2.5-second timer**
+(`CLOUD_HEADSTART_MS`) and runs alongside them, first answer wins, and a local
+answer aborts the request in flight.
+
+That is the second widening of the boundary on this page, and it is the wider
+of the two: the printing tie-break above at least waits for an answer, while
+this one fires on a scan that is merely SLOW — a card the local passes would
+have got at four seconds now also sends its frame. Written down rather than
+buried, same as the first. What remains true, and is what the switch actually
+buys: nothing is uploaded unless `cloudScanRescue` is on, nothing goes before
+the deadline, and a raced call is rationed (`CLOUD_RACE_COOLDOWN_MS`) so one
+stubborn card in front of the lens cannot spend the month's allowance by
+itself. The last-resort call — every local pass failed — is deliberately NOT
+rationed; that is the case the rescue exists for.
+
 The Gemini boundary moved with it and is now stated precisely rather than
 absolutely: the key is scoped to the AI deck builder **and** the scan rescue,
 and to nothing else.

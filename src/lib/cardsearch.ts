@@ -1,10 +1,11 @@
-import { lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
-import { matchMtg, mtgById, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
-import { matchPokemon, pokemonById, pokemonPrintings, searchPokemon } from './pokemon'
+import { parseCardCode, type CardCode } from './cardcode'
+import { lorcanaBySetNumber, lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
+import { matchMtg, mtgById, mtgBySetNumber, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
+import { matchPokemon, pokemonById, pokemonByCollector, pokemonBySetNumber, pokemonPrintings, searchPokemon } from './pokemon'
 import { matchSports, searchSports, sportsById, sportsPrintings } from './sports'
-import { catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
+import { catalogByCode, catalogById, catalogPrintings, matchCatalog, sealedRefresh, searchCatalog } from './tcgcsv'
 import { sealedVariants } from './sealed'
-import { matchYgo, searchYgo, ygoById, ygoPrintingVariants } from './ygo'
+import { matchYgo, searchYgo, ygoById, ygoBySetCode, ygoPrintingVariants } from './ygo'
 import { CUSTOM_PREFIX, customCard, isCustomCard } from './cardpatch'
 import { isAbort } from './fetchJson'
 import { patched, patchedAll, patchFor, searchCustomCards } from './db'
@@ -20,6 +21,54 @@ export interface ApiKeys {
    * same retries serially tax every OTHER game's wait, so they stay off.
    */
   thorough?: boolean
+}
+
+/**
+ * The printed set/batch code as a lookup — "BLMR-EN085", "OP01-016",
+ * "NEO 266". It names ONE printing where a name names a dozen, and it is what
+ * a collector can read off a card in a language nothing else in the app can
+ * read. Each game answers it with the primitive it already uses to pin an
+ * exact printing during a scan; the difference is that a typed code is a
+ * statement of intent, so nothing here needs the corroboration a read off a
+ * photo does.
+ */
+async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
+  const one = (card: Card | null) => (card ? [card] : [])
+  switch (game) {
+    case 'mtg': {
+      if (!code.setCode) return []
+      // "266a" keeps its variant letter; "0266" also gets tried unpadded,
+      // which is how Scryfall spells collector numbers.
+      for (const number of new Set([code.number, code.digits].filter(Boolean) as string[])) {
+        const card = await mtgBySetNumber(code.setCode, number)
+        if (card) return [card]
+      }
+      return []
+    }
+    case 'pokemon': {
+      if (code.setCode && code.digits) {
+        const hits = await pokemonBySetNumber(code.setCode, code.digits, keys.pokemonKey, signal)
+        if (hits.length) return hits
+      }
+      // "123/198" with no set code: the denominator is the set size, which is
+      // what pins the set.
+      if (code.number && code.printedTotal)
+        return one(await pokemonByCollector(code.number, code.printedTotal, keys.pokemonKey, code.setCode))
+      return []
+    }
+    case 'yugioh':
+      // The passcode IS the card id at YGOPRODeck; the print code needs the
+      // set-code endpoint to become one.
+      return one(code.passcode ? await ygoById(code.passcode) : await ygoBySetCode(code.code, signal))
+    case 'lorcana':
+      return code.setCode && code.number ? one(await lorcanaBySetNumber(code.setCode, code.number, signal)) : []
+    case 'sports':
+      // Sports cards are synthesized from the card in hand (lib/sports.ts) —
+      // there is no catalog to look a printed number up in.
+      return []
+    default:
+      return catalogByCode(game, code, signal)
+  }
 }
 
 function searchSource(game: Game, query: string, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
@@ -59,20 +108,32 @@ function searchSource(game: Game, query: string, keys: ApiKeys, signal?: AbortSi
 export async function searchGame(game: Game, query: string, keys: ApiKeys = {}, signal?: AbortSignal): Promise<Card[]> {
   // Both start together — the local read must not delay the network call.
   const local = searchCustomCards(game, query).catch(() => [] as Card[])
+  // A query that reads as a printed card code is looked up as one AS WELL AS
+  // being searched by name, and its answer leads. Running both is what makes
+  // the parse safe to keep loose: a card name that merely LOOKS like a code
+  // ("Mew 25", which is also a real printing) loses nothing either way.
+  const code = parseCardCode(query)
+  const coded = code ? searchByCode(game, code, keys, signal).catch(() => [] as Card[]) : null
   const source = searchSource(game, query, keys, signal)
   // Claim the rejection now: it may be swallowed below, and an unhandled one
   // in the meantime is a console error users would see for a handled case.
   source.catch(() => {})
 
   const mine = await local
+  const byCode = coded ? await coded : []
   let found: Card[] = []
   try {
     found = await source
   } catch (err) {
-    if (!mine.length || isAbort(err) || signal?.aborted) throw err
+    // A code hit answers the question as well as a name hit does, so it
+    // suppresses the source error for the same reason a local card does.
+    if ((!mine.length && !byCode.length) || isAbort(err) || signal?.aborted) throw err
   }
+  // `seen` grows as it filters: a code hit and a name hit can be the same
+  // card (every Yu-Gi-Oh printing shares one id), and the code's own answer is
+  // the one to keep.
   const seen = new Set(mine.map((card) => card.id))
-  return [...mine, ...patchedAll(found).filter((card) => !seen.has(card.id))]
+  return [...mine, ...patchedAll([...byCode, ...found]).filter((card) => !seen.has(card.id) && seen.add(card.id))]
 }
 
 export async function matchGame(

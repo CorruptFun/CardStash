@@ -14,6 +14,7 @@
       "file": "pkm-charizard-in-binder.jpg",
       "game": "pokemon",
       "name": "Charizard",
+      "number": "11",
       "label": "photo-pkm",
       "note": "Evolutions 11/108 inside a binder sleeve — neighbouring cards visible on all four sides, plastic glare",
       "source": "47a9aed6-IMG_1167.jpeg"
@@ -59,6 +60,7 @@
       "file": "ygo-blue-eyes-alt-gold.jpg",
       "game": "yugioh",
       "name": "Blue-Eyes Alternative White Dragon",
+      "number": "RA02-EN010",
       "label": "photo-ygo-foil",
       "note": "RA02-EN010 quarter century, GOLD foil name on the beige bar — the gold case; handheld, angled, box art behind",
       "source": "a90a5629-IMG_1255.jpeg"
@@ -68,6 +70,7 @@
       "file": "ygo-blue-eyes-spirit-silver.jpg",
       "game": "yugioh",
       "name": "Blue-Eyes Spirit Dragon",
+      "number": "RA03-EN030",
       "label": "photo-ygo-foil",
       "note": "RA03-EN030, SILVER foil name on a silver frame — the near-neutral case chroma-sat targets; handheld, angled",
       "source": "3960478e-IMG_1256.jpeg"
@@ -77,6 +80,7 @@
       "file": "ygo-duel-tower-prismatic.jpg",
       "game": "yugioh",
       "name": "Duel Tower",
+      "number": "MP22-EN269",
       "label": "photo-ygo-foil",
       "note": "MP22-EN269 prismatic secret, BLUE foil name on teal — coloured text on coloured ground; flat, evenly lit",
       "source": "881bca2b-IMG_9297.jpeg"
@@ -86,6 +90,7 @@
       "file": "ygo-enigmaster-packbit-secret.jpg",
       "game": "yugioh",
       "name": "Enigmaster Packbit",
+      "number": "PHNI-EN042",
       "label": "photo-ygo-foil",
       "note": "PHNI-EN042 secret rare, silver/blue foil name on a silver frame; flat, evenly lit",
       "source": "235afb8a-IMG_9352.jpeg"
@@ -113,6 +118,7 @@
       "file": "ygo-ip-masquerena-secret.jpg",
       "game": "yugioh",
       "name": "I:P Masquerena",
+      "number": "RA02-EN042",
       "label": "photo-ygo-foil",
       "note": "RA02-EN042 secret rare, rainbow holo across the whole card incl. the name; held in palm, dim indoor",
       "source": "ccf64152-IMG_1257.jpeg"

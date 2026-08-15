@@ -22,6 +22,17 @@ gate, reproduce every verdict twice — lives in
 Read it first. It exists because synthetic tests passed while real cards failed
 on-device.
 
+The matrix reports a second number beside the pass rate: **printing** — of the
+cells that identified the right card, how many landed on the printing that was
+photographed. It is deliberately not part of the gate (the gate is a name gate,
+and every stored baseline was measured against it), and it is only asked where
+the ground truth can answer: Yu-Gi-Oh's fixture images are YGOPRODeck replicas
+with no set code printed on them, so only real photographs can grade its
+printings. Watch the second half of that line hardest — `N wrong while claiming
+the code was read` counts printings the app got wrong *and believed*, which is
+the only kind the user cannot catch (see `pinned` in
+[scanning.md](scanning.md)).
+
 Three paths the matrix cannot reach have their own checks: what the camera
 captures (`test:capture`), when it is allowed to be *on* (`test:camera`), and
 the built bundle (`smoke-app.mjs`). Changes to `camera.ts` or the scan screen
@@ -60,6 +71,8 @@ for a canned-network stub) and `external` to keep a heavy lazy dependency out
 
 | Test | Covers |
 | ---- | ------ |
+| `cardcode.test.mjs` | `parseCardCode` — reading a printed set/batch number ("BLMR-EN085") out of a search query. The **refusals** are the point: an ordinary card name must never be mistaken for a code. |
+| `cardcode-search.test.mjs` | `ygoBySetCode` against a stubbed YGOPRODeck (exact-match set-code endpoint, region/padding spellings, the printing's own price) and `catalogByCode` over a stubbed catalog. |
 | `corner.test.mjs` | `parseCornerInfo` per game, `parsePasscode`, `sameYgoCode` — the collector-line parsers, including the fused-fraction reconstruction and its bounds. |
 | `names.test.mjs` | `nameCandidates` ranking, `nameScore`/`similarity`/`normalizeName` — including split champion names and the lead-segment tolerance. |
 | `orientation.test.mjs` | `looksSideways` and `latinWordCount` — the two pure decisions behind sideways handling. |

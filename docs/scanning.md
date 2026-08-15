@@ -221,6 +221,61 @@ rules box and drops the small detached collector line), and merges partial
 reads across passes because the parts can live in opposite polarities (a white
 set-code badge beside dark digits).
 
+### Which PRINTING — and admitting when it wasn't read
+
+Identifying the card and identifying the printing are two different
+achievements, and the pipeline reports them separately.
+
+`refineFromCorner` pins the edition from the printed code once the name has
+found the card. When it can't — the code didn't read, or the card was
+identified by a Yu-Gi-Oh passcode, which names the card in every language but
+says nothing about which reprint is in the hand — the edition shown is the
+SOURCE's default: for YGOPRODeck, the first entry in `card_sets`, an arbitrary
+reprint out of a dozen whose prices span two orders of magnitude. A Secret Rare
+filed at a $0.12 reprint's price is the right card and the wrong answer.
+
+So `IdentificationMeta.pinned` says which happened, and it is carried through
+the frame cache and out to the UI: with it false, the card sheet marks the
+edition unread and puts the printing picker one tap away
+(`printingUnconfirmed` in the sheet request). The scanner is allowed to guess
+the printing; it is not allowed to present the guess as a reading.
+
+Yu-Gi-Oh's code window is the band BETWEEN the art and the rules box. It used
+to sit at y 0.50–0.63, which is inside the ARTWORK on the modern frame: probed
+against the harness photographs it returned pure foil sparkle on every pass
+while the code sat one band lower. Fixed, but note what the same round showed
+about paying for it — Yu-Gi-Oh gets no extra retry windows, because its passes
+are wanted for the wide bottom band where the passcode reads, and two extra
+code-band rects cost a real photograph its identification outright. A better
+printing is never worth a lost card.
+
+### The cloud rescue's timing
+
+`cloudScanRescue` (opt-in, and the switch is its own act — see
+[decisions.md](decisions.md) 1 and [privacy.md](privacy.md)) no longer waits
+for the local pipeline to exhaust itself. It starts on a **2.5s timer**
+(`CLOUD_HEADSTART_MS`, measured from the top of `identifyViaOcr` so a sideways
+frame's orientation probing counts) and runs alongside the remaining passes:
+
+- A local answer wins if it lands first, and `settle()` aborts the request in
+  flight on every way out of the function. Local answers outrank the model's
+  because they carry corroborating evidence — a matched name plus a printed
+  line — that one reading of a whole card doesn't.
+- A cloud answer that lands mid-sweep ends the sweep. There is nothing to be
+  gained by grinding the magnified collector passes once the answer is in hand.
+- Exactly one call per attempt: `cloudCalled` keeps the raced call and the
+  last-resort call from both firing, and the last resort starts immediately
+  rather than waiting the deadline out when everything local has already
+  failed.
+- The raced call is rationed by `CLOUD_RACE_COOLDOWN_MS` (8s, module-level,
+  across attempts) because the live scanner retries on its own and a hand-held
+  card jitters into a fresh frame hash each time, so the miss cache doesn't
+  cover it. The last-resort call is not rationed.
+
+Entitlement is not checked here and shouldn't be: the hosted route is the
+server's call (decision 2a), and a client-side check only adds a way to be
+locally wrong about what someone paid for.
+
 ### Sideways cards
 
 People photograph cards lying flat on a desk, so the card arrives quarter
