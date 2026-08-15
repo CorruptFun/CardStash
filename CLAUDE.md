@@ -128,6 +128,20 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   `clearAnalytics()` drops that install record along with the events. The scan
   trace ring (`scandebug.ts`) holds real card text and must never feed
   analytics.
+- **Diagnostics now have a receiver, and it is our own project** —
+  `ingest_events()` in `supabase/migrations/0007`, reached via `diagconfig.ts`.
+  Three things about it are load-bearing (decision 20): it posts with the
+  publishable key as `anon` and **never the session JWT**, because tying a
+  content-free counter to an account is the one thing this log must not do;
+  `analytics_events.device` is a random per-install id and must never become
+  `auth.uid()`; and unknown event names are BUCKETED, never rejected, because a
+  cached PWA client predating a rename is permanent rather than exceptional.
+  `diagShare` defaults **on**, which is only honest because `diagConsentAt`
+  gates the upload separately — nothing is posted before the disclosure has been
+  shown, EU/EEA/UK gets an ask instead, and `noteDiagConsent()` buries the
+  pre-consent backlog. Beware the silent failure mode: `flushedThrough` advances
+  on **any** 2xx, so a receiver that 200s a shape it does not understand loses
+  those events forever.
 - Prices: USD only (US/English market). `best` = non-foil headline, `bestFoil`
   = premium finish; per-item pricing multiplies by condition factor. Data
   stored by pre-0.5 versions may still carry EUR (Cardmarket) entries — the
@@ -153,10 +167,16 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0004), not `supabase/schema.sql`** — that file is
-a pointer, and the migration history is baselined on the live project so a
-`db push` cannot replay from zero. Read `docs/social.md` and decision 16 before
-touching any of it.
+`supabase/migrations/` (0000–0007 — social is 0000–0004), not
+`supabase/schema.sql`** — that file is a pointer, and the migration history is
+baselined on the live project so a `db push` cannot replay from zero. Read
+`docs/social.md` and decision 16 before touching any of it.
+
+**The CLI on a dev machine may be signed in as the wrong account.** If every
+project-scoped call answers `does not have the necessary privileges`, that is
+not a scope or database-password problem — compare `GET /v1/profile` against
+`GET /v1/projects` and check the project is even visible. `sb doctor` reporting
+"linked" proves nothing; it reads a local file, not the API.
 
 The one rule that is not obvious from the SQL: **scope drives visibility.** A
 `scope='trade'` binder is readable by any signed-in user (being findable is the

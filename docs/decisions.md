@@ -590,3 +590,85 @@ delivery confirmation being required rather than optional. Or wanting an open
 marketplace — that is not a bigger version of this, it is a different product
 with listing moderation, seller reputation and counterfeit disputes attached,
 and the friends-only scope is what keeps the current design honest.
+
+### 20. Diagnostics report to the app's own project, and consent is a separate fact from the switch
+
+**Context.** The diagnostics log had collected on every device since it was
+written and had never once uploaded — which was not a bug so much as a design
+that could not succeed. `flushTelemetry` required `diagShare` **and** an
+endpoint **and** a bearer token, and the endpoint and token were free-text
+fields in Settings. No user has an ingest token for our server and none can
+obtain one, so the switch above those fields could be turned on and still send
+nothing, forever. A control that cannot succeed is worse than no control,
+because it reads as a working one. The shipped default endpoint pointed at a
+host that serves a different application entirely.
+
+**Decision (2026-08-15).** The receiver is `public.ingest_events(jsonb)` on
+**Cardstock's own Supabase project** — the one already carrying the vault,
+hosted social and orders — defined in `supabase/migrations/0007_analytics.sql`.
+The endpoint and token fields are gone; there is no diagnostics credential at
+all.
+
+**Why here rather than somewhere separate.** The alternatives were a self-hosted
+box on our own hardware and a brand-new project. `docs/roadmap.md` §6 argues
+against putting analytics in *the shared* project (`deskabqqxqqibxjffwmb`), and
+that argument is sound — three apps' migration numbers already collide there.
+It does not apply to a project this app owns outright with a baselined history.
+The self-hosted box would have added a tunnel, a DNS record, a second uptime
+story and a token to rotate, in exchange for nothing this needs. What survives
+from the roadmap's objection is the blast-radius half — an anonymous firehose
+sitting beside users' encrypted vaults — and the answer to that is the trust
+model, not a second database.
+
+**No new credential, deliberately.** It posts with the publishable key that
+already ships in the bundle, as `anon`. A bearer token would have been equally
+readable in the same bundle plus a second thing to forget. What actually defends
+the receiver is SQL: the function is the only way in, it caps every batch (500
+per call, 5000 per device per hour, 4KB per event), and RLS with no policy means
+nothing but `service_role` can read a row back.
+
+**The session JWT is never sent, and `device` must never become `auth.uid()`.**
+Posting as the signed-in user would tie a content-free counter to an account,
+which is the one thing this log exists not to do. `device` is a random
+per-install id minted in `analytics.ts`. Nothing in 0007 references `auth.uid()`
+for exactly that reason.
+
+**Unknown event names are bucketed, never rejected.** A PWA keeps users on a
+cached bundle until they accept an update, so a client predating a rename is a
+permanent fact rather than an error. Rejecting its batch would lose the events
+we *do* understand along with the ones we do not.
+
+**On by default — and that is only honest because consent is a second field.**
+`diagShare` now starts true, but `diagConsentAt` gates the upload independently:
+nothing is posted until the disclosure has actually been shown, however the flag
+came to be set. Where ePrivacy applies — EU/EEA/UK, detected from the browser's
+own timezone, local and with zero egress — the banner *asks* instead and starts
+false.
+
+**Retroactive consent is not consent.** `noteDiagConsent()` advances
+`flushedThrough` to the newest event as it answers, so an install that has been
+collecting for weeks sends what happens *next*, never what happened before it
+was asked. `merge()` in `settings.ts` forces any install predating the field
+back to off rather than letting a new default opt it in silently. Without both
+of those, flipping the default would have uploaded weeks of events gathered
+while the answer was no.
+
+**A receiver that 200s a payload it does not understand is worse than none.**
+`flushedThrough` advances on any 2xx, so those events are lost permanently and
+never retried. This is why the envelope is pinned in `privacy.md` and why the
+function returns a count rather than raising — a caller sending nonsense gets 0
+and no explanation, and diagnostics never become a way for the app to break.
+
+**Costs.** Anonymous writes are the one deliberate hole in the schema, and they
+have to be: diagnostics are collected before anyone signs in and most users
+never will. Anyone can therefore post rubbish with a key read out of the bundle,
+and the caps are the only thing between that and a full table. Analytics volume
+now shares a database with users' vaults and orders, which is a blast radius
+that did not exist before.
+
+**What would make this wrong.** Volume high enough that the firehose threatens
+the project the vault depends on — at which point the answer is its own project,
+and the client change is one constant in `diagconfig.ts`. Or wanting per-user
+analytics, which this schema deliberately cannot answer and should not be
+retrofitted to; that is a different product with a different consent
+conversation attached.

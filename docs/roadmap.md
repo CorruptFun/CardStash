@@ -67,15 +67,18 @@ device only. It cannot tell us whether anyone else opened the app this week.
 
 Four things that the docs get wrong or omit, each of which changes a round.
 
-### 1. The analytics client cannot measure anyone as built
+### 1. The analytics client cannot measure anyone as built — ✅ FIXED 2026-08-15
 
-[`analytics.ts`](../src/lib/analytics.ts) `flushTelemetry` no-ops unless
-`diagShare` **and** an endpoint **and** a **`diagToken`** are set. The token is a
-free-text field in Settings. No real user types a bearer token into a scanner
-app, so a perfect receiver would collect events from exactly one person.
+*Was:* `flushTelemetry` no-opped unless `diagShare` **and** an endpoint **and** a
+**`diagToken`** were set, the latter two being free-text fields in Settings. No
+real user types a bearer token into a scanner app, so a perfect receiver would
+have collected events from exactly one person.
 
-**The receiver is necessary but not sufficient.** Round 0 is *client gate +
-receiver*, and the gate is a privacy decision, not a code decision.
+*Now:* both fields are gone and there is no diagnostics credential. The receiver
+is `ingest_events()` on **this app's own Supabase project**
+(`supabase/migrations/0007_analytics.sql`), reached with the publishable key that
+already ships. Round 0a and 0b below are **done** — see decision 20 for the
+reasoning, `privacy.md` for the contract.
 
 ### 2. `docs/social.md`'s "storage swap rather than a client rewrite" is half true
 
@@ -188,26 +191,25 @@ moved before.
 The highest-value round and the current blind spot. "I need users first" and "I
 cannot measure users" are the same problem.
 
-### 0a. Client consent gate
+### 0a. Client consent gate — ✅ SHIPPED 2026-08-15 (`8a688bb`)
 
-- **`diagShare` defaults to `true`**, with a first-run disclosure and a one-tap
-  off in Settings. The payload is content-free by construction, which is what
-  makes this defensible — it is not a licence to relax the redaction contract.
-- **Drop the mandatory `diagToken`** for the first-party endpoint. Keep token
-  auth for the *custom endpoint* path, which becomes the advanced option.
-- **EU/UK carve-out.** ePrivacy consent applies to any non-essential storage
-  access, not just cookies, so worldwide opt-out is not lawful everywhere. Detect
-  an EU/EEA/UK timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` —
-  local, zero egress, no IP geolocation — and show a first-run *ask* there
-  instead of a disclosure. Everywhere else gets opt-out.
-- ⚠️ **`diagEndpoint` is already persisted in every existing install.** zustand
-  `persist` writes the whole settings object, so the shipped default
-  `https://telemetry.corrupt.solutions/ingest/telemetry` sits in users'
-  localStorage today. Changing the constant does **not** move them. The
-  `merge()` function in [`settings.ts`](../src/lib/settings.ts) must rewrite a
-  stored endpoint that equals the old default — `merge()` already sanitizes
-  `enabledGames`/`gameFilter`, so the precedent is there. Miss this and every
-  existing install posts at a dead host forever.
+- **`diagShare` defaults to `true`**, with a first-run disclosure
+  (`DiagConsent.tsx`) and a one-tap off in Settings. Made honest by a second
+  field: `diagConsentAt` gates the upload independently, so nothing is posted
+  before the disclosure has been shown, however the flag came to be set.
+- **The `diagToken` requirement is gone**, along with the endpoint field. There
+  is no custom-endpoint path and no advanced option — the destination is the
+  app's own project or nothing (`diagconfig.ts`).
+- **EU/UK carve-out** as specified: `needsExplicitDiagConsent()` reads
+  `Intl.DateTimeFormat().resolvedOptions().timeZone` for `Europe/*` — local,
+  zero egress, no IP geolocation — and the banner *asks* there, starting false.
+- ⚠️ **The persisted-`diagEndpoint` trap was real, and dodged rather than
+  patched.** Nothing reads that key any more, so a stored dead endpoint is
+  simply inert; no `merge()` rewrite was needed. What `merge()` *does* do is
+  force any install predating `diagConsentAt` back to **off**, so a new default
+  cannot silently opt in someone who has been collecting under the old regime.
+  `noteDiagConsent()` then buries that backlog by advancing `flushedThrough` —
+  retroactive consent is not consent.
 - Add `EVENT_TYPES` entries for the new surfaces (backup, restore, sync
   lifecycle) **before** the receiver ships, so the receiver never meets a name it
   has to bucket on day one.
@@ -566,9 +568,14 @@ Paste this into a fresh session to pick the work up cleanly.
 - `drive.appdata`'s current scope tier and review requirement (round 1). The
   whole cost case for Drive backup rests on it being non-sensitive.
 - Supabase's current free-project cap per organization (finding 6).
-- Whether zustand `persist` has written `diagEndpoint` for installs that never
-  changed a setting, or only for those that did. The `merge()` fix covers both,
-  but the blast radius differs.
+- ~~Whether zustand `persist` has written `diagEndpoint` for installs that never
+  changed a setting.~~ **Moot as of 2026-08-15** — nothing reads that key any
+  more, so a stored dead endpoint is inert and no rewrite was needed.
 
 ~~What `telemetry.corrupt.solutions` actually is~~ — **answered, see finding 5.**
+It is also now **irrelevant to this app**: the receiver is our own Supabase
+project, and nothing in Cardstock references that host. (For the record, it was
+never routed — the hostname has no CNAME to its tunnel, so the 2026-07-31
+"Cloudflare WAF" theory was the wrong suspect, and its SQLite tables were still
+empty on 2026-08-15.)
 It serves Family Hub and `/ingest/telemetry` 404s.

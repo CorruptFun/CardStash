@@ -23,8 +23,8 @@ Pages, and everything else happens in the browser tab.
                 │ read-only card data      │ opt-in only
                 ▼                          ▼
    Scryfall · pokemontcg.io · TCGdex     Gemini (AI deck builder)
-   YGOPRODeck · Lorcast · tcgcsv.com     telemetry endpoint
-                                          sync server (server/)
+   YGOPRODeck · Lorcast · tcgcsv.com     Supabase (vault · social ·
+                                          orders · ingest_events)
 ```
 
 Everything above the line works offline once the shell and OCR engine are
@@ -77,7 +77,8 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `sync.ts` | 267 | The optional live-sync client and poll loop. |
 | `drive.ts` | 340 | Opt-in backup to the user's **own** Google Drive (`appDataFolder`). Dormant without `VITE_GOOGLE_CLIENT_ID`; loads the third-party Google script on first use, never at boot. |
 | `gemini.ts` | 211 | The AI deck builder — the app's only Gemini use. |
-| `analytics.ts` | 746 | Local diagnostics store, redaction, install/session identity, opt-in telemetry upload. |
+| `analytics.ts` | 860 | Local diagnostics store, redaction, install/session identity, the consent gate (`noteDiagConsent`) and the batched upload. |
+| `diagconfig.ts` | 32 | Where diagnostics post: `ingest_events()` on the app's own project. No credential of its own — see decision 20. |
 | `importexport.ts` / `csv.ts` | 241 / 62 | Collection CSV import/export and a CSV parser. |
 | `demo.ts` | 431 | `?demo=1` seed data. |
 | `fetchJson.ts` | 40 | `fetch` + JSON + timeout + abort linking. Every card API uses it. |

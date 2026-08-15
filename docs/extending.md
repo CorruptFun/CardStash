@@ -153,6 +153,16 @@ works:
    only**. See [privacy.md](privacy.md) for the redaction rules — anything that
    could carry card text, a query or a key will be dropped, and shouldn't have
    been passed in the first place.
+3. **Add it to the whitelist in `ingest_events()` too**
+   (`supabase/migrations/0007_analytics.sql`) and apply the change. The SQL
+   keeps its own copy of the list, and an unlisted name is stored as `'other'` —
+   silently, by design, because rejecting it would lose the whole batch from a
+   client running an older bundle. So a new event that never reaches the SQL
+   still *arrives*; it just arrives unnamed, and you will not be told.
+4. If the event carries a money amount, pass `amountBucket()` — never the
+   figure. `amount`, `price`, `total` and friends are in `FORBIDDEN_KEYS` and
+   are dropped, so an exact value does not silently sneak through under a
+   different name.
 
 ---
 
