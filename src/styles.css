@@ -73,6 +73,25 @@
     #9fadc0 80%,
     #eef3fa 100%
   );
+  /* The glare — a narrow specular band, for sweeping across a foil surface.
+     The cyan and magenta shoulders either side of the white core are the
+     whole trick: real holo foil splits light into colour at the edge of the
+     highlight, and a purely white band reads as glass or a loading shimmer
+     instead.
+
+     The stops are TIGHT (44%→56%), and that is tuning rather than taste: the
+     elements carrying this are deliberately oversized so the diagonal clears
+     their corners, which multiplies the apparent width. A band that looks
+     reasonable in the abstract washed out half a card once it was painted
+     onto a 220%-wide pseudo-element. */
+  --glare: linear-gradient(
+    105deg,
+    transparent 44%,
+    rgba(126, 231, 255, 0.13) 47.5%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 176, 243, 0.15) 52.5%,
+    transparent 56%
+  );
   --font-ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --r-2: 14px;
@@ -825,6 +844,118 @@ button {
 }
 .cardimg--rounded {
   border-radius: 4.6%/3.4%;
+}
+
+/*
+ * Foil cards catch the light. Applied only where the row's finish is actually
+ * a foil treatment (`isFoilFinish`), which is both the honest thing to do and
+ * what keeps a 500-card grid from animating 500 layers.
+ *
+ * Two layers, because one does not read as holographic:
+ *
+ * - **A standing rainbow wash** at low opacity on `soft-light`, so it tints
+ *   the art rather than painting over it. This is what makes the card look
+ *   like foil while it is sitting still; without it the sweep reads as a
+ *   glass reflection on an ordinary card.
+ * - **A specular band that sweeps**, which is the glare itself.
+ *
+ * The sweep is brief and rare on purpose. It crosses in the first ~18% of the
+ * cycle and then waits off-screen for the rest — a continuous shimmer is the
+ * universal visual language for "this content hasn't loaded", which is the
+ * last thing a collection grid should say. The nth-child delays matter for
+ * the same reason: a grid glinting in unison reads as a loading wave passing
+ * through, where staggered glints read as light moving over a page of cards.
+ *
+ * **This is only affordable because `.cardcell` already sets
+ * `content-visibility: auto`.** That makes offscreen cells skip rendering,
+ * and their pseudo-elements with them, so a 900-card collection animates the
+ * dozen cards actually on screen rather than all of them. If that rule is
+ * ever removed, this becomes a per-card animation across the whole grid —
+ * check here before dropping it.
+ */
+.cardimg--foil:before,
+.cardimg--foil:after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: inherit;
+}
+/*
+ * The wash does NOT animate, and that is both the cheap and the correct
+ * choice. Animating it means `background-position` moving every frame, which
+ * is a repaint per card per frame — the one genuinely expensive thing in this
+ * effect, and it scales with collection size. It is also wrong: on a real
+ * card the foil pattern is fixed and the *light* is what moves. Static
+ * pattern, moving glare.
+ */
+.cardimg--foil:before {
+  inset: 0;
+  background: var(--holo);
+  background-size: 190% 190%;
+  background-position: 30% 40%;
+  opacity: 0.17;
+  mix-blend-mode: soft-light;
+}
+/* Wider than the card so the diagonal band clears both corners; the parent
+   clips it. */
+.cardimg--foil:after {
+  inset: -25% -60%;
+  background: var(--glare);
+  mix-blend-mode: screen;
+  animation: glaresweep 7s ease-in-out infinite;
+}
+.cardimg--foil:nth-child(2n):after {
+  animation-delay: 1.6s;
+}
+.cardimg--foil:nth-child(3n):after {
+  animation-delay: 3.1s;
+}
+.cardimg--foil:nth-child(5n):after {
+  animation-delay: 4.4s;
+}
+
+@keyframes glaresweep {
+  0% {
+    transform: translateX(-105%);
+  }
+  18%,
+  to {
+    transform: translateX(105%);
+  }
+}
+
+/*
+ * The same glare for chrome (the welcome mark, holo buttons). Separate class
+ * because those surfaces are already a gradient and want the band without the
+ * rainbow wash underneath.
+ */
+.foilglare {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.foilglare:after {
+  content: "";
+  position: absolute;
+  inset: -25% -60%;
+  background: var(--glare);
+  mix-blend-mode: screen;
+  animation: glaresweep 7s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* A glare is decoration; someone who asked for less motion gets the foil
+   colouring and none of the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .cardimg--foil:before,
+  .cardimg--foil:after,
+  .foilglare:after {
+    animation: none;
+  }
+  .cardimg--foil:after,
+  .foilglare:after {
+    opacity: 0;
+  }
 }
 .cardimg img {
   position: absolute;

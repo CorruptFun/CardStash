@@ -7,7 +7,7 @@ import { Sheet } from '../components/Sheet'
 import { TradeSides } from '../components/TradeSides'
 import { track } from '../lib/analytics'
 import { db, removeFriend, saveTrade, upsertFriendFromProfile } from '../lib/db'
-import { FINISH_LABEL, GAME_SHORT, GAMES } from '../lib/games'
+import { FINISH_LABEL, GAME_SHORT, GAMES, isFoilFinish } from '../lib/games'
 import {
   buildTradePayload,
   encodeBlob,
@@ -254,7 +254,7 @@ function BinderCell({ row, wanted, onPick }: { row: SharedCard; wanted: boolean;
   const card = useMemo(() => sharedCardToCard(row), [row])
   return (
     <button className="cardcell" onClick={onPick}>
-      <CardImg card={card} />
+      <CardImg card={card} foil={isFoilFinish(row.finish)} />
       {row.qty > 1 && <span className="cardcell__qty">×{row.qty}</span>}
       {row.forTrade > 0 && (
         <span className="cardcell__trade">
@@ -606,7 +606,7 @@ function PickRow({
     <div className={`pickrow ${on ? 'pickrow--on' : ''}`}>
       <button className="pickrow__main" onClick={onToggle} aria-pressed={on}>
         <span className={`pickrow__check ${on ? 'pickrow__check--on' : ''}`}>{on && <Icon name="check" size={13} />}</span>
-        <CardImg card={card} className="sharedrow__thumb" />
+        <CardImg card={card} className="sharedrow__thumb" foil={isFoilFinish(row.finish)} />
         <span className="sharedrow__body">
           <span className="sharedrow__name">
             {match && <Icon name="heart" size={11} filled className="pickrow__heart" />}

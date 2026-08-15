@@ -66,6 +66,21 @@ export const FINISH_LABEL: Record<Finish, string> = {
   firstEd: '1st Edition',
 }
 
+/**
+ * Whether this finish is a reflective treatment — the ones that actually
+ * catch the light, and so the ones the UI gives a holographic glare to.
+ *
+ * `firstEd` is deliberately excluded: it is an edition stamp, not a surface.
+ * A 1st Edition Yu-Gi-Oh common is as matte as any other common, and making
+ * it shimmer would be the app asserting something about the card that isn't
+ * true.
+ */
+const FOIL_FINISHES = new Set<Finish>(['foil', 'etched', 'holo', 'reverse'])
+
+export function isFoilFinish(finish: Finish | undefined): boolean {
+  return finish != null && FOIL_FINISHES.has(finish)
+}
+
 export const SOURCE_LABEL: Record<PriceSource, string> = {
   tcgplayer: 'TCGplayer',
   cardmarket: 'Cardmarket',

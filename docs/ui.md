@@ -89,6 +89,33 @@ must stay rainbow. `--foil` is silver and it is *chrome*: it says "collectible"
 without claiming anything about the card under it. Reaching for `--holo` to
 decorate UI would make the app assert a card is foil when it isn't.
 
+### The holographic glare
+
+`.cardimg--foil` gives a card the look of light catching a foil, and
+`CardImg`'s `foil` prop drives it from the row's actual finish
+(`isFoilFinish` in `games.ts` — `foil`/`etched`/`holo`/`reverse`, and
+deliberately **not** `firstEd`, which is an edition stamp rather than a
+surface). A search result never glares: finish lives on the collection row,
+not the card, so a bare `Card` genuinely doesn't know which printing is meant.
+
+Two layers, and both are needed:
+
+| Layer | What | Why |
+| ----- | ---- | --- |
+| `::before` | standing `--holo` wash, `soft-light`, **not animated** | what makes it look like foil at rest. Static because animating `background-position` is a repaint per card per frame — and because on a real card the foil pattern is fixed and the *light* moves |
+| `::after` | `--glare` band sweeping on `transform` | the glint itself; composited, so it's cheap |
+
+The sweep crosses in the first ~18% of its cycle and waits off-screen for the
+rest. A continuous shimmer is the universal language for "not loaded yet",
+which is the last thing a collection grid should say — and `nth-child` delays
+break the unison, because a grid glinting together reads as a loading wave.
+
+**This is only affordable because `.cardcell` sets `content-visibility: auto`,**
+so offscreen cells (and their pseudo-elements) don't render at all. If that
+rule goes, this becomes a per-card animation across the entire grid.
+
+`prefers-reduced-motion` keeps the foil colouring and drops all movement.
+
 Charts that stroke SVG or canvas can't read CSS variables, so `InsightsPanel`,
 `DecksView` and `CardSheet` each mirror `--silver` as a literal with a comment
 saying so. If the accent moves, those move too.

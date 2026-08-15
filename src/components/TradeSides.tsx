@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { FINISH_LABEL } from '../lib/games'
+import { FINISH_LABEL, isFoilFinish } from '../lib/games'
 import { sharedCardToCard, sharedRowValue, sideQty, sideValue } from '../lib/social'
 import type { SharedCard } from '../lib/types'
 import { money } from '../lib/util'
@@ -36,7 +36,7 @@ export function SharedRow({ row, onClick }: { row: SharedCard; onClick?: () => v
     .join(' · ')
   const body = (
     <>
-      <CardImg card={card} className="sharedrow__thumb" />
+      <CardImg card={card} className="sharedrow__thumb" foil={isFoilFinish(row.finish)} />
       <span className="sharedrow__body">
         <span className="sharedrow__name">{row.name}</span>
         <span className="sharedrow__meta">{meta || row.setName || '—'}</span>

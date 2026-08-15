@@ -20,7 +20,7 @@ import {
 } from '../lib/db'
 import { wantKeyFor } from '../lib/social'
 import { addedToBoardToast, boardForCard } from '../lib/deckstats'
-import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, SOURCE_LABEL } from '../lib/games'
+import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, isFoilFinish, SOURCE_LABEL } from '../lib/games'
 import { cardTrend } from '../lib/portfolio'
 import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
@@ -316,7 +316,7 @@ function CardSheet() {
   return (
     <div className="cardsheet">
       <header className="cardsheet__head">
-        <CardImg card={card} size="large" className="cardsheet__img" />
+        <CardImg card={card} size="large" className="cardsheet__img" foil={isFoilFinish(finish)} />
         <div className="cardsheet__title">
           <div className="cardsheet__gamerow">
             <span className={`gamechip gamechip--${card.game}`}>{GAME_LABEL[card.game]}</span>

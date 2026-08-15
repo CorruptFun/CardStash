@@ -22,11 +22,20 @@ export function CardImg({
   size = 'small',
   className = '',
   rounded = true,
+  foil = false,
 }: {
   card: Card
   size?: 'small' | 'large'
   className?: string
   rounded?: boolean
+  /**
+   * This copy is a reflective printing, so give it the holographic glare
+   * (`isFoilFinish` decides). Off by default: finish lives on the collection
+   * row, not on the card, so a bare `Card` genuinely does not know — and a
+   * search result shimmering would claim something about a printing nobody
+   * has chosen yet.
+   */
+  foil?: boolean
 }) {
   const [loaded, setLoaded] = useState<{ src: string | undefined; state: 'loading' | 'ok' | 'error' }>({
     src: undefined,
@@ -36,7 +45,7 @@ export function CardImg({
   const state = loaded.src === src ? loaded.state : 'loading'
   return (
     <div
-      className={`cardimg ${rounded ? 'cardimg--rounded' : ''} ${className}`}
+      className={`cardimg ${rounded ? 'cardimg--rounded' : ''} ${foil ? 'cardimg--foil' : ''} ${className}`}
       style={!src || state === 'error' ? { background: GAME_FALLBACK_BG[card.game] } : undefined}
     >
       {src && state !== 'error' && (

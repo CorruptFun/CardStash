@@ -21,7 +21,7 @@ import {
 } from '../lib/db'
 import { boardForCard } from '../lib/deckstats'
 import { backupToDrive, isDriveConfigured, prewarmDrive } from '../lib/drive'
-import { GAMES, GAME_SHORT, FINISH_LABEL } from '../lib/games'
+import { GAMES, GAME_SHORT, FINISH_LABEL, isFoilFinish } from '../lib/games'
 import { collectionToCsv, parseCollectionCsv, type CsvImportRow } from '../lib/importexport'
 import { valueWindow } from '../lib/portfolio'
 import {
@@ -690,7 +690,7 @@ const CollectionCell = memo(function CollectionCell({
 }) {
   return (
     <button className={`cardcell ${selected ? 'cardcell--selected' : ''}`} onClick={() => onPick(item)}>
-      <CardImg card={item.card} />
+      <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
       {item.qty > 1 && <span className="cardcell__qty">×{item.qty}</span>}
       {tradeQty(item) > 0 && (
         <span className="cardcell__trade">
