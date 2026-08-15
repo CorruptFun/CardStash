@@ -22,6 +22,13 @@ basis add bar, copies you already own, deck membership and assignment, the want
 toggle, external links, and — for sealed products — the set's other products and
 everything that could be pulled from it.
 
+When a scan couldn't read the printed code, the sheet says so under the set
+line ("Edition not read — check it's yours") and taps through to the printings
+picker. The card is right; the edition is the source's default, and a
+Yu-Gi-Oh reprint can be a hundredth of the Secret Rare's price — so the sheet
+shows a guess as a guess (`printingUnconfirmed`, from `pinned` in
+identify.ts).
+
 ## Routing and shell
 
 Hash routing parsed in `App.tsx`; no router library. The shell is a

@@ -357,7 +357,13 @@ export function ScanView({ active }: { active: boolean }) {
       const outcome = await identifyFrame({ canvas }, frameHash(canvas), { ignoreMisses: true, mode: 'card' })
       if (outcome.ok) {
         onHit(outcome)
-        openSheet({ card: outcome.card, origin: 'scan', finish: scanFinish(outcome), grade: outcome.identification.grade })
+        openSheet({
+          card: outcome.card,
+          origin: 'scan',
+          finish: scanFinish(outcome),
+          grade: outcome.identification.grade,
+          printingUnconfirmed: !outcome.identification.pinned,
+        })
         return
       }
       toast(
@@ -802,7 +808,15 @@ export function ScanView({ active }: { active: boolean }) {
                 foilAuto={foilAuto}
                 onCycleFinish={cycleFinish}
                 onOpen={() =>
-                  hit && hitFinish && openSheet({ card: hit.card, origin: 'scan', finish: hitFinish, grade: hit.identification.grade })
+                  hit &&
+                  hitFinish &&
+                  openSheet({
+                    card: hit.card,
+                    origin: 'scan',
+                    finish: hitFinish,
+                    grade: hit.identification.grade,
+                    printingUnconfirmed: !hit.identification.pinned,
+                  })
                 }
                 detail={scanner.detail}
                 onSearch={scanner.miss?.readName ? searchInstead : null}

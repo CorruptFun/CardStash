@@ -66,6 +66,9 @@ interface CacheEntry {
   card: Card | null
   /** Foil sheen read off the physical copy — kept so cached hits price right. */
   foil?: boolean
+  /** Whether the printed code pinned the printing — same reason as `foil`:
+   * a cached hit must not silently upgrade a guessed edition into a read one. */
+  pinned?: boolean
   at: number
 }
 
@@ -88,8 +91,15 @@ function cacheLookup(hash: string, mode: ScanMode, hint?: Game): CacheEntry | nu
   return null
 }
 
-function cacheStore(hash: string, mode: ScanMode, hint: Game | undefined, card: Card | null, foil?: boolean): void {
-  cache.unshift({ hash, mode, hint, card, foil, at: Date.now() })
+function cacheStore(
+  hash: string,
+  mode: ScanMode,
+  hint: Game | undefined,
+  card: Card | null,
+  foil?: boolean,
+  pinned?: boolean,
+): void {
+  cache.unshift({ hash, mode, hint, card, foil, pinned, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
@@ -121,6 +131,16 @@ export interface IdentificationMeta {
   via: 'ocr' | 'cache' | 'cloud'
   /** The physical copy showed a foil/holo sheen (on-device detector). */
   foil?: boolean
+  /**
+   * The printed collector code was read AND it is what chose this printing.
+   *
+   * False means the card is right but the edition is the source's default —
+   * usually its first-listed printing, which for Yu-Gi-Oh is an arbitrary
+   * reprint. Same card, possibly a hundredth of the price. The UI needs to be
+   * able to say so rather than present a guess with the confidence of a read
+   * (see the printing picker in CardSheet).
+   */
+  pinned?: boolean
   /**
    * Read off a graded slab's label. Lives on the identification rather than
    * the card because a grade describes the copy in the holder, not the
@@ -223,6 +243,7 @@ export async function identifyFrame(
         confidence: 1,
         via: 'cache',
         foil: cached.foil,
+        pinned: cached.pinned,
       },
     })
   }
@@ -249,7 +270,7 @@ export async function identifyFrame(
     // (confidence 0.7) must be re-derived per attempt, not re-served at
     // cache confidence.
     if (useCache && outcome.identification.confidence >= 0.75)
-      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
+      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil, outcome.identification.pinned)
   }
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
@@ -895,6 +916,7 @@ async function identifyViaOcr(
           confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
+          pinned: linePinnedPrinting(refined),
         },
       }
     }
@@ -1073,6 +1095,9 @@ async function identifyViaOcr(
             confidence: CORNER_CONFIDENCE,
             via: 'ocr',
             foil: detectFoil(canvas) ? true : undefined,
+            // A Yu-Gi-Oh passcode identifies the card in every language but
+            // says nothing about WHICH printing is in the hand.
+            pinned: !!read.number,
           },
         }
       }
@@ -1208,6 +1233,7 @@ async function identifyViaOcr(
         confidence: CLOUD_CONFIDENCE,
         via: 'cloud',
         foil: detectFoil(reading.canvas) ? true : undefined,
+        pinned: !!read.number,
       },
     }
   }
@@ -1296,6 +1322,24 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false
   const norm = (value: string) => value.toLowerCase().replace(/^0+(?=\d)/, '')
   return norm(a) === norm(b)
+}
+
+/**
+ * Did the printed line actually CHOOSE this printing?
+ *
+ * Not the same question as "did the line read", and the difference is the
+ * whole worth of the flag. `matchMtg` carries a fuzzy fallback: on a
+ * borderless print the line read "PRM 2", resolved to nothing under that set,
+ * and fell back to the name — returning the base printing #806 while a
+ * refinement had, technically, happened. Requiring the chosen card's own
+ * number to agree with the read keeps that honest. A collector-line override
+ * (`viaCollector`) counts too: there the line didn't merely pick the edition,
+ * it picked the card.
+ */
+function linePinnedPrinting(refined: { card: Card; read: CornerRead; viaCollector?: boolean } | null): boolean {
+  if (!refined) return false
+  if (refined.viaCollector) return true
+  return collectorEq(refined.card.number, refined.read.number) || sameYgoCode(refined.card.number, refined.read.number)
 }
 
 /**

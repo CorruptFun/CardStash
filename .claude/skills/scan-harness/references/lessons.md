@@ -604,3 +604,47 @@ result seems absurd, check this list before writing code.
     "no uncaught page errors" check with a stack that is entirely inside a
     dependency, look for OUR lifecycle call that put the dependency there;
     the stack cannot name it, because the async boundary ate our frames.
+
+## The printing was never being graded (the wrong-edition round)
+
+62. **A grader only finds what it asks about.** The matrix passed a cell when
+    the NAME matched at ≥0.9 and the game was right — so "Dragon Spirit of
+    White" filed as MP17-EN010 while the card in the hand was LCKC-EN018
+    scored a clean pass, at a $0.12 reprint's price for a Secret Rare. Yu-Gi-Oh
+    sat at a flawless 36/36 the whole time. The metric now sits BESIDE the
+    pass rate (`printing: N/M`), never folded into it: the gate is a name gate
+    and every stored baseline was measured against it, so quietly tightening it
+    would move every number at once and destroy the before/after comparison the
+    harness exists for.
+63. **The first thing the new metric measured was the fixtures, not the code.**
+    Yu-Gi-Oh scored 36/36 on printings too — vacuously. YGOPRODeck serves
+    rendered replicas stamped "Replica - Not For Use in Sanctioned
+    Tournaments" with **no set code and no passcode printed anywhere on them**,
+    and the fetcher's ground-truth `number` is the API's first printing, which
+    is exactly what the pipeline falls back to. Both sides agreed because
+    neither had read anything. `REPLICA_ART_GAMES` excludes them; only real
+    photographs can grade Yu-Gi-Oh printings. (MTG and Pokémon fixtures ARE
+    real card scans with printed lines — they grade honestly, at 23/46 and
+    32/54.)
+64. **The Yu-Gi-Oh code window was pointed at the artwork.** `CORNER_REGION`
+    said y 0.50-0.63, which on the modern frame is inside the art box; probed
+    against the photographs it returned foil sparkle on every variant while
+    "PHNI-EN042" sat one band lower and read (garbled but present) at
+    y 0.60-0.68. Two full-magnification OCR passes per scan were being spent on
+    pixels that could not contain the answer. Probe rects against a real photo
+    before trusting any region constant — the probe is twenty lines against
+    `readRegionText` and it answers in seconds what a matrix run cannot.
+65. **Adding regions is not free, and the budget is shared with the pass that
+    actually identifies the card.** Two extra Yu-Gi-Oh code-band rects turned
+    the Enigmaster Packbit photo from a pass into an `ocr-misread`: the pass
+    budget ran out before the wide bottom band, and the dedicated 7%-tall
+    passcode strip returns "" on that exact card (lesson 30's card, again).
+    A better printing is never worth a lost card. Relocating a window costs
+    nothing; adding one costs a card.
+66. **Guessing is allowed; claiming is not.** When the code doesn't read, the
+    edition shown is the source's default — unavoidable. What was wrong was
+    presenting it identically to a read one. `IdentificationMeta.pinned` now
+    records which happened, rides the frame cache, and reaches the sheet, which
+    marks the edition unread and puts the picker one tap away. The harness
+    reports the same split: `N wrong while claiming the code was read` is the
+    only class the user cannot catch, and it is 0 on the photos.

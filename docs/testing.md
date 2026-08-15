@@ -22,6 +22,17 @@ gate, reproduce every verdict twice — lives in
 Read it first. It exists because synthetic tests passed while real cards failed
 on-device.
 
+The matrix reports a second number beside the pass rate: **printing** — of the
+cells that identified the right card, how many landed on the printing that was
+photographed. It is deliberately not part of the gate (the gate is a name gate,
+and every stored baseline was measured against it), and it is only asked where
+the ground truth can answer: Yu-Gi-Oh's fixture images are YGOPRODeck replicas
+with no set code printed on them, so only real photographs can grade its
+printings. Watch the second half of that line hardest — `N wrong while claiming
+the code was read` counts printings the app got wrong *and believed*, which is
+the only kind the user cannot catch (see `pinned` in
+[scanning.md](scanning.md)).
+
 Three paths the matrix cannot reach have their own checks: what the camera
 captures (`test:capture`), when it is allowed to be *on* (`test:camera`), and
 the built bundle (`smoke-app.mjs`). Changes to `camera.ts` or the scan screen
