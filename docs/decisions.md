@@ -483,3 +483,93 @@ here. Grades travel on `SharedCard` so a trade shows what it really is, and
 when, sold to whom). That is a different feature — an item-history log — and it
 should not be built by turning the cert into an identity.
 
+
+---
+
+### 19. Paid trades run on Stripe, and the money is never ours to hold
+
+**Context.** Trading only works when both people want something the other has.
+When one side has nothing the other wants — or lives too far for a swap to be
+worth the postage — the trade dies. Letting one friend *buy* from another fixes
+that, but it needs somewhere to hold the buyer's money between "paid" and "it
+arrived", and that somewhere is the whole design problem.
+
+**Decision (2026-08-15).** A friends-only marketplace on **Stripe Connect**,
+using separate charges and transfers: the buyer is charged to our platform
+balance under a `transfer_group`, and a Transfer to the seller's connected
+account is created on release. `orders` and `seller_accounts`
+(`supabase/migrations/0006`) are the interface; `supabase/functions/stripe-escrow`
+is the only code in the repo that knows what Stripe is.
+
+**Why not Square, which we already use.** This was researched before anything
+was written, because the obvious move was to reuse the existing rail. Square
+cannot do it, for three independent reasons: auth-and-hold caps at **7 days**
+card-not-present, shorter than posting a card and inspecting it; the Payouts API
+is read-only *reporting* about money reaching your **own** bank, not a way to
+pay a third party; and `app_fee_money`, its only marketplace primitive, requires
+the seller to already be a Square merchant and pays them **instantly**, which is
+the opposite of escrow. Square keeps the subscription (`square-billing` →
+`entitlements`). The two providers share no code and no table, which is the same
+separation `square-billing` already argues for — a provider belongs in exactly
+one file, and the table is the interface.
+
+**Why Stripe specifically, and not us.** Holding a buyer's funds and later
+disbursing them to a seller is money transmission in most US states unless a
+licensed party holds the funds. Connect exists for this: **Stripe is the
+custodian and we only direct the release.** That is a legal position as much as
+a technical one, and it is the reason "just hold it in our own account" — which
+Square could almost have done — was never on the table. Stripe also prohibits
+peer-to-peer money transmission while permitting marketplaces selling goods, so
+an order always references a specific card at a specific price and there is no
+arbitrary-amount path anywhere in the schema. **A lawyer still has to look at
+this before real money moves** (marketplace facilitator sales tax, 1099-K).
+
+**Consequences.**
+
+- **A fourth opt-in cloud feature, dormant by default.** No `STRIPE_*` secrets,
+  no marketplace — exactly as Drive is dormant without a client id. Signed out,
+  nothing changes: scanning, collection, decks and link sharing still never
+  touch a server.
+- **The state graph lives in `advance_order()` and nowhere else.** Mirroring it
+  into `logic.ts` for easier node testing was tempting and rejected: two
+  authorities on a money state machine disagree eventually, and the loser is
+  always the one not guarding the row. `logic.ts` decides what a Stripe event
+  *means*; SQL decides whether that is allowed; `tests/harness/escrow-rls.mjs`
+  proves the edges against real SQL rather than against a copy.
+- **Nobody writes an order through PostgREST.** Not the buyer, not the seller.
+  A buyer who could UPDATE would mark their own purchase delivered and collect a
+  stranger's money; `seller_accounts.stripe_account_id` is where money *goes*,
+  so a user who could write another's row would redirect their payouts. Money
+  transitions are `service_role` only; ship/confirm/dispute are the users' and
+  check who is asking.
+- **Shipping addresses are never stored, anywhere.** Stripe Checkout collects
+  one, it stays on the session, and the seller's app fetches it per request. In
+  Dexie an address would ride into the JSON backup, the CSV export and the daily
+  Drive backup; on the server it would be plaintext PII beside `binders`. This
+  is the rare case where the privacy-preserving option is also less code.
+- **Orders outlive accounts.** `buyer`/`seller` are `on delete set null`, not
+  `cascade`, and `erase_social()` does not touch `orders`. A completed sale
+  backs a 1099-K, a chargeback response and a tax return, none of which stop
+  being true because someone closed their account. An orphaned row keeps no
+  name, handle or address — two nulls and an amount — and RLS hides it from
+  every user, since a null never equals an `auth.uid()`.
+- **A flat percentage would lose money.** Stripe takes 2.9% + 30c and we pay it
+  (`fees.payer = application`), plus 0.25% Connect, $1.50 per payout and $15 per
+  dispute. 8% of a $5 card is 40c against 44.5c of cost. Hence a $5 order floor
+  and a $1 fee floor, and connected accounts on weekly/manual payouts so sales
+  batch into one payout.
+- **Disputes are resolved by a person.** Deciding whether a card arrived as
+  described is not something the schema can know, and a coin flip dressed as
+  arbitration would be worse than admitting someone has to look.
+- **We now carry liability we did not before** — chargebacks, negative balances
+  and fraud between users are ours under `losses.payments = application`.
+  Decision 16 said hosting readable user content made retention a real
+  obligation; money makes it a financial one.
+
+**What would make this wrong.** Volume low enough that the fee floors read as
+gouging on cheap cards, which would argue for making this friends-only forever
+and free. Chargeback losses outrunning fee income, which would argue for
+delivery confirmation being required rather than optional. Or wanting an open
+marketplace — that is not a bigger version of this, it is a different product
+with listing moderation, seller reputation and counterfeit disputes attached,
+and the friends-only scope is what keeps the current design honest.

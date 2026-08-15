@@ -51,6 +51,9 @@ The copy says so.
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
 | the user's sync server | while `syncOn` | binder payload, trade/reply payloads, the device token | off by default |
+| the Cardstock `stripe-escrow` function | opening a purchase, onboarding as a seller, shipping or confirming an order | the session token, the card id/name and the amounts, or an order id — **never an address**; the function reads one from Stripe and returns it to the seller without storing it | off by default; dormant entirely if the deployment has no Stripe secrets |
+| `checkout.stripe.com` | the buyer is redirected to pay | whatever the buyer types into Stripe's own hosted checkout — card details and shipping address go to Stripe, never through us | only on a deliberate purchase |
+| `connect.stripe.com` | a seller starts Connect onboarding | Stripe's hosted identity verification; **we never see a government ID or a bank number** | only when someone chooses to sell |
 | the diagnostics endpoint | while `diagShare` **and** a token are set | redacted event batches + a random device id + app version | off by default |
 
 A cert lookup sends the certification number and nothing else — not the photo,
@@ -241,6 +244,10 @@ unit price), plus your want list if you have one.
   the quantity shown is the for-trade count — not what you own.
 - Opened sealed products never travel.
 - No keys, no history, no decks, no other friends, no trades.
+- **No orders and no address.** A purchase is not part of a share: it lives in
+  `orders` on our project, readable only by its buyer and seller, and the
+  shipping address is never in it — Stripe holds that, and the seller's app asks
+  for it one request at a time while there is still something to post.
 
 The share is a snapshot in a link or file. Nothing is published anywhere unless
 the user sends it — or unless they explicitly turn on live sync and enter a

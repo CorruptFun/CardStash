@@ -190,7 +190,7 @@ console must stay clean. It catches wiring the type checker can't — JSX
 structure, store subscriptions, dead imports — in the artifact users actually
 get.
 
-## Live Supabase harnesses (`test:cloud`, `test:social`)
+## Live Supabase harnesses (`test:cloud`, `test:social`, `test:escrow`)
 
 Two harnesses that can only fail in production, so neither is in CI and both
 need `SUPABASE_SECRET`:
@@ -198,6 +198,7 @@ need `SUPABASE_SECRET`:
 ```sh
 SUPABASE_SECRET=sb_secret_… npm run test:cloud    # the encrypted vault transport
 SUPABASE_SECRET=sb_secret_… npm run test:social   # hosted-social RLS
+SUPABASE_SECRET=sb_secret_… npm run test:escrow   # marketplace escrow RLS
 ```
 
 Each creates its own throwaway users and deletes them on the way out, including
@@ -221,6 +222,33 @@ and not a missing object.
 **Run `test:social` after any migration touching `binders`, `friendships`,
 `trade_offers` or `inbox`.** Those policies look correct in review whether or
 not they are.
+
+`test:escrow` is the same instrument pointed at money: 45 assertions over a
+buyer, a seller, a stranger and an anonymous caller, guarding the sentence
+migration 0006 is built around — **nobody may write an order's state or its
+amounts through PostgREST**, and nobody may repoint a seller's Stripe account
+id, which is where the money goes.
+
+It also holds the escrow state machine to its own table. Migration 0006 is the
+only place that graph is written down — `logic.ts` deliberately keeps no second
+copy — so this harness is what proves the edges, including that a disputed
+order cannot be released and that releasing twice is a no-op rather than a
+double payout.
+
+**Run `test:escrow` after any migration touching `orders` or
+`seller_accounts`.** Two cleanup notes, both learned the hard way: it deletes
+its own orders explicitly, because `orders.buyer`/`seller` are `on delete set
+null` rather than `cascade` (decision 19) and deleting the users would orphan
+rows rather than remove them; and it creates friendships **as the users**,
+because `friendships` grants DML to `authenticated` only, so a service-role
+insert 42501s silently and every downstream assertion goes red for the wrong
+reason.
+
+Neither of these covers Stripe itself. The pure decisions — signature
+verification, event mapping, fee arithmetic, the sweep timers — are in
+`tests/unit/stripe-escrow.test.mjs` and need no account. The HTTP calls to
+Stripe are exercised only by hand in test mode, and that gap is real: see
+docs/decisions.md decision 19.
 
 ## CI
 

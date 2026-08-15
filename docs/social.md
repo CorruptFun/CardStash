@@ -566,3 +566,44 @@ to lock yourself out; the vault is deliberate two-way *sync* whose passphrase
 has no reset by design. Retiring Drive would make an unrecoverable passphrase
 the only route back to a lost collection, and would put a per-user cloud cost
 on free users the tiering explicitly keeps free.
+
+---
+
+## Paid trades (v0.18.0, in progress)
+
+Everything above is barter: cards for cards, no money anywhere in the model.
+Buying a card from a friend is a **separate subsystem**, not a widened trade —
+`TradeRecord` has no price, no currency and no shipping state, and
+`sanitizeTradeRecord` and `applyTradeToCollection` both assume an even swap.
+Orders live in `orders` on the hosted project, never in a payload and never in a
+share link. See [decisions.md](decisions.md) §19 for why Stripe and why the
+money is never ours to hold.
+
+Three things that interact with what this document already describes:
+
+- **Scope does not govern orders.** The visibility rule (`trade` readable by any
+  signed-in user, `all` by accepted friends) decides who can read a *binder*. An
+  order is readable by exactly two people, its buyer and its seller, regardless
+  of any scope. Publishing nothing at all does not stop someone selling to a
+  friend, and publishing to everyone does not let a stranger buy.
+- **`forTrade` is not "for sale."** It sets the shared quantity under
+  `scope: 'trade'` and populates `trade_offers`, the global want index. Reusing
+  it as a listing count would make every listing a barter offer *and* globally
+  enumerable through `match_wants()`. A sale carries its own count and price.
+- **`erase_social()` does not touch `orders`.** Erasing your social presence
+  removes your profile, binder, offers, inbox and friendships; it leaves the
+  vault alone (as documented above) and now leaves completed sales alone too.
+  A sale backs a 1099-K and a chargeback response. `buyer`/`seller` are
+  `on delete set null`, so a closed account leaves a row with no name, no handle
+  and no address — and RLS hides it from everyone, because a null never equals
+  an `auth.uid()`.
+
+**The inbox is not the channel for this.** It is recipient-read-only,
+sender-stamped, 30-day TTL, capped at 20 undrained per pair — built for handing
+someone a trade payload, not for a shipping conversation. An order deliberately
+carries no free-text field either: the moment one exists it is an unmoderated
+message channel between two people who are, by construction, in a dispute.
+
+**Verification** is `npm run test:escrow` (`tests/harness/escrow-rls.mjs`), the
+sibling of `test:social` — 45 assertions over buyer, seller, stranger and anon,
+ending in the same control tests so a refusal is provably a refusal.

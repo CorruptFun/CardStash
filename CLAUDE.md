@@ -3,9 +3,10 @@
 Vite + React 19 + TypeScript PWA. Local-first: all user data in IndexedDB via
 Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
 (`src/lib/settings.ts`). The deployed app is a static bundle with **three
-opt-in cloud features** — Drive backup, the encrypted cloud vault, and hosted
-social — all dormant until switched on. Signed out, the app must always work
-fully: scanning, collection, decks and link sharing never touch a server.
+opt-in cloud features** — Drive backup, the encrypted cloud vault, hosted
+social, and paid trades — all dormant until switched on. Signed out, the app
+must always work fully: scanning, collection, decks and link sharing never
+touch a server.
 
 ## Where the full documentation is
 
@@ -196,6 +197,47 @@ dismissed reflexively for the rest of the product's life.
   door on the Friends screen.
 - **`server/` and `lib/sync.ts` are deleted** (the app had no users, so no
   compatibility path was carried). Don't reintroduce a second live tier.
+
+## Paid trades — buying a card from a friend (in progress)
+
+Escrowed purchases between accepted friends: the buyer pays, the money is held,
+the seller ships, and it is released on confirmation. `supabase/migrations/0006`
+(`orders`, `seller_accounts`) and `supabase/functions/stripe-escrow` are the
+whole server side. **Read decision 19 before touching any of it.** Server half
+is built and tested; there is no UI yet, so nothing is user-reachable.
+
+**Stripe, not Square, and that is settled.** Square runs the subscription
+(`square-billing` → `entitlements`) and cannot run this: its auth-and-hold caps
+at 7 days, its Payouts API only reports money reaching *our own* bank, and
+`app_fee_money` pays sellers instantly. The two providers share no code and no
+table. A provider belongs in exactly one file; the table is the interface.
+
+Four things that are load-bearing rather than incidental:
+
+- **Nobody writes an order through PostgREST** — not the buyer, not the seller.
+  Money transitions (`paid`/`released`/`refunded`) are `service_role` only;
+  ship/confirm/dispute are user RPCs that check who is asking.
+  `seller_accounts.stripe_account_id` is where money *goes*, so it is the most
+  dangerous column in the schema and nothing may write it but the webhook.
+- **The state graph lives in `advance_order()` and nowhere else.** `logic.ts`
+  decides what a Stripe event *means*; SQL decides whether it is allowed. Do not
+  add a second copy for easier unit testing — `tests/harness/escrow-rls.mjs`
+  proves the edges against real SQL. Run it after any migration touching
+  `orders` or `seller_accounts`.
+- **Never store a shipping address.** Stripe Checkout holds it; the seller's app
+  fetches it per request. In Dexie it would ride into the JSON backup, the CSV
+  export and the daily Drive backup; on the server it would be plaintext PII
+  beside `binders`. `redact()` also drops the postal and money key families —
+  order value travels through `amountBucket()`, never as an amount.
+- **`forTrade` is not "for sale."** It sets the shared quantity under
+  `scope: 'trade'` *and* feeds the global `trade_offers` index. A sale needs its
+  own count and price with its own clamp beside `tradeCount()`, or every listing
+  silently becomes a globally enumerable barter offer.
+
+Dormant without `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`, exactly as Drive
+is without a client id. `STRIPE_WEBHOOK_SECRET` takes a **comma-separated list**
+— a Connect platform needs two endpoints (platform scope for checkout/charge,
+connected-accounts scope for `account.updated`) and each has its own secret.
 
 ## Sports cards have no catalog
 
