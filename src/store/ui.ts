@@ -27,6 +27,13 @@ export interface SheetRequest {
   finish?: Finish
   /** Preselect this grade in the add bar (scanner read a slab label). */
   grade?: GradeInfo
+  /**
+   * The scan identified the card but never read its printed code, so the
+   * edition on show is the source's default rather than the one in the hand.
+   * The sheet says so instead of letting an arbitrary reprint's price pass
+   * for the card's — see `pinned` in identify.ts.
+   */
+  printingUnconfirmed?: boolean
   origin?: 'scan' | 'search' | 'collection' | 'deck' | 'friend'
   /**
    * Whose copy this is, when the sheet was opened from a friend's binder — the

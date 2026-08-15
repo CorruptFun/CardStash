@@ -51,7 +51,7 @@ import { settings } from './settings'
 import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv'
 import type { Card, Game, GradeInfo } from './types'
 import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
-import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity } from './util'
+import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity, sleep } from './util'
 import { ygoById, ygoPrintingVariants } from './ygo'
 
 export type ScanMode = 'card' | 'sealed' | 'slab'
@@ -74,6 +74,9 @@ interface CacheEntry {
   card: Card | null
   /** Foil sheen read off the physical copy — kept so cached hits price right. */
   foil?: boolean
+  /** Whether the printed code pinned the printing — same reason as `foil`:
+   * a cached hit must not silently upgrade a guessed edition into a read one. */
+  pinned?: boolean
   at: number
 }
 
@@ -96,13 +99,37 @@ function cacheLookup(hash: string, mode: ScanMode, hint?: Game): CacheEntry | nu
   return null
 }
 
-function cacheStore(hash: string, mode: ScanMode, hint: Game | undefined, card: Card | null, foil?: boolean): void {
-  cache.unshift({ hash, mode, hint, card, foil, at: Date.now() })
+function cacheStore(
+  hash: string,
+  mode: ScanMode,
+  hint: Game | undefined,
+  card: Card | null,
+  foil?: boolean,
+  pinned?: boolean,
+): void {
+  cache.unshift({ hash, mode, hint, card, foil, pinned, at: Date.now() })
   if (cache.length > CACHE_LIMIT) cache.length = CACHE_LIMIT
 }
 
 export function clearScanCache(): void {
   cache.length = 0
+}
+
+/**
+ * Forget every cached frame that answered with this card.
+ *
+ * The frame-hash cache exists so a card sitting unchanged under the lens
+ * isn't re-identified every two seconds — but it also means a WRONG answer is
+ * re-served instantly, from the same frames, for as long as the card lies
+ * there. A user who drops that scan and scans again would get the identical
+ * wrong card back without a single OCR pass having run, which reads as the
+ * app ignoring them. Dropping a scan forgets its frames, so the next look is
+ * a real one.
+ */
+export function forgetScanCard(cardId: string): void {
+  for (let i = cache.length - 1; i >= 0; i--) {
+    if (cache[i].card?.id === cardId) cache.splice(i, 1)
+  }
 }
 
 export type IdentifyOutcome =
@@ -129,6 +156,16 @@ export interface IdentificationMeta {
   via: 'ocr' | 'cache' | 'cloud'
   /** The physical copy showed a foil/holo sheen (on-device detector). */
   foil?: boolean
+  /**
+   * The printed collector code was read AND it is what chose this printing.
+   *
+   * False means the card is right but the edition is the source's default —
+   * usually its first-listed printing, which for Yu-Gi-Oh is an arbitrary
+   * reprint. Same card, possibly a hundredth of the price. The UI needs to be
+   * able to say so rather than present a guess with the confidence of a read
+   * (see the printing picker in CardSheet).
+   */
+  pinned?: boolean
   /**
    * Read off a graded slab's label. Lives on the identification rather than
    * the card because a grade describes the copy in the holder, not the
@@ -238,6 +275,7 @@ export async function identifyFrame(
         confidence: 1,
         via: 'cache',
         foil: cached.foil,
+        pinned: cached.pinned,
       },
     })
   }
@@ -264,7 +302,7 @@ export async function identifyFrame(
     // (confidence 0.7) must be re-derived per attempt, not re-served at
     // cache confidence.
     if (useCache && outcome.identification.confidence >= 0.75)
-      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil)
+      cacheStore(hash, mode, gameHint, outcome.card, outcome.identification.foil, outcome.identification.pinned)
   }
   // Cache unreadable frames too: the same card sitting unchanged shouldn't
   // re-burn OCR + lookups every retry. A manual rescan tap bypasses this.
@@ -598,6 +636,48 @@ const CLOUD_CONFIDENCE = 0.85
  */
 const PRINTING_TIEBREAK_TIMEOUT_MS = 6_000
 
+/**
+ * How long the local pipeline gets to itself before the cloud rescue starts
+ * ALONGSIDE it rather than after it.
+ *
+ * The rescue used to be strictly last: every band, every candidate lookup and
+ * the whole magnified collector sweep first, which on a hard frame is the
+ * best part of twenty seconds (`DEFAULT_BUDGET.ocrMs`). For someone paying
+ * for it that is the wrong shape — the thing they bought should be racing the
+ * local passes, not queueing behind them. So on a scan that has not settled
+ * in this long, the frame goes up and whichever answer lands first wins.
+ *
+ * 2.5s is where a scan stops feeling like a scan and starts feeling stuck,
+ * and it is comfortably past the ordinary case: on the harness matrix the
+ * median identified cell answers in well under a second and the p90 is around
+ * 2s, so the frames that trip this are the ones genuinely in trouble.
+ *
+ * The cost of being wrong is real and worth stating: a card the local passes
+ * would have got at 4s now also spends one cloud call, and — the part that
+ * matters more — its frame leaves the device (see docs/privacy.md, which says
+ * so). A local answer aborts the request in flight, so the window is only as
+ * wide as the call itself.
+ */
+const CLOUD_HEADSTART_MS = 2_500
+
+/**
+ * Floor between two RACED cloud calls, across attempts.
+ *
+ * The live scanner re-attempts on its own every couple of seconds while a card
+ * is held still, and a hand-held card jitters into a new frame hash each time,
+ * so the miss cache doesn't cover it. Without a floor, one stubborn card in
+ * front of the lens is a call every retry — the month's allowance spent on a
+ * single card the user is about to give up on anyway.
+ *
+ * The LAST-RESORT call is deliberately not gated by this: when every local
+ * pass has failed the alternative is telling the user "no", which is what the
+ * rescue exists to avoid. Only the speculative early race is rationed. A
+ * manual rescan tap goes through the normal path and is not special-cased —
+ * it will usually be past the floor by the time the user reaches for it.
+ */
+const CLOUD_RACE_COOLDOWN_MS = 8_000
+let lastRacedCloudAt = 0
+
 /** Full-magnification OCR passes the sole-evidence corner sweep may spend.
  * Every one of them is paid on a MISS, while the scanner is still running —
  * keep it tight enough that an unreadable card doesn't cook the phone. */
@@ -711,6 +791,22 @@ async function identifyViaOcr(
   const bail = () => {
     if (signal?.aborted) throw new DOMException('Scan attempt aborted', 'AbortError')
   }
+  // Wall clock for the cloud head start. Taken HERE rather than beside the
+  // OCR budget below, because a sideways frame spends real seconds working
+  // out which way is up before the first band is read, and the user is
+  // watching "Identifying…" through all of it.
+  const startedAt = Date.now()
+  /**
+   * One cloud call per attempt, whoever asks first.
+   *
+   * Three paths can reach for the model now — the raced head start, the MTG
+   * printing tie-break, and the last-resort rescue — and without this they
+   * genuinely overlap: the race fires at 2.5s while a name hit at 3s walks
+   * into the tie-break, and one card costs two uploads and two credits. The
+   * flag is shared rather than per-path for the same reason the allowance is:
+   * the user is scanning ONE card.
+   */
+  let cloudSpent = false
   // The reticle crop is a fixed window; the card in it is regularly smaller,
   // off-center or slightly rolled. Tighten to the detected card and deskew
   // before any OCR — every band below assumes card-relative geometry.
@@ -826,6 +922,15 @@ async function identifyViaOcr(
     // The same switch, and the same reason, as the rescue: sending the frame
     // anywhere is something the user turned on. A subscription is not consent.
     if (!config.cloudScanRescue || !isSignedIn()) return null
+    // The head-start race already sent this frame up (or is still waiting on
+    // it). Its answer carries the model's own collector line and pins the
+    // printing the same way this would, so a second upload buys a second
+    // opinion on a question that is already out for one.
+    if (cloudSpent) {
+      traceEvent('tiebreak-skip', { reason: 'cloud-spent' })
+      return null
+    }
+    cloudSpent = true
     bail()
     const raws = await mtgRawPrintings(card.name).catch(() => [] as any[])
     const treatments = new Set(raws.map(treatmentOf))
@@ -1048,6 +1153,7 @@ async function identifyViaOcr(
           confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
+          pinned: linePinnedPrinting(refined),
         },
       }
     }
@@ -1226,6 +1332,9 @@ async function identifyViaOcr(
             confidence: CORNER_CONFIDENCE,
             via: 'ocr',
             foil: detectFoil(canvas) ? true : undefined,
+            // A Yu-Gi-Oh passcode identifies the card in every language but
+            // says nothing about WHICH printing is in the hand.
+            pinned: !!read.number,
           },
         }
       }
@@ -1262,7 +1371,7 @@ async function identifyViaOcr(
    * a corner-only ID this answer is stable for the same frame and re-deriving
    * it would mean paying for the same API call twice.
    */
-  const cloudIdentify = async (reading: Reading): Promise<IdentifyOutcome | null> => {
+  const cloudIdentify = async (reading: Reading, raceSignal?: AbortSignal): Promise<IdentifyOutcome | null> => {
     // Two routes to the same answer, tried in this order:
     //   1. HOSTED — a subscriber's scan, read by our own edge function with a
     //      key that never ships to the client. Entitlement and the monthly
@@ -1292,7 +1401,7 @@ async function identifyViaOcr(
     // code-split. What it does buy is keeping authsession/cloudconfig out of
     // the scan path until a rescue actually runs.
     const { readCardHosted } = await import('./gemini')
-    const read = await readCardHosted(reading.canvas, signal).catch(() => null)
+    const read = await readCardHosted(reading.canvas, raceSignal ?? signal).catch(() => null)
     if (!read) {
       traceEvent('cloud-read', { name: null })
       return null
@@ -1361,9 +1470,46 @@ async function identifyViaOcr(
         confidence: CLOUD_CONFIDENCE,
         via: 'cloud',
         foil: detectFoil(reading.canvas) ? true : undefined,
+        pinned: !!read.number,
       },
     }
   }
+
+  // The cloud rescue, started on a timer and raced against the passes below
+  // rather than queued behind all of them (see CLOUD_HEADSTART_MS). One call
+  // per attempt either way: this promise IS the last-resort call, awaited at
+  // the bottom if nothing local answered first.
+  //
+  // A local answer aborts it — `settle()` on every way out of here — so the
+  // frame only travels when the scan was genuinely still stuck at the
+  // deadline. That is a narrower window than "every slow scan" but a wider
+  // one than "only scans that failed", which is what docs/privacy.md used to
+  // be able to promise.
+  const cloudCtl = new AbortController()
+  const unlinkCloud = linkAbort(signal, cloudCtl)
+  let cloudHit: IdentifyOutcome | null = null
+  const settle = <T>(outcome: T): T => {
+    cloudCtl.abort()
+    unlinkCloud()
+    return outcome
+  }
+  const raceCloud = () => {
+    if (cloudCtl.signal.aborted || cloudSpent) return null
+    if (Date.now() - lastRacedCloudAt < CLOUD_RACE_COOLDOWN_MS) {
+      traceEvent('cloud-race', { skipped: true })
+      return null
+    }
+    lastRacedCloudAt = Date.now()
+    cloudSpent = true
+    traceEvent('cloud-race', { skipped: false })
+    return cloudIdentify(readings[0], cloudCtl.signal)
+  }
+  const cloudRace = config.cloudScanRescue
+    ? sleep(Math.max(0, CLOUD_HEADSTART_MS - (Date.now() - startedAt)))
+        .then(raceCloud)
+        .then((outcome) => (cloudHit = outcome))
+        .catch(() => null)
+    : null
 
   // When the frame looked sideways and the collector line couldn't settle
   // which way up it is, the alternatives are read in turn — names across all
@@ -1371,7 +1517,12 @@ async function identifyViaOcr(
   // corner sweep on the wrong one, and the corner path is the expensive one.
   for (const reading of readings) {
     const hit = await namePasses(reading)
-    if (hit) return hit
+    if (hit) return settle(hit)
+    // A cloud answer that landed mid-sweep ends it. The local passes still
+    // outrank it when they answer FIRST — they carry corroborating evidence
+    // the model's single reading doesn't — but there is nothing to be gained
+    // by grinding the remaining escalation once the answer is in hand.
+    if (cloudHit) return settle(cloudHit)
   }
   if (gameHint) {
     for (const reading of readings) {
@@ -1380,18 +1531,31 @@ async function identifyViaOcr(
       // and would only spend magnified passes on the card's side edge.
       if (reading.sweepOnly) continue
       const hit = await cornerIdentify(reading, gameHint)
-      if (hit) return hit
+      if (hit) return settle(hit)
+      if (cloudHit) return settle(cloudHit)
     }
   }
 
-  // Every local pass has failed. If — and only if — the user supplied their own
-  // Gemini key AND opted in, read the frame in the cloud as a last resort.
+  // Every local pass has failed. If — and only if — the user opted in, the
+  // frame is read in the cloud: either the raced call above is still in
+  // flight (wait for it) or the deadline never mattered because everything
+  // local finished first.
   //
   // This is the one place a camera frame may leave the device, and it is
-  // deliberately the place where the alternative is telling the user "no". The
-  // frames that succeed locally never reach here, so opting in does not put
-  // ordinary scanning on the network.
-  const cloud = await cloudIdentify(readings[0])
+  // deliberately the place where the alternative is telling the user "no".
+  // Local work is finished, so there is nothing left to race: a call already
+  // in flight is simply awaited, and if the timer hasn't fired (or the
+  // cooldown rationed it) the last resort starts NOW rather than waiting the
+  // deadline out — a frame that failed everything in 800ms shouldn't sit
+  // watching a clock. `cloudSpent` is what keeps the two from both firing.
+  const lastResort = () => {
+    if (cloudSpent) return cloudRace
+    cloudSpent = true
+    lastRacedCloudAt = Date.now()
+    return cloudIdentify(readings[0], cloudCtl.signal)
+  }
+  const cloud = cloudHit ?? ((await lastResort()) ?? null)
+  unlinkCloud()
   if (cloud) return cloud
 
   // Auto mode never sweeps the catalog-backed games — each would pull a whole
@@ -1449,6 +1613,24 @@ function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false
   const norm = (value: string) => value.toLowerCase().replace(/^0+(?=\d)/, '')
   return norm(a) === norm(b)
+}
+
+/**
+ * Did the printed line actually CHOOSE this printing?
+ *
+ * Not the same question as "did the line read", and the difference is the
+ * whole worth of the flag. `matchMtg` carries a fuzzy fallback: on a
+ * borderless print the line read "PRM 2", resolved to nothing under that set,
+ * and fell back to the name — returning the base printing #806 while a
+ * refinement had, technically, happened. Requiring the chosen card's own
+ * number to agree with the read keeps that honest. A collector-line override
+ * (`viaCollector`) counts too: there the line didn't merely pick the edition,
+ * it picked the card.
+ */
+function linePinnedPrinting(refined: { card: Card; read: CornerRead; viaCollector?: boolean } | null): boolean {
+  if (!refined) return false
+  if (refined.viaCollector) return true
+  return collectorEq(refined.card.number, refined.read.number) || sameYgoCode(refined.card.number, refined.read.number)
 }
 
 /**

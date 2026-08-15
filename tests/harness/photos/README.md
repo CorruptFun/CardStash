@@ -58,6 +58,17 @@ Drop the image in this directory and add a row to `manifest.json`:
 
 - `name` is the ground truth, graded exactly like a fixture: right game, and
   name similarity ≥ 0.9.
+- `number` is the printed set/collector code (`"PHNI-EN042"`, `"11"`), and it
+  grades a SECOND question beside the pass/fail one: did the scan land on the
+  printing in the photograph, or on whatever edition the source lists first?
+  Reported on its own line, never folded into the pass rate — the gate is a
+  name gate and every stored baseline was measured against it. Optional; a row
+  without one simply isn't asked. **For Yu-Gi-Oh this is the only ground truth
+  that exists**: YGOPRODeck serves rendered replicas stamped "Replica - Not For
+  Use in Sanctioned Tournaments", with no set code and no passcode printed on
+  them at all, so every fixture cell is excluded from the printing question
+  (`REPLICA_ART_GAMES` in run-matrix.mjs) — it would otherwise score a vacuous
+  100%, both sides agreeing on "the API's first printing".
 - `label` is what the cell is called in the report grid (defaults to `photo`).
   Group like with like — `photo-ultra`, `photo-secret`, `photo-plain` — so a
   per-label column shows which finish is failing.

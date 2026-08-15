@@ -135,6 +135,7 @@ function CardSheet() {
   const [didAdd, setDidAdd] = useState(false)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
   const [allPrintings, setAllPrintings] = useState(false)
+  const printingsRef = useRef<HTMLElement | null>(null)
   const [variants, setVariants] = useState<Card[] | null>(null)
   const sealed = !!card.sealed
   /** Sealed only: everything that could be pulled from this product's set. */
@@ -393,6 +394,22 @@ function CardSheet() {
             {card.number ? ` · #${card.number}` : ''}
             {card.releasedAt ? ` · ${card.releasedAt.slice(0, 4)}` : ''}
           </p>
+          {/*
+            The scan read the card but not its printed code, so this edition is
+            the source's default — for Yu-Gi-Oh, an arbitrary reprint out of a
+            dozen whose prices span two orders of magnitude. Saying so is the
+            difference between a guess and a claim, and the picker is one tap
+            away. Only shown when there is something to pick.
+          */}
+          {sheet.printingUnconfirmed && (variants?.length ?? 0) > 1 && (
+            <button
+              className="unpinnedchip"
+              onClick={() => printingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            >
+              <Icon name="alert" size={13} />
+              Edition not read — check it’s yours
+            </button>
+          )}
           {card.manaCost ? <ManaCost cost={card.manaCost} /> : card.typeLine && <p className="cardsheet__type">{card.typeLine}</p>}
           <span className="cardsheet__chips">
             {copiesCount > 0 && (
@@ -537,7 +554,7 @@ function CardSheet() {
         </section>
       )}
       {(variants?.length ?? 0) > 1 && (
-        <section className="sheetsec">
+        <section className="sheetsec" ref={printingsRef}>
           <h3>
             <Icon name="cards" size={15} /> {sealed ? 'Products from this set' : 'Printings & variants'}
             <em className="sheetsec__count">{variants!.length}</em>

@@ -68,7 +68,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `src/lib/` — data + integrations: Dexie schema/CRUD (`db.ts`), price picking
   (`prices.ts`), the card APIs (`scryfall.ts`, `pokemon.ts`, `ygo.ts`,
   `lorcast.ts` for Lorcana, `tcgcsv.ts` — a day-cached TCGplayer catalog for
-  Riftbound/One Piece/Star Wars/Digimon/Gundam — unified in `cardsearch.ts`),
+  Riftbound/One Piece/Star Wars/Digimon/Gundam — unified in `cardsearch.ts`;
+  `cardcode.ts` parses the printed set/batch number off a search query
+  ("BLMR-EN085", "OP01-016", "SVI 123/198") so every game is searchable by the
+  number on the card and not only by name),
   the AI deck builder (`gemini.ts` — the app's ONLY Gemini use; scanning must
   stay fully on-device), sports cards + graded slabs (`sportsparse.ts` and
   `slab.ts` — both pure and node-tested, `sports.ts`, and `psa.ts` for cert

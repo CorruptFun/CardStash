@@ -118,6 +118,60 @@ function graded(expected, outcome) {
 }
 
 /**
+ * Did it land on the fixture's own PRINTING, not merely the right card?
+ *
+ * Reported beside the pass rate rather than folded into it, on purpose. The
+ * pass gate is a name gate and every stored baseline was measured against it;
+ * quietly making it stricter would move every number at once and make the
+ * before/after comparison this harness exists for meaningless. But the two
+ * questions are genuinely different, and only one of them was ever asked:
+ * "Dragon Spirit of White" filed as MP17-EN010 when the card in the hand is
+ * LCKC-EN018 is the right card at the wrong rarity — a Secret Rare priced as
+ * a $0.12 reprint, added to a collection at that price.
+ *
+ * Returns null when the question cannot be asked (cell failed, no ground
+ * truth number, source returned no number) — those are not wrong answers and
+ * must not be counted as either.
+ */
+function printingOf(cell, outcome) {
+  if (!outcome?.ok || !outcome.number) return null
+  const truth = cell.photo || !REPLICA_ART_GAMES.has(cell.fixture.game) ? cell.fixture.number : null
+  if (!truth) return null
+  return sameNumber(truth, outcome.number) ? 'ok' : 'wrong'
+}
+
+/**
+ * Games whose FIXTURE images cannot answer the printing question, because the
+ * source doesn't ship photographs of the printing.
+ *
+ * YGOPRODeck serves rendered replicas stamped "Replica - Not For Use in
+ * Sanctioned Tournaments": correct art, correct text, and **no set code and no
+ * passcode printed anywhere on them**. So every Yu-Gi-Oh fixture cell would
+ * score as the wrong printing no matter what the pipeline did, which is a
+ * statement about the fixture and not about the code (lesson: suspect the
+ * harness too). Real photographs under tests/harness/photos/ are the only
+ * Yu-Gi-Oh evidence that can answer it — and they are exempt from this, being
+ * photographs of actual cards.
+ */
+const REPLICA_ART_GAMES = new Set(['yugioh'])
+
+/**
+ * Compare two printed numbers across the shapes the games use: a set-prefixed
+ * code ("LCKC-EN018", region infix and padding optional) or a bare collector
+ * number, with or without its "/298" set size.
+ */
+function sameNumber(a, b) {
+  const code = (value) => {
+    const m = String(value).toUpperCase().replace(/\s+/g, '').match(/^([A-Z][A-Z0-9]{0,7})-?(?:[A-Z]{2})?0*(\d{1,4})([A-Z]?)$/)
+    return m ? `${m[1]}-${m[2]}${m[3]}` : null
+  }
+  const ca = code(a)
+  if (ca || code(b)) return ca === code(b)
+  const digits = (value) => String(value).split('/')[0].replace(/\D+/g, '').replace(/^0+(?=\d)/, '')
+  return !!digits(a) && digits(a) === digits(b)
+}
+
+/**
  * Grade a binder page against an unordered MULTISET of names.
  *
  * A page is a different kind of ground truth from a card and must never be
@@ -292,7 +346,10 @@ async function main() {
       if (gamesFilter && !gamesFilter.includes(photo.game)) continue
       if (keysFilter && !keysFilter.includes(photo.key)) continue
       cells.push({
-        fixture: { game: photo.game, key: photo.key, name: photo.name },
+        // `number` is the printed set/collector code, when the manifest
+        // records one — a photograph of a real card is the only Yu-Gi-Oh
+        // ground truth that can answer the printing question at all.
+        fixture: { game: photo.game, key: photo.key, name: photo.name, number: photo.number ?? null },
         degradation: photo.label ?? 'photo',
         hint: photo.game,
         imageUrl: `/tests/harness/photos/${photo.file}`,
@@ -460,9 +517,11 @@ async function main() {
             game: cell.fixture.game,
             key: cell.fixture.key,
             expected: cell.fixture.name,
+            expectedNumber: cell.fixture.number ?? null,
             degradation: cell.degradation,
             hint: cell.hint,
             pass,
+            printing: printingOf(cell, result.outcome),
             stage,
             ms: result.ms,
             outcome: result.outcome,
@@ -617,6 +676,23 @@ async function main() {
     for (const [game, g] of Object.entries(byGame)) {
       const stages = Object.entries(g.stages).sort((a, b) => b[1] - a[1])
       if (stages.length) console.log(`  ${game} failures: ${stages.map(([s, n]) => `${s}×${n}`).join(', ')}`)
+    }
+    // Right card, wrong printing — invisible to the pass gate, and the reason
+    // a scan can be graded "identified" while filing a Secret Rare at a
+    // reprint's price.
+    const asked = results.filter((r) => r.printing)
+    if (asked.length) {
+      const right = asked.filter((r) => r.printing === 'ok').length
+      // A wrong printing the app KNOWS it guessed is honest (the sheet says
+      // so and offers the picker); a wrong printing it believes it read is a
+      // lie the user has no way to catch. Count them separately.
+      const claimed = asked.filter((r) => r.printing === 'wrong' && r.outcome.pinned).length
+      console.log(`\n=== printing: ${right}/${asked.length} identified cells landed on the fixture's own printing` +
+        ` · ${claimed} wrong while claiming the code was read ===`)
+      for (const game of [...new Set(asked.map((r) => r.game))]) {
+        const of = asked.filter((r) => r.game === game)
+        console.log(`  ${pad(game, 11)} ${of.filter((r) => r.printing === 'ok').length}/${of.length}`)
+      }
     }
     if (clipResults.length) {
       const t = clipResults.reduce(

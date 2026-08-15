@@ -17,8 +17,15 @@ export interface CornerRect {
 export const CORNER_REGION: Record<Game, CornerRect> = {
   mtg: { x: 0, y: 0.85, w: 0.62, h: 0.15 },
   pokemon: { x: 0, y: 0.87, w: 1, h: 0.13 },
-  // Yu-Gi-Oh prints the set code right-aligned just under the art.
-  yugioh: { x: 0.3, y: 0.5, w: 0.7, h: 0.13 },
+  // Yu-Gi-Oh prints the set code right-aligned in the narrow band BETWEEN the
+  // art and the rules box. The old window (y 0.50-0.63) sat INSIDE the
+  // artwork on the modern frame: probed against the harness photographs it
+  // returned pure foil sparkle on every pass while "PHNI-EN042" sat one band
+  // lower, legible enough to read. A region that never contains the line
+  // costs two full-magnification OCR passes AND leaves the printing pinned
+  // to whatever the API happened to list first — how a Secret Rare gets
+  // filed at a $0.12 reprint's price.
+  yugioh: { x: 0.35, y: 0.58, w: 0.65, h: 0.12 },
   riftbound: { x: 0, y: 0.85, w: 1, h: 0.15 },
   lorcana: { x: 0, y: 0.87, w: 0.78, h: 0.13 },
   onepiece: { x: 0, y: 0.85, w: 1, h: 0.15 },
@@ -40,6 +47,14 @@ export const CORNER_REGION: Record<Game, CornerRect> = {
  * (Pokémon: modern cards print it bottom-left, vintage bottom-right.)
  */
 export const CORNER_RETRY_REGIONS: Partial<Record<Game, CornerRect[]>> = {
+  // Yu-Gi-Oh deliberately has NO extra windows here, and that is a budget
+  // decision rather than an oversight. Its passes are spent on the mid-card
+  // band above and then on the wide bottom band, which is where the passcode
+  // — the identifier that actually names the card in any language — reads.
+  // Measured: two extra code-band rects cost the Enigmaster Packbit photo its
+  // identification outright, because the budget ran out before the bottom
+  // band and the dedicated 7%-tall passcode strip returns "" on that card.
+  // A better printing is not worth a lost card.
   pokemon: [
     { x: 0, y: 0.925, w: 0.52, h: 0.075 },
     { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },

@@ -1,3 +1,4 @@
+import { sameYgoCode } from './corner'
 import { fetchJson, isAbort } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, PriceEntry, Printing } from './types'
@@ -154,6 +155,68 @@ export async function matchYgo(name: string, thorough = false): Promise<Card | n
     if (best && best.score >= 0.85) break
   }
   return best && best.score >= 0.62 ? toCard(best.raw) : null
+}
+
+/**
+ * Every spelling of a print code worth asking the API about, best first.
+ * Yu-Gi-Oh prints "BLMR-EN085" — set code, region, three padded digits — but
+ * people type what they can see and what they remember: no region on an
+ * Asian-English print, no padding on a hand-written list. The set-code
+ * endpoint is an exact string match, so the variants are ours to supply.
+ */
+function codeCandidates(code: string): string[] {
+  const m = code
+    .toUpperCase()
+    .replace(/[–—\s]+/g, '-')
+    .match(/^([A-Z][A-Z0-9]{0,7})-?([A-Z]{2})?0*(\d{1,4})([A-Z]?)$/)
+  if (!m) return []
+  const [, set, lang, digits, variant] = m
+  const padded = digits.padStart(3, '0')
+  const out: string[] = []
+  for (const region of [lang, lang ? undefined : 'EN', undefined]) {
+    for (const num of new Set([padded, digits])) {
+      const candidate = `${set}-${region ?? ''}${num}${variant}`
+      if (!out.includes(candidate)) out.push(candidate)
+    }
+  }
+  return out
+}
+
+/**
+ * Look a card up by the print code on its face — "BLMR-EN085" — rather than
+ * by name. It is the only identifier that names ONE printing (name, set,
+ * rarity and price all follow from it), and the only one a collector can read
+ * off a card whose name the OCR couldn't get: the digits are Latin on every
+ * print worldwide.
+ *
+ * YGOPRODeck's set-code endpoint answers with the card id, which is the
+ * passcode, so the full card comes back through the ordinary id path and the
+ * printing that was asked for is selected out of its set list.
+ */
+export async function ygoBySetCode(code: string, signal?: AbortSignal): Promise<Card | null> {
+  for (const candidate of codeCandidates(code)) {
+    let id: unknown
+    try {
+      const res = await fetchJson(`${API}/cardsetsinfo.php?setcode=${encodeURIComponent(candidate)}`, { signal })
+      id = res?.id
+    } catch (err) {
+      if (isAbort(err)) throw err
+      continue // unknown code — the endpoint 400s rather than answering empty
+    }
+    if (id == null) continue
+    const card = await ygoById(String(id))
+    if (card) return printingByCode(card, candidate)
+  }
+  return null
+}
+
+/**
+ * The card as the asked-for printing: rarity and set price move Yu-Gi-Oh
+ * values by orders of magnitude, so answering a code with the card's FIRST
+ * printing would put a common's price on a secret rare.
+ */
+function printingByCode(card: Card, code: string): Card {
+  return ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, code)) ?? card
 }
 
 export async function ygoById(id: string): Promise<Card | null> {

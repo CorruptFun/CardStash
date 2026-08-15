@@ -141,6 +141,12 @@
                 foil: outcome.identification.foil ?? null,
                 editionSet: outcome.identification.setCode ?? null,
                 editionNumber: outcome.identification.number ?? null,
+                // Whether the printed code PINNED this printing, or the
+                // edition on show is just the source's default. The printing
+                // column is only meaningful beside this: a wrong printing
+                // that the app already flags as unread is a different (and
+                // much smaller) problem from one it presents as read.
+                pinned: !!outcome.identification.pinned,
               }
             : { ok: false, reason: outcome.reason, message: outcome.message, readName: outcome.readName ?? null },
         }

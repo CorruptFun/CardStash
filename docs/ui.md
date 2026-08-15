@@ -5,7 +5,7 @@
 | Screen | File | What it does |
 | ------ | ---- | ------------ |
 | **Scan** | `views/ScanView.tsx` | The camera. Game filter chips, Packs (sealed) toggle, Collect toggle, torch. A reticle with live "sensing/locking" feedback, the result chip (name · set · price · finish cycler), the "what the scanner saw" diagnostics door, and the recent-scan tray. Also owns the start gate and the iOS permission explainer, the **photo upload** control (`UploadButton`) and the **Page** pill for binder/multi-card scanning — both entry points check `entitlement.ts`, and both land on a **review screen** where the user confirms every row before anything is written. A page files ~9 cards on one tap, so nothing is added silently; each row offers a full-budget re-read. |
-| **Search** | `views/SearchView.tsx` | Debounced multi-game search over the enabled games, accepting a prefill handed over from a failed scan. |
+| **Search** | `views/SearchView.tsx` | Debounced multi-game search over the enabled games, by name or by the number printed on the card (`CODE_EXAMPLE` supplies the per-game example in the placeholder), accepting a prefill handed over from a failed scan. |
 | **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, price refresh, CSV import/export and JSON backup/restore. |
 | **Decks** | `views/DecksView.tsx` | Deck list and deck detail: board grouping by type, mana curve / colour bar / type bars, owned-vs-missing costing, rules warnings, add-cards modal (search or from your collection), rename, cover, decklist copy. |
 | **AI builder** | `views/BuilderView.tsx` | The Gemini deck builder: game/format/style/budget, optional "build around these" seed cards, live-search-grounded meta research, parsed decklists that can be created as real decks. |
@@ -21,6 +21,13 @@ and a sparkline, printings/variants, the finish + condition + quantity + cost
 basis add bar, copies you already own, deck membership and assignment, the want
 toggle, external links, and — for sealed products — the set's other products and
 everything that could be pulled from it.
+
+When a scan couldn't read the printed code, the sheet says so under the set
+line ("Edition not read — check it's yours") and taps through to the printings
+picker. The card is right; the edition is the source's default, and a
+Yu-Gi-Oh reprint can be a hundredth of the Secret Rare's price — so the sheet
+shows a guess as a guess (`printingUnconfirmed`, from `pinned` in
+identify.ts).
 
 ## Routing and shell
 

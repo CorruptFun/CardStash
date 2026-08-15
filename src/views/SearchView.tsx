@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { CardImg, Empty, Seg } from '../components/basics'
 import { track } from '../lib/analytics'
+import { CODE_EXAMPLE } from '../lib/cardcode'
 import { searchGame } from '../lib/cardsearch'
 import { searchSharedCards } from '../lib/cardsource'
 import { recordPricePoint } from '../lib/db'
@@ -113,6 +114,10 @@ export function SearchView() {
     [],
   )
 
+  // The printed set/batch number is a first-class query (see cardsearch.ts),
+  // and nothing on the screen would say so unless the copy does.
+  const codeExample = CODE_EXAMPLE[game]
+
   return (
     <div className="screen safe-top">
       <header className="screenhead searchhead">
@@ -129,7 +134,7 @@ export function SearchView() {
         <input
           ref={inputRef}
           type="search"
-          placeholder={`Search ${GAME_LABEL[game]} cards…`}
+          placeholder={codeExample ? `Name or card number — ${codeExample}` : `Search ${GAME_LABEL[game]} cards…`}
           value={query}
           onChange={(event) => onType(event.target.value)}
           autoComplete="off"
@@ -168,6 +173,7 @@ export function SearchView() {
           icon="search"
           title="No cards found"
           body={`Nothing in ${GAME_LABEL[game]} matches “${query}”. Promos, prereleases and regional prints are often missing from the catalogs — you can add it yourself.`}
+          note={codeExample ? `Card numbers work too — try ${codeExample}.` : undefined}
           action={
             <button className="btn btn--primary" onClick={() => openEditor({ game, name: query.trim() })}>
               <Icon name="plus" size={16} /> Add this card
@@ -193,7 +199,15 @@ export function SearchView() {
         </>
       )}
       {!loading && !error && results == null && (
-        <Empty icon="search" title="Look up any card" body="Type at least two letters. Tap a result for prices, comps and history." />
+        <Empty
+          icon="search"
+          title="Look up any card"
+          body={
+            codeExample
+              ? `Search by name, or by the number printed on the card — ${codeExample}. Tap a result for prices, comps and history.`
+              : 'Type at least two letters. Tap a result for prices, comps and history.'
+          }
+        />
       )}
     </div>
   )
