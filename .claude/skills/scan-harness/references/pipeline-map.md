@@ -172,6 +172,27 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    "gr"); the matrix spent 119 lookups on such fragments and not one ever
    identified a card, while each was a chance to hit a real name exactly in a
    big catalogue. Three, not four, because "Mew" and "Muk" are real.
+12. **A confident answer can be SUSPECT, and the rescue has to fire on that,
+   not only on a miss.** The cloud rescue was first wired where every failure
+   path ends — after all local passes give up. That is the wrong place for the
+   failure it was bought to fix. The wrong-card class is not a miss: the local
+   path returns "Krookodile" at score 1.0 for a Krookodile ex and never asks
+   anyone (lessons 29 and 47). A miss-triggered rescue therefore cannot touch a
+   single one of them, which is why turning it on changed nothing.
+   So a Pokémon match on a BARE species, whose rules box declared no variant
+   (invariant 10 silent — unread, or read as "Pokémon €X rule"), and which has
+   a suffixed sibling in the catalog, is treated as suspect and re-read in the
+   cloud. Four narrowings hold it down, and all four are load-bearing: Pokémon
+   and suffix-less only; only when invariant 10 found nothing to say; only when
+   a sibling actually exists (a species with no ex/GX/V printing cannot be
+   wrong this way); and only when the rescue is ARMED — checked first and sync,
+   so an un-opted-in user does not even pay the sibling lookup and the free
+   path is unchanged instruction for instruction.
+   The cloud may only REPLACE the answer, never withdraw it: any refusal —
+   off, unreachable, or rejected by `CLOUD_MATCH_THRESHOLD` on the whole
+   printed name — falls through to the local card. That keeps the worst case
+   equal to today rather than trading wrong cards for misses, which would be
+   the same mistake in the other direction.
 
 ## Scanner loop (hooks/useScanner.ts)
 
