@@ -5096,6 +5096,100 @@ button {
   background: var(--down-fill);
   color: var(--down);
 }
+
+/* Order states. No new colour tokens: an escrow is a trade with money in it, so
+   it reuses the same three fills the trade pills already use -- warn while
+   something is owed, up once it is settled, down when it went wrong. `pending`
+   is deliberately the plainest of all, because an unpaid order is not yet an
+   event in anybody's life. */
+.statuspill--pending {
+  border-color: var(--rule-strong);
+  background: var(--ink-150);
+  color: var(--paper-3);
+}
+.statuspill--paid,
+.statuspill--shipped {
+  border-color: rgba(224, 165, 66, 0.4);
+  background: var(--warn-fill);
+  color: var(--warn);
+}
+.statuspill--delivered,
+.statuspill--released {
+  border-color: rgba(76, 195, 138, 0.4);
+  background: var(--up-fill);
+  color: var(--up);
+}
+.statuspill--refunded,
+.statuspill--cancelled,
+.statuspill--disputed {
+  border-color: rgba(242, 104, 92, 0.4);
+  background: var(--down-fill);
+  color: var(--down);
+}
+
+/* ---------------------------------------------------------------- orders */
+
+.orderline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 7px 0;
+  font-size: 14px;
+  color: var(--paper);
+  min-width: 0;
+}
+.orderline__name {
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orderline__amount {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.orderline--minor {
+  font-size: 13px;
+  color: var(--paper-3);
+}
+.orderline--total {
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+  font-weight: 600;
+}
+
+/* The sentence that says what is actually happening. It carries the screen --
+   a status pill alone cannot tell a buyer whether to wait or to act. */
+.ordernarrative {
+  margin: var(--s3) 0;
+  padding: 11px var(--s3);
+  border-radius: var(--r-1);
+  background: var(--ink-100);
+  border: 1px solid var(--rule);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--paper-2);
+}
+
+.addressbox__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-num);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--paper);
+  margin: var(--s2) 0;
+}
+
+/* Buying is a ghost button beside Add, never the primary one. Adding a card to
+   your own collection is the thing this sheet is for; spending money is the
+   occasional alternative, and the visual weight should say so. */
+.addbar__buy {
+  white-space: nowrap;
+}
 .statuspill--completed {
   border-color: rgba(76, 195, 138, 0.25);
   color: var(--up);

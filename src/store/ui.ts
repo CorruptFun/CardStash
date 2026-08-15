@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import { useStore } from 'zustand'
-import type { Card, CollectionItem, Finish, Game, GradeInfo } from '../lib/types'
+import type { Card, CollectionItem, Finish, Game, GradeInfo, SharedCard } from '../lib/types'
 
 export type ToastKind = 'info' | 'success' | 'error'
 
@@ -28,6 +28,23 @@ export interface SheetRequest {
   /** Preselect this grade in the add bar (scanner read a slab label). */
   grade?: GradeInfo
   origin?: 'scan' | 'search' | 'collection' | 'deck' | 'friend'
+  /**
+   * Whose copy this is, when the sheet was opened from a friend's binder — the
+   * only context in which the card can be bought rather than merely admired.
+   *
+   * `origin: 'friend'` already existed but is not enough: it says the sheet came
+   * from a binder, not WHOSE, and the sheet is handed a reconstructed `Card`
+   * rather than the `SharedCard` it came from. Buying needs the account id to
+   * pay and the row to price, so both travel explicitly. Absent this, the sheet
+   * shows no Buy button at all, which is the correct default everywhere else.
+   */
+  seller?: {
+    /** Their Supabase account id — a link-imported friend has none, and cannot be paid. */
+    userId: string
+    name: string
+    /** Their published row: the price and the number they will part with. */
+    row: SharedCard
+  }
 }
 
 export interface SearchPrefill {

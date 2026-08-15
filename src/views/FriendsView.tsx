@@ -4,6 +4,7 @@ import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { ShareActions, type SharePack } from '../components/ShareActions'
 import { SocialPanel } from '../components/SocialPanel'
+import { SellerPanel } from '../components/SellerPanel'
 import { track } from '../lib/analytics'
 import { readFileText } from '../lib/csv'
 import {
@@ -12,6 +13,7 @@ import {
   recordIncomingTrade,
   upsertFriendFromProfile,
 } from '../lib/db'
+import { listOrders, marketReady, orderStatusLabel, type Order } from '../lib/marketplace'
 import { itemUnitPrice, totalQty } from '../lib/prices'
 import { settings, useSettings } from '../lib/settings'
 import {
@@ -42,7 +44,7 @@ import {
   type WantMatch,
 } from '../lib/socialcloud'
 import type { CollectionItem, Friend, ShareScope, SocialPayload, TradeRecord } from '../lib/types'
-import { money, relativeAge, ymd } from '../lib/util'
+import { dateTime, money, relativeAge, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 
 const NO_ITEMS: CollectionItem[] = []
@@ -367,6 +369,10 @@ export function FriendsView() {
         <SocialPanel />
       </section>
 
+      <SellerPanel />
+
+      <OrdersSection />
+
       {requests.incoming.length > 0 && (
         <section className="setsec">
           <h3>
@@ -584,5 +590,61 @@ function TradeRow({ trade }: { trade: TradeRecord }) {
       <span className={`statuspill statuspill--${trade.status} ${attention ? 'statuspill--hot' : ''}`}>{tradeStatusLabel(trade)}</span>
       <Icon name="chevronRight" size={16} className="social-row__go" />
     </a>
+  )
+}
+
+/**
+ * Purchases, either side. Its own component because unlike everything else on
+ * this screen it is not a Dexie live query -- orders live on the server and are
+ * fetched (marketplace.ts), so it owns a loading state and can fail.
+ *
+ * Renders nothing at all when there are none, which is the common case and the
+ * permanent case for anyone who never buys. A heading over an empty list would
+ * advertise a feature to people who have not opted into it.
+ */
+function OrdersSection() {
+  const [orders, setOrders] = useState<Order[]>([])
+
+  useEffect(() => {
+    let live = true
+    if (!marketReady()) return
+    void listOrders()
+      .then((rows) => {
+        if (live) setOrders(rows)
+      })
+      // A failure here is silence, deliberately: this section is one of eight
+      // on the screen, and an unreachable server should not put an error toast
+      // in front of someone who came here to look at their friends.
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+
+  if (!orders.length) return null
+
+  return (
+    <section className="setsec">
+      <h3>
+        Purchases <em className="sheetsec__count">{orders.length}</em>
+      </h3>
+      <div className="social-list">
+        {orders.map((order) => (
+          <a className="social-row" key={order.id} href={`#/orders/${order.id}`}>
+            <Icon name="cart" size={16} />
+            <div className="social-row__text">
+              <span className="social-row__name">
+                {order.qty > 1 ? `${order.qty}× ` : ''}
+                {order.cardName}
+              </span>
+              <span className="social-row__meta">
+                {money((order.itemCents + order.shippingCents) / 100)} · {dateTime(order.createdAt)}
+              </span>
+            </div>
+            <span className={`statuspill statuspill--${order.status}`}>{orderStatusLabel(order.status)}</span>
+          </a>
+        ))}
+      </div>
+    </section>
   )
 }

@@ -18,6 +18,7 @@ import { IngestView } from './views/IngestView'
 import { ScanView } from './views/ScanView'
 import { SearchView } from './views/SearchView'
 import { SettingsView } from './views/SettingsView'
+import { OrderView } from './views/OrderView'
 import { TradeView } from './views/TradeView'
 
 type Route =
@@ -29,6 +30,7 @@ type Route =
   | { name: 'settings' }
   | { name: 'friends'; friendId: string | null }
   | { name: 'trades'; tradeId: string | null }
+  | { name: 'orders'; orderId: string | null }
   /** Share-link landing: `#/x?d=<blob>` (profile, trade, or reply). */
   | { name: 'ingest'; blob: string | null }
 
@@ -53,6 +55,8 @@ function parseRoute(hash: string): Route {
       return { name: 'friends', friendId: parts[1] ?? null }
     case 'trades':
       return { name: 'trades', tradeId: parts[1] ?? null }
+    case 'orders':
+      return { name: 'orders', orderId: parts[1] ?? null }
     case 'x':
       return { name: 'ingest', blob: query.get('d') }
     default:
@@ -64,7 +68,7 @@ const TABS: { route: string; icon: IconName; label: string; match: string[] }[] 
   { route: '#/scan', icon: 'scan', label: 'Scan', match: ['scan'] },
   { route: '#/search', icon: 'search', label: 'Search', match: ['search'] },
   { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection'] },
-  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'ingest'] },
+  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'ingest'] },
   { route: '#/decks', icon: 'decks', label: 'Decks', match: ['decks', 'builder'] },
   { route: '#/settings', icon: 'settings', label: 'Settings', match: ['settings'] },
 ]
@@ -111,6 +115,7 @@ export function App() {
         {route.name === 'friends' &&
           (route.friendId ? <FriendBinderView key={route.friendId} friendId={route.friendId} /> : <FriendsView />)}
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
+        {route.name === 'orders' && <OrderView key={route.orderId ?? 'none'} orderId={route.orderId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
       {route.name !== 'scan' && route.name !== 'ingest' && (

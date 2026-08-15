@@ -39,6 +39,9 @@ function matchesFilter(row: SharedCard, needle: string): boolean {
   return row.name.toLowerCase().includes(needle) || (row.setCode ?? '').toLowerCase().includes(needle)
 }
 
+/** A Supabase account id, as opposed to a legacy link-imported `uid()`. */
+const IS_ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function FriendBinderView({ friendId }: { friendId: string }) {
   const friend = useLiveQuery(() => db.friends.get(friendId), [friendId])
   const myItems = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
@@ -224,7 +227,21 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
             key={rowKey(row)}
             row={row}
             wanted={myWantKeys.has(wantKeyFor(row.game, row.name))}
-            onPick={() => openSheet({ card: sharedCardToCard(row, friend.exportedAt), origin: 'friend' })}
+            onPick={() =>
+              openSheet({
+                card: sharedCardToCard(row, friend.exportedAt),
+                origin: 'friend',
+                // Only an ACCOUNT can be paid. A friend added from a link has a
+                // localStorage uid for an id, not a Supabase uuid, and there is
+                // nobody at the other end to send money to -- so no seller
+                // context travels and the sheet offers no Buy button. The sheet
+                // still asks `can_sell()` before showing one; this is the first
+                // of the two gates, not the only one.
+                seller: IS_ACCOUNT_ID.test(friend.id)
+                  ? { userId: friend.id, name: friend.name, row }
+                  : undefined,
+              })
+            }
           />
         ))}
       </div>

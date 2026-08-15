@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"],
       "port": 5173,
       "url": "http://127.0.0.1:5173"
+    },
+    {
+      "name": "cardstash-dev-b",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--host", "127.0.0.1", "--port", "5174"],
+      "port": 5174,
+      "url": "http://127.0.0.1:5174"
     }
   ]
 }

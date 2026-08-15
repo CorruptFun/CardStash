@@ -4,7 +4,8 @@ import { CardImg, ManaCost, Seg, Stepper, Toggle } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
-import { track } from '../lib/analytics'
+import { amountBucket, track } from '../lib/analytics'
+import { canBuyFrom, marketReady, startCheckout } from '../lib/marketplace'
 import { printingVariants, refreshCard } from '../lib/cardsearch'
 import {
   addCardToDeck,
@@ -27,6 +28,7 @@ import { cardTrend } from '../lib/portfolio'
 import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
   collectionValue,
+  conditionFactor,
   groupComps,
   headlineFinish,
   itemUnitPrice,
@@ -307,6 +309,59 @@ function CardSheet() {
   const displayFinish = headlineFinish(card.prices)
   const headline = best ?? bestFoil
   const range = useMemo(() => priceRange(comps, displayFinish), [comps, displayFinish])
+  /**
+   * Buying is offered only when the sheet was opened from a friend's binder AND
+   * that friend can actually be paid — `can_sell()` answers both the friendship
+   * and the Stripe-verification halves without telling us anything else about
+   * them. Asked once per sheet rather than cached, because a seller finishing
+   * verification is exactly the kind of thing that changes between two openings.
+   */
+  const seller = sheet.seller
+  const [canBuy, setCanBuy] = useState(false)
+  const [buying, setBuying] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    if (!seller?.userId || !marketReady()) {
+      setCanBuy(false)
+      return
+    }
+    void canBuyFrom(seller.userId).then((ok) => {
+      if (live) setCanBuy(ok)
+    })
+    return () => {
+      live = false
+    }
+  }, [seller?.userId])
+
+  /**
+   * The price is the seller's published market unit for the finish they listed,
+   * with their condition applied -- the same number the binder already shows
+   * them and shows you, so nobody is surprised at the checkout. It is sent to
+   * the server and then recomputed there; `open_order()` refuses anything that
+   * does not clear the floor or leaves the seller nothing.
+   */
+  const buy = async () => {
+    if (!seller || buying) return
+    const unit = Math.round((seller.row.price ?? 0) * conditionFactor(seller.row.condition) * 100)
+    setBuying(true)
+    try {
+      const { url } = await startCheckout({
+        sellerId: seller.userId,
+        cardId: seller.row.cardId,
+        cardName: seller.row.name,
+        qty: 1,
+        itemCents: unit,
+        shippingCents: 0,
+      })
+      track('card_added', { game: card.game, source: 'buy', band: amountBucket(unit / 100) })
+      location.href = url
+    } catch (err: any) {
+      toast(err?.message ?? 'Could not start checkout', 'error')
+      setBuying(false)
+    }
+  }
+
   const addPrice = addLabelPrice(card, finish, condition)
   /* Finishes this printing exists in — plus the current pick, so the control
    * never strands the user (their physical copy beats incomplete API data). */
@@ -639,6 +694,12 @@ function CardSheet() {
           {!sheet.deckId && !sealed && (
             <button className="btn btn--ghost" onClick={() => setDeckPickOpen(true)}>
               <Icon name="decks" size={16} /> Deck
+            </button>
+          )}
+          {canBuy && seller && (
+            <button className="btn btn--ghost addbar__buy" onClick={buy} disabled={buying}>
+              <Icon name="cart" size={16} />{' '}
+              {buying ? 'Opening…' : `Buy · ${money((seller.row.price ?? 0) * conditionFactor(seller.row.condition))}`}
             </button>
           )}
         </div>
