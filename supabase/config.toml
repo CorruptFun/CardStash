@@ -414,3 +414,16 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# ---------------------------------------------------------------- functions
+#
+# `stripe-escrow` carries BOTH the user-facing routes and the Stripe webhook,
+# and a webhook is unauthenticated by definition -- Stripe has no JWT to send.
+# So the platform's JWT gate is off and the function verifies callers itself:
+# the user routes ask GoTrue who the bearer is (the `scan-card` pattern), and
+# `/webhook` trusts nothing but a valid `Stripe-Signature`.
+#
+# Leaving this at the default would 401 every event Stripe ever sent, which
+# fails as "payments silently never arrive" rather than as an error anyone sees.
+[functions.stripe-escrow]
+verify_jwt = false

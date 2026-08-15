@@ -128,20 +128,34 @@ that it doesn't today.
 
 1. **Fixed event whitelist.** `EVENT_TYPES` — `app_open`, `session_end`,
    `screen_view`, `scan_attempt`, `scan_failure`, `card_added`,
-   `variant_selected`, `import_completed`, `search`, `deck_created`,
-   `ai_builder_run`, `price_refresh`, `friend_added`, `social_share`,
-   `trade_update`, `want_update`, `sync_run`, `error`. Adding an event means
-   adding it here.
+   `variant_selected`, `import_completed`, `backup_run`, `backup_restore`,
+   `search`, `deck_created`, `ai_builder_run`, `price_refresh`, `friend_added`,
+   `social_share`, `trade_update`, `want_update`, `sync_run`, `error`. Adding an
+   event means adding it here.
 2. **Redaction on write** (`redact()`), applied to every event before it is
    stored:
    - keys must match `^[a-z][A-Za-z0-9]{0,20}$`;
-   - keys on the forbidden list are dropped outright: `name`, `cardname`,
-     `title`, `query`, `q`, `search`, `term`, `message`, `msg`, `text`,
-     `detail`, `note`, `prompt`, `key`, `apikey`, `token`, `url`, `href`,
-     `endpoint`, `email`, `user`, `id`;
+   - keys on the forbidden list are dropped outright, in three families:
+     - *content* — `name`, `cardname`, `title`, `query`, `q`, `search`, `term`,
+       `message`, `msg`, `text`, `detail`, `note`, `prompt`;
+     - *identity and credentials* — `key`, `apikey`, `token`, `url`, `href`,
+       `endpoint`, `email`, `user`, `id`, `handle`;
+     - *postal and money* — `address`, `addr`, `street`, `line1`, `line2`,
+       `city`, `state`, `region`, `zip`, `postcode`, `postal`, `country`,
+       `phone`, `recipient`, `tracking`, `amount`, `price`, `total`,
+       `subtotal`, `fee`, `cost`, `value`, `balance`, `payout`;
    - booleans pass; numbers pass rounded to 2 decimals; **strings pass only if
      they match `^[A-Za-z0-9_.:-]{1,32}$`** — so an enum like `hit` or `mtg`
      survives and a card name does not.
+
+   The postal and money family is the one to understand, because nothing else
+   would have caught it: a postcode carries no card text and `zip: '94110'`
+   satisfies the string rule exactly. It is forbidden ahead of the feature that
+   would supply one, since the failure mode is silent — an address in the log
+   looks identical to a working event. Order values are still answerable
+   through `amountBucket()`, the same way collection sizes go through
+   `sizeBucket()`: a bucket is a count, an amount is a fact about one person's
+   money.
 3. **Errors are hashed.** `trackError` stores a sanitized component name and an
    FNV-1a hash of the message. The message text itself is never stored.
 3b. **Failing cards are hashed, never named.** `scan_failure` carries the stage

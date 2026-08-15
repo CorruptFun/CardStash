@@ -85,8 +85,27 @@ async function prune(): Promise<number> {
   return stale.length
 }
 
-/** Value keys that must never reach the log, even by accident. */
+/**
+ * Value keys that must never reach the log, even by accident.
+ *
+ * Three families, and the reason differs for each:
+ *
+ *   * **Content** — card names, queries, notes, error prose. The original list.
+ *   * **Identity and credentials** — keys, tokens, emails, ids.
+ *   * **Postal and money.** These carry no card text, so nothing above would
+ *     have caught them, and both `zip: '94110'` and `city: 'Austin'` satisfy
+ *     `SAFE_STRING` — they would have sailed straight through. They are here
+ *     ahead of the marketplace that will need them rather than after it,
+ *     because the failure mode is silent: a postcode in the log looks exactly
+ *     like a working event. No event has ever passed one of these, so nothing
+ *     regresses by forbidding them.
+ *
+ * An order's value is still answerable — pass a BUCKET, the way collection
+ * size already is, never the amount. A bucket is a count; an amount is a fact
+ * about one person's money.
+ */
 const FORBIDDEN_KEYS = new Set([
+  // content
   'name',
   'cardname',
   'title',
@@ -100,6 +119,7 @@ const FORBIDDEN_KEYS = new Set([
   'detail',
   'note',
   'prompt',
+  // identity and credentials
   'key',
   'apikey',
   'token',
@@ -109,6 +129,33 @@ const FORBIDDEN_KEYS = new Set([
   'email',
   'user',
   'id',
+  'handle',
+  // postal
+  'address',
+  'addr',
+  'street',
+  'line1',
+  'line2',
+  'city',
+  'state',
+  'region',
+  'zip',
+  'postcode',
+  'postal',
+  'country',
+  'phone',
+  'recipient',
+  'tracking',
+  // money
+  'amount',
+  'price',
+  'total',
+  'subtotal',
+  'fee',
+  'cost',
+  'value',
+  'balance',
+  'payout',
 ])
 const SAFE_STRING = /^[A-Za-z0-9_.:-]{1,32}$/
 const SAFE_KEY = /^[a-z][A-Za-z0-9]{0,20}$/
@@ -266,6 +313,33 @@ export function sizeBucket(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0'
   for (const [limit, label] of SIZE_BUCKETS) if (n < limit) return label
   return '5k-up'
+}
+
+/** USD, in dollars. */
+const AMOUNT_BUCKETS: [number, string][] = [
+  [5, 'u5'],
+  [10, '5-10'],
+  [25, '10-25'],
+  [50, '25-50'],
+  [100, '50-100'],
+  [250, '100-250'],
+]
+
+/**
+ * Order values travel as a bucket, for the same reason collection sizes do,
+ * and one more: an exact amount is a fact about a specific transaction between
+ * two identifiable people, which is precisely what this log is built not to
+ * hold. `amount` and `price` are in `FORBIDDEN_KEYS`, so an exact figure is
+ * dropped rather than merely discouraged — this is the supported way to ask
+ * "are people buying cheap cards or expensive ones".
+ *
+ * The label deliberately avoids `$` and `+`: `SAFE_STRING` would reject them
+ * and the value would vanish silently.
+ */
+export function amountBucket(usd: number): string {
+  if (!Number.isFinite(usd) || usd <= 0) return '0'
+  for (const [limit, label] of AMOUNT_BUCKETS) if (usd < limit) return label
+  return '250-up'
 }
 
 const PLATFORMS: [RegExp, string][] = [

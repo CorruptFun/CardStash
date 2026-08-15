@@ -15,10 +15,16 @@ import { bundleImport } from './bundle.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const STUB = join(HERE, 'stubs', 'analytics-host.mjs')
 
-const { EVENT_TYPES, redact, hashToken, sizeBucket, describeDevice, failureStats, usageStats } = await bundleImport(
-  'src/lib/analytics.ts',
-  { alias: { dexie: STUB, './settings': STUB } },
-)
+const {
+  EVENT_TYPES,
+  redact,
+  hashToken,
+  sizeBucket,
+  amountBucket,
+  describeDevice,
+  failureStats,
+  usageStats,
+} = await bundleImport('src/lib/analytics.ts', { alias: { dexie: STUB, './settings': STUB } })
 
 const IOS_SAFARI =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
@@ -72,6 +78,50 @@ test('collection sizes leave as buckets, never as counts', () => {
   assert.equal(sizeBucket(4999), '1k-5k')
   assert.equal(sizeBucket(5000), '5k-up')
   assert.equal(sizeBucket(Number.NaN), '0')
+})
+
+test('a postal address is dropped even though none of it looks like content', () => {
+  // Every one of these satisfies SAFE_STRING, so the string rule would have
+  // passed them all. Only the forbidden list stops them, which is why it has
+  // to name them explicitly rather than rely on the shape of the value.
+  assert.deepEqual(
+    redact({
+      line1: '38-Oak-St',
+      city: 'Austin',
+      state: 'TX',
+      zip: '94110',
+      postcode: 'SW1A-1AA',
+      country: 'US',
+      phone: '5551234567',
+      recipient: 'rae',
+      tracking: '9400111899223',
+      game: 'mtg',
+    }),
+    { game: 'mtg' },
+  )
+})
+
+test('an exact money figure is dropped; a bucket is how value travels', () => {
+  assert.deepEqual(redact({ amount: 42.5, price: 12, total: 99, fee: 1.5, payout: 40, ok: true }), { ok: true })
+  // The supported route. Numbers are fine as counts — it is the naming of a
+  // figure as somebody's money that the contract refuses.
+  assert.deepEqual(redact({ band: amountBucket(42.5), cards: 3 }), { band: '25-50', cards: 3 })
+})
+
+test('order values leave as buckets, and the labels survive SAFE_STRING', () => {
+  assert.equal(amountBucket(0), '0')
+  assert.equal(amountBucket(4.99), 'u5')
+  assert.equal(amountBucket(5), '5-10')
+  assert.equal(amountBucket(249.99), '100-250')
+  assert.equal(amountBucket(250), '250-up')
+  assert.equal(amountBucket(Number.NaN), '0')
+  assert.equal(amountBucket(-3), '0')
+  // A label that redact() would drop is a metric that silently disappears —
+  // no '$', no '+', nothing outside the allowed character class.
+  for (const usd of [0, 3, 7, 20, 40, 80, 150, 900]) {
+    const band = amountBucket(usd)
+    assert.deepEqual(redact({ band }), { band }, `bucket ${band} must survive redaction`)
+  }
 })
 
 test('device shape reads platform and browser off the user agent', () => {
