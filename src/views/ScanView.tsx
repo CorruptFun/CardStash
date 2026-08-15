@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Icon } from '../components/Icon'
 import { BinderReview } from '../components/BinderReview'
 import { CardImg, Seg } from '../components/basics'
+import { ScanModes } from '../components/ScanModes'
 import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
@@ -597,7 +598,8 @@ export function ScanView({ active }: { active: boolean }) {
           {config.enabledGames.length > 1 && (
             <Seg
               ariaLabel="Game filter"
-              size="sm"
+              size="lg"
+              glass
               scroll
               options={[
                 { value: 'auto' as const, label: 'Auto' },
@@ -608,50 +610,50 @@ export function ScanView({ active }: { active: boolean }) {
             />
           )}
           <div className="scan__topbtns">
-            <button
-              className={`collectpill ${scanMode === 'sealed' ? 'collectpill--on' : ''}`}
-              onClick={() => {
-                const next: ScanMode = scanMode === 'sealed' ? 'card' : 'sealed'
-                setScanMode(next)
-                scanner.rescan()
-                toast(next === 'sealed' ? 'Pack mode: scan boosters, boxes and bundles' : 'Card mode', 'info')
-              }}
-              aria-pressed={scanMode === 'sealed'}
-              aria-label="Scan sealed packs"
-            >
-              <Icon name="grid" size={14} />
-              <span className="collectpill__label">Packs</span>
-            </button>
-            <button
-              className={`collectpill ${pageMode ? 'collectpill--on' : ''}`}
-              onClick={() => {
-                const next = !pageMode
-                setPageMode(next)
-                if (next && scanMode === 'sealed') setScanMode('card')
-                scanner.rescan()
-                toast(
-                  next ? 'Page mode: tap to read every card in frame' : 'Single card mode',
-                  'info',
-                )
-              }}
-              aria-pressed={pageMode}
-              aria-label="Scan a whole page of cards"
-            >
-              <Icon name="cards" size={14} />
-              <span className="collectpill__label">Page</span>
-            </button>
-            <button
-              className={`collectpill ${config.collectMode ? 'collectpill--on' : ''}`}
-              onClick={() => {
-                config.set({ collectMode: !config.collectMode })
-                toast(config.collectMode ? 'Collect mode off' : 'Collect mode: scans add to collection', 'info')
-              }}
-              aria-pressed={config.collectMode}
-              aria-label="Collect mode"
-            >
-              <Icon name={config.collectMode ? 'check' : 'plus'} size={14} />
-              <span className="collectpill__label">Collect</span>
-            </button>
+            <ScanModes
+              modes={[
+                {
+                  key: 'sealed',
+                  icon: 'grid',
+                  label: 'Packs',
+                  description: 'Read boosters, boxes and bundles instead of single cards',
+                  on: scanMode === 'sealed',
+                  onChange: (on) => {
+                    setScanMode(on ? 'sealed' : 'card')
+                    scanner.rescan()
+                    toast(on ? 'Pack mode: scan boosters, boxes and bundles' : 'Card mode', 'info')
+                  },
+                },
+                {
+                  key: 'page',
+                  icon: 'cards',
+                  label: 'Page',
+                  description: 'Tap to read every card in frame at once',
+                  on: pageMode,
+                  // Page and Packs are mutually exclusive — one reads a grid of
+                  // cards, the other a single product — so turning this on
+                  // stands the other down rather than leaving both claiming the
+                  // frame.
+                  onChange: (on) => {
+                    setPageMode(on)
+                    if (on && scanMode === 'sealed') setScanMode('card')
+                    scanner.rescan()
+                    toast(on ? 'Page mode: tap to read every card in frame' : 'Single card mode', 'info')
+                  },
+                },
+                {
+                  key: 'collect',
+                  icon: config.collectMode ? 'check' : 'plus',
+                  label: 'Collect',
+                  description: 'Add every confident scan straight to your collection',
+                  on: config.collectMode,
+                  onChange: (on) => {
+                    config.set({ collectMode: on })
+                    toast(on ? 'Collect mode: scans add to collection' : 'Collect mode off', 'info')
+                  },
+                },
+              ]}
+            />
             <UploadButton busy={uploadBusy} onPick={() => fileRef.current?.click()} />
             {scanner.torchAvailable && (
               <button

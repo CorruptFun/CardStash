@@ -88,15 +88,23 @@ export function Seg<T extends string>({
   onChange,
   size = 'md',
   scroll = false,
+  glass = false,
   ariaLabel,
   ariaLabelledBy,
 }: {
   options: SegOption<T>[]
   value: T
   onChange: (value: T) => void
-  size?: 'sm' | 'md'
+  /**
+   * `lg` is for the scan screen: a viewfinder is used one-handed, at arm's
+   * length, often in a shop — the game picker there needs a real touch
+   * target, not a settings-row control.
+   */
+  size?: 'sm' | 'md' | 'lg'
   /** Overflow sideways-scrolls instead of squeezing (long game lists). */
   scroll?: boolean
+  /** Frosted, for sitting over the camera picture rather than a panel. */
+  glass?: boolean
   ariaLabel?: string
   ariaLabelledBy?: string
 }) {
@@ -116,7 +124,7 @@ export function Seg<T extends string>({
   return (
     <div
       ref={scrollRef}
-      className={`seg seg--${size} ${scroll ? 'seg--scroll' : ''}`}
+      className={`seg seg--${size} ${scroll ? 'seg--scroll' : ''} ${glass ? 'seg--glass' : ''}`}
       role="tablist"
       aria-label={ariaLabelledBy ? undefined : ariaLabel}
       aria-labelledby={ariaLabelledBy}
@@ -179,11 +187,19 @@ export function Modal({
   onClose,
   title,
   children,
+  variant = 'solid',
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  /**
+   * `glass` frosts the panel and lightens the backdrop so what is behind
+   * stays legible — meant for dialogs opened over the camera viewfinder,
+   * where blacking out the picture is the one thing the screen must not do.
+   * Everywhere else wants `solid`, which is readable over arbitrary content.
+   */
+  variant?: 'solid' | 'glass'
 }) {
   useEffect(() => {
     if (!open) return
@@ -196,8 +212,8 @@ export function Modal({
   // the sheet's transform (which would re-root position:fixed) or its scroll.
   return createPortal(
     <div className="modal-root" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="sheet-backdrop" onClick={onClose} />
-      <div className="modal">
+      <div className={`sheet-backdrop ${variant === 'glass' ? 'sheet-backdrop--glass' : ''}`} onClick={onClose} />
+      <div className={`modal ${variant === 'glass' ? 'modal--glass' : ''}`}>
         <div className="modal__head">
           <h2>{title}</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Close">

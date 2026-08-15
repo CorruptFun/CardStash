@@ -480,6 +480,31 @@ button {
   padding: 5px 10px;
   font-size: 12.5px;
 }
+/* Scan screen: used one-handed, at arm's length, often standing in a shop.
+   The game picker there is a primary control and needs a real touch target —
+   44px tall including the track's padding, which is the platform minimum. */
+.seg--lg .seg__opt {
+  padding: 10px 15px;
+  font-size: 14.5px;
+  font-weight: 560;
+}
+/* Frosted, for sitting over the camera picture rather than a panel. The
+   fallback background is deliberately opaque enough to stay legible where
+   backdrop-filter is unsupported — over live video, an unreadable control is
+   worse than an unfashionable one. */
+.seg--glass {
+  background: #0a0908b3;
+  border-color: rgba(244, 239, 232, 0.14);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.seg--glass .seg__opt {
+  color: #f4efe8b8;
+}
+.seg--glass .seg__opt--on {
+  background: rgba(244, 239, 232, 0.16);
+  color: var(--paper);
+}
 .seg__opt--on {
   background: var(--ink-200);
   color: var(--paper);
@@ -774,6 +799,31 @@ button {
   inset: 0;
   background: #040303b8;
   animation: fade-in var(--t-2) ease;
+}
+/* Glass variant: opened over the camera viewfinder, where blacking out the
+   picture is the one thing the screen must not do. The dim is light and the
+   blur does the separating. */
+.sheet-backdrop--glass {
+  background: #04030359;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.modal--glass {
+  background: rgba(18, 16, 16, 0.72);
+  border-color: rgba(244, 239, 232, 0.16);
+  backdrop-filter: blur(26px) saturate(1.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
+}
+/* Where backdrop-filter is unsupported the panel would be a translucent smear
+   over live video — unreadable. Fall back to opaque; an unfashionable dialog
+   beats an illegible one. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .modal--glass {
+    background: var(--ink-050);
+  }
+  .sheet-backdrop--glass {
+    background: #040303b8;
+  }
 }
 @keyframes fade-in {
   0% {
@@ -1189,12 +1239,15 @@ button {
   /* Stays right-aligned when a lone enabled game hides the filter. */
   margin-left: auto;
 }
+/* Colours live on `.seg--glass` now — this rule used to hand-roll them, and
+   two sources for one look is how they drift apart. What stays here is
+   layout, which is specific to sharing a row with the mode and action
+   buttons. */
 .scan__top .seg {
-  background: #0a0908b3;
-  border-color: #f4efe824;
   /* Shrink and scroll rather than clip a game name in half when a lot of
    * games are enabled — a flex item's default min-width:auto refuses to
    * shrink, which is what cut "MTG" down to "MT". */
+  flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -1202,13 +1255,72 @@ button {
 .scan__top .seg::-webkit-scrollbar {
   display: none;
 }
-.scan__top .seg__opt {
-  color: #f4efe8b8;
+/* --- scan modes ---------------------------------------------------------- */
+
+.modelist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
 }
-.scan__top .seg__opt--on {
-  color: #fff;
-  background: #f4efe82e;
+.moderow {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--r-1);
+  background: rgba(244, 239, 232, 0.05);
+  border: 1px solid rgba(244, 239, 232, 0.09);
 }
+.moderow__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-1);
+  background: rgba(244, 239, 232, 0.07);
+  color: var(--paper-2);
+  transition:
+    background var(--t-1) var(--ease-out),
+    color var(--t-1) var(--ease-out);
+}
+.moderow__icon--on {
+  background: var(--signal-fill);
+  color: var(--signal);
+}
+.moderow__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.moderow__label {
+  font-size: 14px;
+  font-weight: 580;
+  color: var(--paper);
+}
+.moderow__text em {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--paper-3);
+}
+/* How many modes are on, when the label can't name them all. */
+.collectpill__count {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--signal-fill);
+  color: var(--signal);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
 .collectpill {
   display: inline-flex;
   align-items: center;
@@ -3421,22 +3533,12 @@ button {
   letter-spacing: 0;
   margin-left: -0.16em;
 }
-/* The scan top bar carries the game filter plus every mode and action pill,
- * and Page + upload made it one control too many: at 420px the filter was
- * clipped mid-label ("Auto | MT"). 379px was never a real phone — modern
- * handsets are 390-430 CSS px — so the icon-only collapse now covers them,
- * which is where the row actually runs out of room. Each pill keeps its
- * aria-label. */
-@media (max-width: 430px) {
-  .collectpill__label {
-    display: none;
-  }
-  .collectpill {
-    width: 36px;
-    padding: 0;
-    justify-content: center;
-  }
-}
+/* The label used to be hidden below 430px, because the top bar carried three
+ * mode pills plus upload and torch and simply ran out of room. Those three
+ * collapsed into one `ScanModes` button, so the room exists again — and the
+ * label has to be shown, because it is now the only thing naming which mode
+ * is active. An icon-only button hiding "Collect mode is on" is exactly the
+ * failure the consolidation had to avoid. */
 .tray__thumb {
   position: relative;
   display: block;
