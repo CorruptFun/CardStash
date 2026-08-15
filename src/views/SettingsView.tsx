@@ -13,6 +13,7 @@ import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { APP_VERSION } from '../lib/version'
 import { CloudSync } from '../components/CloudSync'
+import { Subscription } from '../components/Subscription'
 import { useUi } from '../store/ui'
 
 const INSIGHT_DAYS = 30
@@ -150,6 +151,7 @@ export function SettingsView() {
         </p>
       </section>
       <CardSourceSection />
+      <Subscription />
       <CloudSync />
       <section className="setsec">
         <h3>Data</h3>

@@ -267,8 +267,16 @@ the seller ships, and it is released on confirmation. `supabase/migrations/0006`
 whole server side. **Read decision 19 before touching any of it.** Server half
 is built and tested; there is no UI yet, so nothing is user-reachable.
 
-**Stripe, not Square, and that is settled.** Square runs the subscription
-(`square-billing` → `entitlements`) and cannot run this: its auth-and-hold caps
+**Stripe runs BOTH now (2026-08-15).** The subscription moved off Square to
+`stripe-billing` → `entitlements`; `square-billing` stays deployed but dormant
+until existing subscribers are migrated, then goes. **They are still two
+separate integrations**: Stripe *Billing* (recurring) and Stripe *Connect*
+(escrow) share an account and a secret key but have their own webhook endpoints
+and their own signing secrets — never reuse `STRIPE_WEBHOOK_SECRET` for
+billing. The swap cost nothing in `src/` because `entitlements` is the
+interface, which is exactly what that design was for.
+
+Square could not have run the escrow half regardless: its auth-and-hold caps
 at 7 days, its Payouts API only reports money reaching *our own* bank, and
 `app_fee_money` pays sellers instantly. The two providers share no code and no
 table. A provider belongs in exactly one file; the table is the interface.
