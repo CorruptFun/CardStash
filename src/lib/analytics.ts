@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import { DIAG_AVAILABLE, DIAG_ENDPOINT, DIAG_TOKEN } from './diagconfig'
 import { settings } from './settings'
 import { uid } from './util'
 import { APP_VERSION } from './version'
@@ -745,10 +746,12 @@ function byteLength(text: string): number {
 
 export async function flushTelemetry({ force = false, keepalive = false } = {}): Promise<void> {
   if (flushing) return
-  const config = settings()
-  const endpoint = config.diagEndpoint.trim()
-  const token = config.diagToken.trim()
-  if (!config.diagShare || !endpoint || !token) return
+  // Still doubly gated, but on the two things that can actually differ: whether
+  // this BUILD has somewhere to post to, and whether this USER said yes. The
+  // destination is no longer a pair of text fields nobody could fill in.
+  if (!DIAG_AVAILABLE || !settings().diagShare) return
+  const endpoint = DIAG_ENDPOINT
+  const token = DIAG_TOKEN
   flushing = true
   try {
     if (!force) {

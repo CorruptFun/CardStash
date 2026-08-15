@@ -11,8 +11,8 @@ Everything the user creates lives in browser storage on their device:
 - IndexedDB `cardstock` — collection, decks, price history, scans, friends,
   trades, wants, plus card-data caches.
 - IndexedDB `cardstock-analytics` — local diagnostics events.
-- localStorage `cardstock-settings` — preferences **including API keys and the
-  sync device token**, and `cardstock-version`.
+- localStorage `cardstock-settings` — preferences **including the user's own API
+  keys**, and `cardstock-version`.
 
 There is no user account. `requestPersistence()` at boot asks the browser not to
 evict the data. The user's escape hatches are the JSON backup, the CSV export,
@@ -50,11 +50,10 @@ The copy says so.
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
-| the user's sync server | while `syncOn` | binder payload, trade/reply payloads, the device token | off by default |
 | the Cardstock `stripe-escrow` function | opening a purchase, onboarding as a seller, shipping or confirming an order | the session token, the card id/name and the amounts, or an order id — **never an address**; the function reads one from Stripe and returns it to the seller without storing it | off by default; dormant entirely if the deployment has no Stripe secrets |
 | `checkout.stripe.com` | the buyer is redirected to pay | whatever the buyer types into Stripe's own hosted checkout — card details and shipping address go to Stripe, never through us | only on a deliberate purchase |
 | `connect.stripe.com` | a seller starts Connect onboarding | Stripe's hosted identity verification; **we never see a government ID or a bank number** | only when someone chooses to sell |
-| the diagnostics endpoint | while `diagShare` **and** a token are set | redacted event batches + a random device id + app version | off by default |
+| `VITE_DIAG_ENDPOINT` | while `diagShare` is on **and** the build compiled in an endpoint + token | redacted event batches + a random device id + app version | off by default; dormant entirely if the build configured neither |
 
 A cert lookup sends the certification number and nothing else — not the photo,
 not the collection, not any identifier for the user. The number is already
@@ -105,8 +104,7 @@ text stays on-device (see below), and analytics never learn what was scanned.
 | Gemini API key | `settings.geminiKey` (localStorage) | Google only, as `x-goog-api-key` | the AI deck builder, and — only while `cloudScanRescue` is on — the scan rescue |
 | pokemontcg.io key | `settings.pokemonKey` | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
 | PSA API token | **ours, compiled in** from `VITE_PSA_TOKEN` — not stored per user, no Settings field | psacard.com only, as a bearer token | resolving a scanned slab's cert to the exact card |
-| Diagnostics token | `settings.diagToken` | the user's configured endpoint only, as a bearer token | authorizing telemetry upload |
-| Sync device token | `settings.syncToken` (minted locally) | the user's configured sync server only | proving ownership of the profile id |
+| Diagnostics token | **ours, compiled in** from `VITE_DIAG_TOKEN` — not stored per user, no Settings field | the compiled-in `VITE_DIAG_ENDPOINT` only, as a bearer token | authorizing telemetry upload |
 | Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |
 | Google OAuth client id | compiled in from `VITE_GOOGLE_CLIENT_ID` | Google only | identifying the app during consent |
 
@@ -179,8 +177,12 @@ that it doesn't today.
    session count, active days), a coarse device shape, and collection size as a
    **bucket** — never an exact count. `clearAnalytics()` drops the install
    record along with the events.
-4. **Upload is doubly gated.** `flushTelemetry` no-ops unless `diagShare` is on
-   **and** an endpoint **and** a token are set. Batches of 500, minimum 30s
+4. **Upload is doubly gated**, on the two things that can actually differ: the
+   build must have a destination (`DIAG_AVAILABLE` — both `VITE_DIAG_ENDPOINT`
+   and `VITE_DIAG_TOKEN`, see `lib/diagconfig.ts`) **and** the user must have
+   turned `diagShare` on. Neither is a text field any more; the endpoint and
+   token used to be typed into Settings, which made sharing nominally opt-in and
+   practically impossible. Batches of 500, minimum 30s
    between flushes, 10s timeout, keepalive batches halved until under 60 KB.
    Progress is tracked by `flushedThrough`, so a failed upload simply retries
    the same events.
@@ -195,9 +197,16 @@ explicitly taps Copy and pastes it somewhere. It must never be fed into
 
 ## If you build a receiver
 
-No receiver exists. `diagEndpoint` is a free-form URL the user supplies, and the
-client posts `{app, v, device, firstSeen, sessions, activeDays, sentAt, events[]}`
-as JSON with `Authorization: Bearer <token>`. Four things to get right, three of
+No receiver exists. The client posts
+`{app, v, device, firstSeen, sessions, activeDays, sentAt, events[]}` as JSON
+with `Authorization: Bearer <token>` to whatever `VITE_DIAG_ENDPOINT` names.
+
+**A receiver that expects some other schema is worse than none.** `flushTelemetry`
+advances `flushedThrough` on any 2xx, so a receiver that answers 200 and drops
+the batch — because it was written for a different app's columns — loses those
+events permanently. Match the envelope above or answer non-2xx.
+
+Four things to get right, three of
 them learned the expensive way in a sibling project (`CorruptFun/viva-maya`,
 whose `supabase/migrations/0010`, `0015` and `0019` are worth reading before you
 write any of this):
@@ -228,8 +237,8 @@ write any of this):
 
 **Do not align this schema with viva-maya's.** They are different architectures
 solving different problems — that project posts single rows to its own Supabase
-with RLS as the trust boundary; this one posts a batched envelope to whatever
-endpoint the user names, with a bearer token as the whole trust model. Sharing a
+with RLS as the trust boundary; this one posts a batched envelope to a
+compiled-in endpoint, with a bearer token as the whole trust model. Sharing a
 table would mean giving Cardstock a backend, which decision 1 forbids. The
 lessons above transfer; the schema does not.
 

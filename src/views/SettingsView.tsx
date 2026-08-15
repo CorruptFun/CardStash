@@ -3,6 +3,7 @@ import { Modal, Toggle } from '../components/basics'
 import { DriveBackup } from '../components/DriveBackup'
 import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, type Insights } from '../lib/analytics'
+import { DIAG_AVAILABLE } from '../lib/diagconfig'
 import { clearAllData } from '../lib/db'
 import { seedDemoData } from '../lib/demo'
 import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
@@ -57,7 +58,6 @@ export function SettingsView() {
   const toast = useUi((s) => s.toast)
   const [showGeminiKey, setShowGeminiKey] = useState(false)
   const [showPokemonKey, setShowPokemonKey] = useState(false)
-  const [showDiagToken, setShowDiagToken] = useState(false)
   const [confirmErase, setConfirmErase] = useState(false)
   const [testingKey, setTestingKey] = useState(false)
   const [stats, setStats] = useState<Insights | null>(null)
@@ -300,12 +300,10 @@ export function SettingsView() {
       <section className="setsec">
         <h3>Diagnostics</h3>
         <p className="setsec__note">
-          A private log of counts and timings kept on this device — hit rate, how long an identification took, which
-          step missed, which screens you opened, crashes as a hash rather than a message. Cards that fail to scan are
-          logged as a hash too, so a card that defeats the scanner can be counted without recording what it was. It
-          also holds a random id for this install and how big your collection is as a range, so repeat visits count
-          once. Never card names, never search text, never your keys. Sharing is off by default; switch it on and the
-          same anonymous log is posted to our own server.
+          A private log of counts and timings kept on this device — never card names, never search text, never your
+          keys. Cards that fail to scan are recorded as a hash, so a card that defeats the scanner can be counted
+          without storing what it was, and your collection size travels as a range rather than a number. Sharing is off
+          by default.
         </p>
         <div className="diag__tiles">
           <div className="diag__tile">
@@ -335,6 +333,14 @@ export function SettingsView() {
             </div>
           )}
         </div>
+        {/* Everything below is maintainer tooling: latency percentiles, miss
+            reasons, the stage a scan died at, hashed repeat offenders, a screen
+            histogram. It is genuinely useful — it is how scanning gets fixed —
+            but a person cannot act on "ocr-miss 43%" or on a card called
+            `a3f21b09`, and at full tilt it ran to eight hundred pixels of table
+            in the middle of Settings. Folded away, not deleted. */}
+        <details className="diagmore">
+          <summary className="diagmore__head">Technical detail</summary>
         {stats && Object.keys(stats.scans.byEngine).length > 0 && (
           <div className="diag__table diag__table--engines">
             <div className="diag__row diag__row--head">
@@ -427,6 +433,7 @@ export function SettingsView() {
               ))}
           </div>
         )}
+        </details>
         {stats && stats.total === 0 && (
           <p className="diag__empty">Nothing logged yet — scan a card or run a search and the numbers show up here.</p>
         )}
@@ -447,66 +454,16 @@ export function SettingsView() {
             Clear
           </button>
         </div>
-        <div className="setrow">
-          <div className="setrow__text">
-            <span>Share diagnostics</span>
-            <em>Upload the anonymous log so scanning gets better — needs an ingest token</em>
+        {/* Only offered when the build has somewhere to post to. A switch that
+            cannot succeed is worse than no switch — see diagconfig.ts. */}
+        {DIAG_AVAILABLE && (
+          <div className="setrow">
+            <div className="setrow__text">
+              <span>Share diagnostics</span>
+              <em>Send the anonymous log so scanning gets better. Never card names, searches or keys.</em>
+            </div>
+            <Toggle on={config.diagShare} onChange={(diagShare) => config.set({ diagShare })} label="Share diagnostics" />
           </div>
-          <Toggle on={config.diagShare} onChange={(diagShare) => config.set({ diagShare })} label="Share diagnostics" />
-        </div>
-        {config.diagShare && (
-          <>
-            <div className="setfield">
-              <label htmlFor="diag-endpoint">
-                <span>Ingest endpoint</span>
-              </label>
-              <input
-                id="diag-endpoint"
-                className="input"
-                type="url"
-                inputMode="url"
-                value={config.diagEndpoint}
-                onChange={(e) => config.set({ diagEndpoint: e.target.value.trim() })}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-              />
-            </div>
-            <div className="setfield">
-              <label htmlFor="diag-token">
-                <span>Ingest token</span>
-                <KeyState set={!!config.diagToken} noun="Token" />
-              </label>
-              <div className="setfield__row">
-                <input
-                  id="diag-token"
-                  name="diagnostics-ingest-token"
-                  className={`input ${showDiagToken ? '' : 'input--masked'}`}
-                  type="text"
-                  value={config.diagToken}
-                  placeholder="paste the ingest token"
-                  onChange={(e) => config.set({ diagToken: e.target.value.trim() })}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  data-1p-ignore=""
-                  data-lpignore="true"
-                  data-bwignore=""
-                />
-                <button
-                  className="iconbtn"
-                  onClick={() => setShowDiagToken(!showDiagToken)}
-                  aria-label="Show token"
-                  aria-pressed={showDiagToken}
-                >
-                  <Icon name="eye" size={17} />
-                </button>
-              </div>
-              <em className="setfield__hint">Stored on this device like your API keys. Without a token nothing is ever sent.</em>
-            </div>
-          </>
         )}
       </section>
       <section className="setsec setsec--about">
@@ -550,6 +507,6 @@ export function SettingsView() {
   )
 }
 
-function KeyState({ set, noun = 'Key' }: { set: boolean; noun?: string }) {
-  return <span className={`setfield__state ${set ? 'setfield__state--on' : ''}`}>{set ? `${noun} set` : 'Not set'}</span>
+function KeyState({ set }: { set: boolean }) {
+  return <span className={`setfield__state ${set ? 'setfield__state--on' : ''}`}>{set ? 'Key set' : 'Not set'}</span>
 }

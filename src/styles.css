@@ -345,8 +345,28 @@ button {
   overflow: hidden;
   transition: color var(--t-1) var(--ease-out);
 }
+/* The label is the clipping boundary, not the tab. `overflow: hidden` on the
+   tab alone let a too-wide label stay full width and centred, so it bled over
+   its neighbours instead of being cut — at 320px "COLLECTION" needs 58px of a
+   53px cell and ran into "FRIENDS". */
+.nav__tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .nav__tab svg {
   transition: color var(--t-1) var(--ease-out);
+}
+/* Six tabs on the narrowest phones still shipping (320px). Losing the tracking
+   and a point of size is what makes the longest label fit whole, which beats
+   showing every user "COLLECTIO…". */
+@media (max-width: 359px) {
+  .nav__tab {
+    padding-left: 1px;
+    padding-right: 1px;
+    font-size: 8px;
+    letter-spacing: 0.01em;
+  }
 }
 .nav__tab--on {
   color: var(--paper);
@@ -1901,6 +1921,13 @@ button {
   border: 1px solid var(--signal-rule);
   background: var(--ink-100);
   box-shadow: 0 10px 30px #0a0908b0;
+  /* This card is ~310px of copy anchored to the BOTTOM, so on a short viewport
+     — a phone in landscape is 375px tall — it grew straight off the top and
+     took its own heading with it. Bounded to whatever is left above the nav,
+     with the overflow scrolling inside rather than out of the screen. */
+  max-height: calc(100% - var(--nav-h) - var(--sab) - var(--sat) - var(--s5));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .installtip__body {
   display: flex;
@@ -4419,10 +4446,23 @@ button {
   padding-top: var(--s3);
   border-top: 1px solid var(--rule);
 }
+/* Three money figures on one line, and `white-space: nowrap` on each means none
+   of them can give. At 320px the P&L column needed 88px of the 87.5px it got
+   and its percentage was cut off mid-digit. Wrapping is the honest answer for a
+   row of unbreakable numbers: below ~380px the third stat drops to its own
+   line rather than losing a character. */
 .ins-pnl__row {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: var(--s4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--s4);
+}
+.ins-pnl__stat:last-child {
+  margin-left: auto;
+}
+@media (max-width: 379px) {
+  .ins-pnl__stat:last-child {
+    margin-left: 0;
+  }
 }
 .ins-pnl__stat {
   display: flex;
@@ -4599,10 +4639,13 @@ button {
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
+/* Sized so the three standing tiles fit one row on a 375px phone — at
+   112px/20px they needed 376px of a 343px column and wrapped 2+1, which reads
+   as a layout accident rather than a set. */
 .diag__tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
-  gap: var(--s3) var(--s5);
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: var(--s3);
   padding: var(--s2) 0 var(--s4);
 }
 .diag__tile {
@@ -4696,6 +4739,39 @@ button {
 }
 .diag__row .num--quiet {
   color: var(--paper-3);
+}
+/* The maintainer tables, folded away by default. `list-style: none` plus the
+   webkit pseudo is what it takes to lose the native triangle on both engines. */
+.diagmore {
+  margin-top: var(--s3);
+}
+.diagmore__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.diagmore__head::-webkit-details-marker {
+  display: none;
+}
+.diagmore__head:before {
+  content: "▸";
+  font-size: 11px;
+  transition: transform var(--t-1) var(--ease-out);
+}
+.diagmore[open] .diagmore__head:before {
+  transform: rotate(90deg);
+}
+.diagmore__head:hover {
+  color: var(--paper-2);
 }
 .diag__empty {
   font-size: 13px;

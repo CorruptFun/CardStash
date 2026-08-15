@@ -214,9 +214,8 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `cloudAuto` (`true`) | Reserved for syncing after collection writes; nothing schedules it yet. |
 | `geminiKey` / `geminiModel` (`'gemini-flash-latest'`) | AI deck builder only. **Scanning never uses Gemini.** |
 | `pokemonKey` (`''`) | Optional pokemontcg.io key (higher rate limits). |
-| `diagShare` (`false`) / `diagEndpoint` / `diagToken` | Opt-in telemetry upload. Uploads require *both* the toggle and a token. |
+| `diagShare` (`false`) | Opt-in telemetry upload. The destination is compiled in (`lib/diagconfig.ts`), not stored — uploads need both this toggle and a build that configured `VITE_DIAG_ENDPOINT` + `VITE_DIAG_TOKEN`. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
-| `syncUrl` / `syncOn` (`false`) / `syncToken` / `syncCursor` / `syncAt` | Optional live sync. With `syncOn` false nothing in `sync.ts` runs. |
 
 **Session tokens are deliberately NOT here.** They live under their own
 `cardstock-cloud-session` localStorage key so they can never be swept into a

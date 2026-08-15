@@ -4,7 +4,6 @@ import { GAMES } from './games'
 import type { Game, ShareScope } from './types'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest'
-const DEFAULT_DIAG_ENDPOINT = 'https://telemetry.corrupt.solutions/ingest/telemetry'
 
 export interface Settings {
   gameFilter: Game | 'auto'
@@ -74,9 +73,12 @@ export interface Settings {
    */
   cloudScanModel: string
   pokemonKey: string
+  /**
+   * May the anonymous log be posted. WHERE it goes is compiled in
+   * (`diagconfig.ts`) rather than typed in — this is the only half of that
+   * question a user can answer, so it is the only half still stored.
+   */
   diagShare: boolean
-  diagEndpoint: string
-  diagToken: string
   /** Stable id this device shares binders/trades under — minted on first share. */
   profileId: string
   /** Display name on shared binders and trade proposals. */
@@ -141,8 +143,6 @@ export const useSettings = create<Settings>()(
       cloudScanModel: '',
       pokemonKey: '',
       diagShare: false,
-      diagEndpoint: DEFAULT_DIAG_ENDPOINT,
-      diagToken: '',
       profileId: '',
       profileName: '',
       profileNote: '',
