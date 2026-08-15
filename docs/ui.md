@@ -67,9 +67,9 @@ Token families:
 | Surfaces | `--ink-000` … `--ink-300`, `--rule`, `--surface`, `--bg-elev` | A warm near-black ladder; the app is dark-only (`color-scheme: dark`). |
 | Text | `--paper`, `--paper-2`, `--paper-3` → `--text`, `--text-2`, `--text-3` | |
 | Signal | `--silver` → `--signal`, `--silver-deep` → `--signal-solid`, `--signal-fill`/`--signal-rule`, `--up`/`--down`/`--warn` + their fills | The accent is **metallic, not chromatic** — a collectible-card app should read like foil on card stock, not like a brand colour. Works because the surface ladder is warm: cool silver on warm near-black reads as metal catching light. Gains green, losses red, warnings amber. |
-| Foil (chrome) | `--foil` | Silver gradient for the few hero moments (the welcome mark, the nav indicator). Distinct from `--holo` below — see the note under this table. |
+| Foil (chrome) | `--foil` | Silver gradient for the few hero moments (the welcome mark, the nav indicator). Its bright bands carry a few points of violet/rose/aqua, because real silver holo stock diffracts — neutral highlights read as brushed aluminium. Distinct from `--holo` below — see the note under this table. |
 | Per-game | `--game-mtg`, `--game-pkm`, `--game-ygo`, `--game-rft`, `--game-lor`, `--game-op`, `--game-swu`, `--game-dgm`, `--game-gcg` | One hue per game, used for badges and accents. **A new game needs one.** |
-| Foil | `--holo`, `--holo-spec` | The rainbow gradient + specular sweep used for foil treatments. |
+| Foil | `--holo`, `--holo-spec`, `--holo-grain`, `--holo-veil`, `--glare` | The rainbow gradient + specular sweep used for foil treatments, plus the diffraction grating and the spectral veil — see "The holographic glare" below. |
 | Rhythm | `--s1` … `--s12` (4→48px), `--r-0/1/2` radii | |
 | Motion | `--t-1/2/3` (0.12/0.16/0.22s), `--ease-out`, `--ease-spring` | |
 | Chrome | `--nav-h` (58px), `--sat`/`--sab` safe-area insets, `--lift-1/2`, `--sheen` | |
@@ -102,8 +102,12 @@ Two layers, and both are needed:
 
 | Layer | What | Why |
 | ----- | ---- | --- |
-| `::before` | standing `--holo` wash, `soft-light`, **not animated** | what makes it look like foil at rest. Static because animating `background-position` is a repaint per card per frame — and because on a real card the foil pattern is fixed and the *light* moves |
+| `::before` | standing `--holo` wash with `--holo-grain` blended over it on `soft-light`, **not animated** | what makes it look like foil at rest. The grain is the diffraction grating — real holo stock is a physically ruled pattern, and a smooth gradient alone reads as painted metal however saturated it gets. Static because animating `background-position` is a repaint per card per frame — and because on a real card the foil pattern is fixed and the *light* moves |
 | `::after` | `--glare` band sweeping on `transform` | the glint itself; composited, so it's cheap |
+
+The grain's pitch is in **px, not %**, on purpose: it is a property of the
+stock rather than of the element, so a 54px mark and a full-bleed card show the
+same ruling instead of a scaled version of it.
 
 The sweep crosses in the first ~18% of its cycle and waits off-screen for the
 rest. A continuous shimmer is the universal language for "not loaded yet",
@@ -115,6 +119,24 @@ so offscreen cells (and their pseudo-elements) don't render at all. If that
 rule goes, this becomes a per-card animation across the entire grid.
 
 `prefers-reduced-motion` keeps the foil colouring and drops all movement.
+
+**`.foilglare` is the chrome version, and it is allowed to do more.** It carries
+the glare plus a third layer a card grid can't afford: `--holo-veil` (a spectral
+wash on `overlay`) with `--holo-grain` over it, drifting slowly on a 14s cycle.
+That drift is what reads as *holographic* rather than *silver* — a still surface
+under a moving colour field is what the eye interprets as a tilt, even though
+nothing tilted. It is affordable because exactly one 54px element on the welcome
+screen uses it; the same layer multiplied across a 900-card grid is the repaint
+storm the card rules above exist to avoid. `overlay` (not `screen`) is what lets
+the veil cover the plaque's dark glyph without fogging it, and `isolation:
+isolate` on the parent keeps every blend resolving against the plaque instead of
+punching through to the page.
+
+`.holotext` is the type version: `--holo-spec` clipped over `--holo`, both riding
+`holoshift`, so a highlight crosses the letterforms rather than the whole word
+pulsing. The `drop-shadow` on it is colour bleeding onto the surface behind — it
+is small, and it is the difference between letters printed in foil and letters
+filled with a gradient.
 
 Charts that stroke SVG or canvas can't read CSS variables, so `InsightsPanel`,
 `DecksView` and `CardSheet` each mirror `--silver` as a literal with a comment

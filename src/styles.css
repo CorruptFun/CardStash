@@ -63,16 +63,56 @@
      a foil" and is data, so it must stay rainbow; this is chrome, and it says
      "collectible" without claiming anything about the card. The alternating
      bright/dim stops are what sell metal — a flat grey gradient reads as a
-     disabled surface. */
+     disabled surface.
+     The bright bands are TINTED rather than neutral — violet, rose, aqua in
+     turn — because real silver holo stock still diffracts: the highlights on
+     it are never white, they pick up a hue and the shadows stay cool. The
+     tints are a few points of saturation, far below `--holo`'s rainbow, so
+     the surface still reads silver; remove them and it goes back to looking
+     like brushed aluminium. */
   --foil: linear-gradient(
     112deg,
-    #eef3fa 0%,
-    #a9b6c8 15%,
-    #e2e9f3 30%,
-    #8d9bb0 46%,
-    #e8eff7 62%,
-    #9fadc0 80%,
-    #eef3fa 100%
+    #f1f6fc 0%,
+    #b3c1d6 12%,
+    #e6e2f7 24%,
+    #93a2bb 37%,
+    #f6ecf1 50%,
+    #8fa1b8 63%,
+    #e3f1f1 76%,
+    #a2b0c3 88%,
+    #f1f6fc 100%
+  );
+  /* The diffraction grating. Holographic foil is physically a fine ruled
+     pattern, and that structure is what a smooth gradient can never fake — a
+     gradient alone reads as painted metal, however saturated. Laid over a
+     foil surface at a tight pitch it registers as sheen rather than as
+     stripes, and it is what makes a still image look like it would flash if
+     you tilted it.
+
+     Pitch is in px, deliberately: it is a property of the STOCK, not of the
+     element, so a 54px mark and a whole card should show the same grating
+     rather than a scaled version of it. */
+  --holo-grain: repeating-linear-gradient(
+    98deg,
+    rgba(255, 255, 255, 0) 0px,
+    rgba(120, 226, 255, 0.16) 1.5px,
+    rgba(255, 255, 255, 0.22) 2.5px,
+    rgba(255, 168, 240, 0.16) 3.5px,
+    rgba(255, 255, 255, 0) 6px
+  );
+  /* The spectral wash for silver chrome — the rainbow `--foil` is not allowed
+     to be, applied as a blended veil instead of as the surface itself. Over
+     silver on `overlay` it deepens into colour; over the near-black glyph
+     sitting on that silver it stays near-black, which is why it can cover a
+     whole plaque including its mark. */
+  --holo-veil: linear-gradient(
+    76deg,
+    rgba(90, 210, 255, 0.5) 0%,
+    rgba(150, 130, 255, 0.4) 20%,
+    rgba(255, 140, 220, 0.46) 38%,
+    rgba(255, 214, 130, 0.4) 56%,
+    rgba(120, 235, 190, 0.46) 74%,
+    rgba(90, 210, 255, 0.5) 100%
   );
   /* The glare — a narrow specular band, for sweeping across a foil surface.
      The cyan and magenta shoulders either side of the white core are the
@@ -80,18 +120,22 @@
      highlight, and a purely white band reads as glass or a loading shimmer
      instead.
 
-     The stops are TIGHT (44%→56%), and that is tuning rather than taste: the
+     The stops are TIGHT (43%→57%), and that is tuning rather than taste: the
      elements carrying this are deliberately oversized so the diagonal clears
      their corners, which multiplies the apparent width. A band that looks
      reasonable in the abstract washed out half a card once it was painted
-     onto a 220%-wide pseudo-element. */
+     onto a 220%-wide pseudo-element. The colour either side of the core is
+     what got stronger, not the core itself — a brighter white band reads as
+     glass, a wider spectral fringe reads as diffraction. */
   --glare: linear-gradient(
     105deg,
-    transparent 44%,
-    rgba(126, 231, 255, 0.13) 47.5%,
-    rgba(255, 255, 255, 0.4) 50%,
-    rgba(255, 176, 243, 0.15) 52.5%,
-    transparent 56%
+    transparent 43%,
+    rgba(150, 130, 255, 0.1) 45.5%,
+    rgba(126, 231, 255, 0.22) 47.5%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 176, 243, 0.24) 52.5%,
+    rgba(255, 214, 130, 0.12) 54.5%,
+    transparent 57%
   );
   --font-ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -383,8 +427,15 @@ button {
   position: relative;
   overflow: hidden;
   color: #0d0b09;
-  background: var(--holo);
-  background-size: 240% 100%;
+  /* Grating over rainbow, on `soft-light` so it textures the colour rather
+     than greying it. See `--holo-grain`. */
+  background:
+    var(--holo-grain),
+    var(--holo);
+  background-size:
+    auto,
+    240% 100%;
+  background-blend-mode: soft-light, normal;
   animation: holoshift 9s linear infinite;
   font-weight: 620;
   border-color: transparent;
@@ -636,11 +687,24 @@ button {
   letter-spacing: -0.01em;
   text-align: right;
 }
+/* Foil text. Two clipped layers rather than one: the rainbow underneath, and
+   a specular band travelling over it, both riding the same `holoshift` so a
+   highlight crosses the letterforms instead of the whole word pulsing. The
+   drop-shadow is the colour bleeding onto the surface behind it — small, but
+   it is the difference between letters PRINTED in foil and letters filled
+   with a gradient. */
 .holotext {
-  background: var(--holo);
+  background:
+    var(--holo-spec),
+    var(--holo);
+  background-size:
+    260% 100%,
+    240% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  animation: holoshift 9s linear infinite;
+  filter: drop-shadow(0 0 5px rgba(150, 190, 255, 0.16));
 }
 .toasts {
   position: fixed;
@@ -941,10 +1005,19 @@ button {
  */
 .cardimg--foil:before {
   inset: 0;
-  background: var(--holo);
-  background-size: 190% 190%;
-  background-position: 30% 40%;
-  opacity: 0.17;
+  /* The grating rides on top of the rainbow inside the same layer, so the
+     whole thing still costs one pseudo-element and no animation. */
+  background:
+    var(--holo-grain),
+    var(--holo);
+  background-size:
+    auto,
+    190% 190%;
+  background-position:
+    0 0,
+    30% 40%;
+  background-blend-mode: soft-light, normal;
+  opacity: 0.2;
   mix-blend-mode: soft-light;
 }
 /* Wider than the card so the diagonal band clears both corners; the parent
@@ -976,14 +1049,51 @@ button {
 }
 
 /*
- * The same glare for chrome (the welcome mark, holo buttons). Separate class
- * because those surfaces are already a gradient and want the band without the
- * rainbow wash underneath.
+ * The same glare for chrome (the welcome mark, holo buttons), plus the two
+ * things a card grid cannot afford but a single 54px plaque can: the grating,
+ * and a spectral veil that drifts.
+ *
+ * Three layers, and each is doing a different job:
+ *
+ * - `--holo-veil` on `overlay`, DRIFTING slowly. This is the one that reads as
+ *   "holographic" rather than "silver": a still silver surface with a moving
+ *   colour field over it is what your eye reads as a tilt, even though nothing
+ *   has tilted. It is slow (14s) and it never resets — a shimmer with a visible
+ *   loop point reads as a loading state.
+ * - `--holo-grain` on top of it, the diffraction structure.
+ * - The specular sweep (`:after`), unchanged — a quick glint every 7s.
+ *
+ * The veil covers the plaque's glyph as well as its background, which is
+ * correct: on a stamped foil card the mark is the same foil as the field
+ * around it. `overlay` is what makes that safe — a near-black glyph stays
+ * near-black under it, where `screen` would fog it out.
+ *
+ * `isolation: isolate` is load-bearing for all three: it keeps the blend modes
+ * resolving against the plaque instead of punching through to the page.
  */
 .foilglare {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+}
+.foilglare:before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  background:
+    var(--holo-grain),
+    var(--holo-veil);
+  background-size:
+    auto,
+    240% 240%;
+  /* `overlay` and not `soft-light` for the grating here, unlike on cards: this
+     is 54px of surface, and the softer blend left the ruling invisible at that
+     size. On a card the same grain has 40× the area to register in. */
+  background-blend-mode: overlay, normal;
+  mix-blend-mode: overlay;
+  opacity: 0.6;
+  animation: holodrift 14s ease-in-out infinite;
+  pointer-events: none;
 }
 .foilglare:after {
   content: "";
@@ -994,13 +1104,30 @@ button {
   animation: glaresweep 7s ease-in-out infinite;
   pointer-events: none;
 }
+/* Only the veil moves; the grating stays put, for the same reason the card
+   wash does — the stock is fixed and the light is what travels. */
+@keyframes holodrift {
+  0%,
+  to {
+    background-position:
+      0 0,
+      14% 26%;
+  }
+  50% {
+    background-position:
+      0 0,
+      86% 74%;
+  }
+}
 
 /* A glare is decoration; someone who asked for less motion gets the foil
    colouring and none of the movement. */
 @media (prefers-reduced-motion: reduce) {
   .cardimg--foil:before,
   .cardimg--foil:after,
-  .foilglare:after {
+  .foilglare:before,
+  .foilglare:after,
+  .holotext {
     animation: none;
   }
   .cardimg--foil:after,
@@ -5589,7 +5716,14 @@ button {
   border-radius: var(--r-2);
   background: var(--foil);
   color: var(--ink-000);
-  box-shadow: var(--lift-1);
+  /* A bright top rim and a dark bottom one: foil is stamped INTO stock, so it
+     sits slightly proud of the surface and its edges catch light differently.
+     Without this the plaque is a gradient-filled rectangle, and no amount of
+     shimmer on top of it fixes that. */
+  box-shadow:
+    var(--lift-1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(28, 34, 46, 0.28);
 }
 .welcome__title {
   margin: var(--s2) 0 0;
