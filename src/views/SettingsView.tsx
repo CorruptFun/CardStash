@@ -38,6 +38,7 @@ const SCREEN_LABEL: Record<string, string> = {
   builder: 'AI builder',
   friends: 'Friends',
   trades: 'Trades',
+  orders: 'Purchases',
   ingest: 'Shared link',
   settings: 'Settings',
 }

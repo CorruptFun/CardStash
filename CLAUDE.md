@@ -2,11 +2,11 @@
 
 Vite + React 19 + TypeScript PWA. Local-first: all user data in IndexedDB via
 Dexie (`src/lib/db.ts`); settings in localStorage via zustand persist
-(`src/lib/settings.ts`). The deployed app is a static bundle with **three
+(`src/lib/settings.ts`). The deployed app is a static bundle with **four
 opt-in cloud features** — Drive backup, the encrypted cloud vault, hosted
-social, and paid trades — all dormant until switched on. Signed out, the app
-must always work fully: scanning, collection, decks and link sharing never
-touch a server.
+social, and paid trades — all dormant until switched on, and paid trades is
+switched **off** in the deployed build. Signed out, the app must always work
+fully: scanning, collection, decks and link sharing never touch a server.
 
 ## Where the full documentation is
 
@@ -234,9 +234,17 @@ Four things that are load-bearing rather than incidental:
   own count and price with its own clamp beside `tradeCount()`, or every listing
   silently becomes a globally enumerable barter offer.
 
-Dormant without `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`, exactly as Drive
-is without a client id. `STRIPE_WEBHOOK_SECRET` takes a **comma-separated list**
-— a Connect platform needs two endpoints (platform scope for checkout/charge,
+**It ships OFF, on purpose, and there are two switches.** `VITE_MARKETPLACE`
+hides the UI; `MARKETPLACE_ENABLED` on the edge function refuses to open an
+order or start onboarding. Only the second is a real defence (decision 2a); the
+first stops us offering a purchase the server would refuse. Turn both on,
+**server first**. With it off, `/onboard` and `/checkout` are refused while
+shipping, confirming, refunding, the webhook and the sweep stay live — a kill
+switch stops new business without stranding money already in flight.
+
+Also dormant without `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`, as Drive is
+without a client id. `STRIPE_WEBHOOK_SECRET` takes a **comma-separated list** —
+a Connect platform needs two endpoints (platform scope for checkout/charge,
 connected-accounts scope for `account.updated`) and each has its own secret.
 
 ## Sports cards have no catalog

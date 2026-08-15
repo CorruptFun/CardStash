@@ -458,7 +458,7 @@ export function FriendsView() {
           </button>
         </div>
         <p className="setsec__note">
-          Takes a CardStash share link, a saved <code>.json</code> binder file, or a hosted file’s URL (that last one
+          Takes a Cardstock share link, a saved <code>.json</code> binder file, or a hosted file’s URL (that last one
           can be refreshed anytime). Works with no account at all.
         </p>
         <input

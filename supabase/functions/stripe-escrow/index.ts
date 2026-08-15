@@ -71,6 +71,32 @@ const WEBHOOK_SECRETS = (Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '')
   .filter(Boolean)
 const STRIPE_API = Deno.env.get('STRIPE_API_BASE') ?? 'https://api.stripe.com'
 
+/**
+ * THE OFF SWITCH THAT ACTUALLY COUNTS. Buying and selling are dark unless this
+ * is explicitly `on`.
+ *
+ * The client has a `VITE_MARKETPLACE` flag too, but that one only hides
+ * buttons, and a constant in a static bundle is one devtools tab from being
+ * true (decision 2a). This is the half that stops a real card being charged:
+ * with it off, no order can be opened, no Connect account created and no
+ * payout released, however the request was constructed.
+ *
+ * WHAT STAYS LIVE WHEN IT IS OFF: the webhook and the sweep. That is deliberate
+ * and is what makes this a kill switch rather than a trapdoor — turning the
+ * marketplace off stops NEW business while letting business already in flight
+ * settle. An order that is paid for when the switch flips must still be
+ * shippable, confirmable and refundable; stranding someone's money because a
+ * flag changed would be the worst possible reading of "off".
+ */
+const MARKETPLACE_ON = (Deno.env.get('MARKETPLACE_ENABLED') ?? '') === 'on'
+
+/**
+ * Routes that CREATE new commitments. Everything else -- reading an address,
+ * marking shipped, confirming, the webhook -- keeps working so an in-flight
+ * order can reach its end.
+ */
+const OPENS_NEW_BUSINESS = new Set(['onboard', 'checkout'])
+
 /** Where Stripe sends people back to. Origin only — routes are hash-based. */
 const APP_URL = (Deno.env.get('APP_URL') ?? 'https://cardstock.corrupt.solutions').replace(/\/+$/, '')
 
@@ -537,6 +563,10 @@ Deno.serve(async (req: Request) => {
     } catch {
       return json({ error: 'bad request' }, 400)
     }
+  }
+
+  if (!MARKETPLACE_ON && OPENS_NEW_BUSINESS.has(route)) {
+    return json({ error: 'marketplace_off' }, 503)
   }
 
   switch (route) {

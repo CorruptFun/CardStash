@@ -526,10 +526,27 @@ this before real money moves** (marketplace facilitator sales tax, 1099-K).
 
 **Consequences.**
 
-- **A fourth opt-in cloud feature, dormant by default.** No `STRIPE_*` secrets,
-  no marketplace — exactly as Drive is dormant without a client id. Signed out,
-  nothing changes: scanning, collection, decks and link sharing still never
-  touch a server.
+- **A fourth opt-in cloud feature, and it ships OFF.** Two switches, both
+  currently off: `VITE_MARKETPLACE` hides the UI, and `MARKETPLACE_ENABLED` on
+  the edge function refuses to open an order or start onboarding. Only the
+  second is a real defence — a constant in a static bundle is one devtools tab
+  from being true — but shipping a Buy button the server would refuse is its own
+  bug, so both exist and both must be turned on, **server first**.
+
+  Being dormant *by accident* was the state before those flags, and it was not
+  good enough: nothing stopped a purchase except that no seller could finish
+  Connect onboarding, so the day Connect is enabled for any reason, buying would
+  quietly go live. A switch that unrelated progress can flip is not a switch.
+
+  **The kill switch stops new business and lets existing business finish.** With
+  it off, `/onboard` and `/checkout` refuse, while shipping, confirming,
+  refunding, the webhook and the sweep all keep working. An order that was paid
+  for when the switch flipped must still reach an end; stranding someone's money
+  because a flag changed would be the worst possible reading of "off".
+
+  In-person trades are untouched by any of this, always. Signed out, nothing
+  changes: scanning, collection, decks and link sharing still never touch a
+  server.
 - **The state graph lives in `advance_order()` and nowhere else.** Mirroring it
   into `logic.ts` for easier node testing was tempting and rejected: two
   authorities on a money state machine disagree eventually, and the loser is

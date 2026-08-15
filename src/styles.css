@@ -2687,11 +2687,17 @@ button {
 .searchbox input::-webkit-search-cancel-button {
   display: none;
 }
+/* The filter shares a NOWRAP row with a sort select and two buttons, all of
+   them fixed-width. At 320px those add up to more than the row, and a `flex: 1;
+   min-width: 0` filter is the only thing that can give — it collapsed to 4px,
+   which is a search field nobody can use on the smallest phones still shipping.
+   A basis wide enough to type in makes the row wrap instead: the filter takes
+   the first line to itself and the controls drop below it. */
 .searchbox--slim {
   height: 38px;
   margin-bottom: 0;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 150px;
+  min-width: 150px;
 }
 .colltools .select--slim,
 .colltools .iconbtn,
@@ -2796,6 +2802,7 @@ button {
 }
 .colltools {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   padding-bottom: var(--s3);
@@ -4459,10 +4466,13 @@ button {
   flex-direction: column;
   gap: var(--s1);
 }
+/* Height is reserved whether or not the scrub readout has anything in it, so
+   touching the chart does not shove it up the screen. */
 .ins-chart__readout {
   display: flex;
   align-items: baseline;
   gap: 9px;
+  min-height: 26px;
 }
 .ins-chart__val {
   font-family: var(--font-num);
@@ -4511,16 +4521,8 @@ button {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.ins-delta {
-  font-family: var(--font-num);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.ins-chart__readout .ins-delta {
-  margin-left: auto;
-}
+/* Only the colour modifiers survive: the base's type styling was a duplicate of
+   `.ins-mover__pct`, the one element that still carries them. */
 .ins-delta--up {
   color: var(--up);
 }
@@ -4889,6 +4891,7 @@ button {
   white-space: nowrap;
 }
 .seedchip__x {
+  position: relative;
   display: grid;
   place-items: center;
   width: 22px;
@@ -4897,6 +4900,11 @@ button {
   color: var(--paper-2);
   flex-shrink: 0;
   transition: background var(--t-1) var(--ease-out);
+}
+.seedchip__x:before {
+  content: "";
+  position: absolute;
+  inset: -6px;
 }
 .seedchip__x:hover {
   background: var(--ink-150);
@@ -5096,6 +5104,10 @@ button {
   background: var(--down-fill);
   color: var(--down);
 }
+.statuspill--completed {
+  border-color: rgba(76, 195, 138, 0.25);
+  color: var(--up);
+}
 
 /* Order states. No new colour tokens: an escrow is a trade with money in it, so
    it reuses the same three fills the trade pills already use -- warn while
@@ -5189,10 +5201,6 @@ button {
    occasional alternative, and the visual weight should say so. */
 .addbar__buy {
   white-space: nowrap;
-}
-.statuspill--completed {
-  border-color: rgba(76, 195, 138, 0.25);
-  color: var(--up);
 }
 
 .shareacts {
@@ -5665,6 +5673,7 @@ button {
   color: var(--paper);
 }
 .wantchip__x {
+  position: relative;
   display: grid;
   place-items: center;
   width: 17px;
@@ -5672,6 +5681,15 @@ button {
   border-radius: 50%;
   background: var(--ink-150);
   color: var(--paper-3);
+}
+/* The dot stays 17px because the chip is small and a bigger one would own the
+   chip — but a 17px target is well under a fingertip. The same invisible
+   expansion `.searchbox .iconbtn` uses gives it a ~33px hit area without
+   moving anything. */
+.wantchip__x:before {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 .wantchip__x:active {
   color: var(--paper);
@@ -5689,6 +5707,13 @@ button {
   background: rgba(29, 25, 50, 0.92);
   border: 1px solid var(--signal-rule);
   color: var(--signal);
+}
+/* Sits on top of a card image in a tight grid: it has to stay 20px visually,
+   so the target is widened invisibly instead. */
+.cardcell__want:before {
+  content: "";
+  position: absolute;
+  inset: -7px;
 }
 
 .friendhead__match {

@@ -93,7 +93,7 @@ export function Welcome({ onDone }: { onDone: () => void }) {
     })()
 
   return (
-    <div className="welcome" role="dialog" aria-modal="true" aria-label="Set up CardStash">
+    <div className="welcome" role="dialog" aria-modal="true" aria-label="Set up Cardstock">
       <div className="welcome__inner">
         <div className="welcome__mark foilglare" aria-hidden="true">
           <Icon name="cards" size={30} />

@@ -112,7 +112,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
         <div className="setrow">
           <div className="setrow__text">
             <span>Or use Google</span>
-            <em>Faster, but if you use CardStash from your Home Screen, the emailed code is more reliable</em>
+            <em>Faster, but if you use Cardstock from your Home Screen, the emailed code is more reliable</em>
           </div>
           <button className="btn btn--ghost btn--sm" disabled={busy} onClick={google}>
             Google

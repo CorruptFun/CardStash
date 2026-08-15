@@ -41,15 +41,20 @@ export function InsightsPanel({
   }
   return (
     <section className="ins">
+      {/* No delta chip here, and none in the chart readout below. The screen
+          header already carries "30d ▲ $x (y%)" a few pixels above this panel,
+          and it is the canonical one — repeating it twice more made the same
+          three figures appear three times inside one viewport. What this panel
+          adds that the header cannot is the SHAPE of the line, cost basis, and
+          which cards moved. */}
       <button className="ins__head" onClick={toggle} aria-expanded={open}>
         <span className="ins__title">Insights</span>
         <span className="ins__sub">{WINDOW_DAYS} days</span>
-        {!open && window.ready && <DeltaChip delta={window.delta} pct={window.deltaPct} />}
         <Icon name="chevronDown" size={17} className={`ins__chev ${open ? 'ins__chev--open' : ''}`} />
       </button>
       {open && (
         <div className="ins__body">
-          {window.ready && <ValueChart series={window.series} delta={window.delta} deltaPct={window.deltaPct} />}
+          {window.ready && <ValueChart series={window.series} />}
           {hasCostData && <PnlRow cost={basis} />}
           {(gainers.length > 0 || losers.length > 0) && (
             <div className="ins-movers">
@@ -93,15 +98,7 @@ function PnlRow({ cost }: { cost: CostBasis }) {
   )
 }
 
-function ValueChart({
-  series,
-  delta,
-  deltaPct,
-}: {
-  series: { date: string; value: number }[]
-  delta: number
-  deltaPct: number
-}) {
+function ValueChart({ series }: { series: { date: string; value: number }[] }) {
   const [hover, setHover] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const geom = useMemo(() => {
@@ -129,10 +126,17 @@ function ValueChart({
   }
   return (
     <div className="ins-chart">
-      <div className="ins-chart__readout">
-        <span className="ins-chart__val">{money(shown.value)}</span>
-        <span className="ins-chart__date">{shortDate(shown.date)}</span>
-        <DeltaChip delta={delta} pct={deltaPct} />
+      {/* A scrub readout, not a headline: it says what the line was worth on
+          the day under your finger. Idle it stays empty rather than restating
+          today's total, which the header already shows — the height is held by
+          CSS so nothing jumps when you touch the chart. */}
+      <div className="ins-chart__readout" aria-live="off">
+        {hover != null && (
+          <>
+            <span className="ins-chart__val">{money(shown.value)}</span>
+            <span className="ins-chart__date">{shortDate(shown.date)}</span>
+          </>
+        )}
       </div>
       <svg
         ref={svgRef}
@@ -192,14 +196,6 @@ function MoversGroup({ label, rows, onPick }: { label: string; rows: Mover[]; on
         </button>
       ))}
     </div>
-  )
-}
-
-export function DeltaChip({ delta, pct }: { delta: number; pct: number }) {
-  return (
-    <span className={`ins-delta ${delta >= 0 ? 'ins-delta--up' : 'ins-delta--down'}`}>
-      {delta >= 0 ? '▲' : '▼'} {money(Math.abs(delta))} ({Math.abs(pct).toFixed(1)}%)
-    </span>
   )
 }
 

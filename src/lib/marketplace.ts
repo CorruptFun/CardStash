@@ -180,24 +180,47 @@ const MESSAGES: Record<string, string> = {
   not_shippable: 'There is nothing to post on this order',
   no_address: 'No address on this order yet',
   not_configured: 'Buying is not switched on for this build',
+  marketplace_off: 'Buying and selling are not switched on yet',
   sign_in_required: 'Sign in first',
 }
 
 const humanize = (code: string): string =>
   MESSAGES[code] ?? (code && code.length < 80 && !code.includes(' ') ? 'That did not work' : code || 'That did not work')
 
+/**
+ * THE OFF SWITCH. Buying and selling are dark unless a build opts in with
+ * `VITE_MARKETPLACE=on`, and the deployment does not.
+ *
+ * Being dormant by accident is not the same as being off. Before this flag, the
+ * only thing stopping a purchase was that no seller could finish Stripe Connect
+ * onboarding — so the day Connect is switched on to experiment with, buying
+ * would quietly go live for everyone. A switch that can be flipped by
+ * *unrelated* progress is not a switch.
+ *
+ * THIS IS THE COSMETIC HALF. It hides the UI, which is all a client can
+ * honestly do — a constant in a static bundle is one devtools tab from being
+ * true (decision 2a). The half that matters is `MARKETPLACE_ENABLED` on the
+ * edge function, which refuses to open an order or start onboarding at all.
+ * Both are off; either one alone would be a mistake, and the server one is the
+ * one that stops a real card being charged.
+ *
+ * In-person trades are untouched by this and always have been: they are local,
+ * serverless, and share no code with any of it.
+ */
+const MARKETPLACE_ON = ((import.meta.env ?? {}).VITE_MARKETPLACE ?? '') === 'on'
+
 /** Is the marketplace even reachable in this build? */
 export function marketAvailable(): boolean {
-  return CLOUD_AVAILABLE
+  return MARKETPLACE_ON && CLOUD_AVAILABLE
 }
 
 /** Can this device do anything with money right now? */
 export function marketReady(): boolean {
-  return CLOUD_AVAILABLE && isSignedIn()
+  return marketAvailable() && isSignedIn()
 }
 
 async function call<T>(route: string, body: Record<string, unknown> = {}): Promise<T> {
-  if (!CLOUD_AVAILABLE) throw new CloudError('Buying is not switched on for this build')
+  if (!marketAvailable()) throw new CloudError('Buying and selling are not switched on yet')
   const token = await freshToken()
   const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-escrow/${route}`, {
     method: 'POST',
@@ -217,7 +240,7 @@ async function call<T>(route: string, body: Record<string, unknown> = {}): Promi
  * thing that can be right about where an order has got to.
  */
 async function rest(path: string, init: RequestInit = {}): Promise<unknown> {
-  if (!CLOUD_AVAILABLE) throw new CloudError('Buying is not switched on for this build')
+  if (!marketAvailable()) throw new CloudError('Buying and selling are not switched on yet')
   const token = await freshToken()
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
@@ -254,17 +277,36 @@ export async function startSellerOnboarding(): Promise<string> {
   return url
 }
 
-/** Has this user finished verification and can they actually be paid? */
-export async function sellerReady(): Promise<boolean> {
-  if (!marketReady()) return false
+/**
+ * Where this user has got to as a seller.
+ *
+ * Three answers, not two, because the UI says something different for each and
+ * a boolean forced two of them to share a sentence:
+ *
+ *   `ready`    — verified; they can be paid.
+ *   `started`  — an account exists but Stripe still wants something.
+ *   `none`     — they have never begun.
+ *   `unknown`  — we could not ask: no Stripe secrets on the deployment, an
+ *                expired session, a flaky connection. NOT the same as "no".
+ *
+ * The old boolean collapsed `none`, `started` and `unknown` into `false`, so a
+ * signed-in user on a dormant build — which is every user today — was told
+ * "Stripe still needs something from you" about an account they had never
+ * created. `unknown` is what lets the panel stay silent instead.
+ */
+export type SellerState = 'ready' | 'started' | 'none' | 'unknown'
+
+export async function sellerState(): Promise<SellerState> {
+  if (!marketReady()) return 'unknown'
   try {
-    const { ready } = await call<{ ready: boolean }>('account')
-    return ready === true
+    const { ready, exists } = await call<{ ready: boolean; exists?: boolean }>('account')
+    if (ready === true) return 'ready'
+    // `exists` is what the function reports when it has an account id on file.
+    // An older deployment may not send it; absent, "not ready" can only safely
+    // mean "not begun", which understates rather than accuses.
+    return exists === true ? 'started' : 'none'
   } catch {
-    // Not being able to answer is not the same as "no", but the only thing the
-    // UI does with a false is hide a button, and hiding it on a flaky
-    // connection is better than a Sell button that errors when tapped.
-    return false
+    return 'unknown'
   }
 }
 
