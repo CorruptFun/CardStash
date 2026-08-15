@@ -282,6 +282,14 @@ it) and always written on the way **out** — a photo the user took of their own
 card exists nowhere else in the world, so omitting it would make "restore"
 quietly lossy.
 
+`exportBackup({ imageBudget })` caps the imagery a backup carries, and **only
+the vault passes one** (`VAULT_IMAGE_BUDGET`, ~6 MB): it is a single text
+column rewritten on every sync, where the JSON export and the Drive backup are
+real file writes. Patches past the budget are omitted **whole**, newest kept —
+never stripped of their image. `mergeBackups` is a union, so an omitted row
+costs nothing, but an image-less row could win on `updatedAt` and delete a
+photo that existed nowhere else. Text-only patches are free and always travel.
+
 `importBackup()` runs everything through `sanitizeBackup()` first and then
 `bulkPut`s into one transaction (a merge, not a replace). Sanitization is
 defensive by construction — a backup file is untrusted input:

@@ -879,7 +879,57 @@ export interface Backup {
   patches?: CardPatch[]
 }
 
-export async function exportBackup(): Promise<Backup> {
+export interface ExportOptions {
+  /**
+   * Cap the total characters of patch imagery this backup may carry.
+   *
+   * Only the **vault** passes one. A card picture is by far the heaviest thing
+   * in a backup (~57 KB of base64 each), and the vault is a single Postgres
+   * text column written on every sync — a user who has fixed a few hundred
+   * cards would otherwise turn their automatic backup into a multi-megabyte
+   * round trip and eventually into one that simply fails, which is the exact
+   * failure decision 15b exists to prevent. The JSON export and the Drive
+   * backup are real file writes and pass no budget, so the complete set always
+   * has somewhere to live.
+   */
+  imageBudget?: number
+}
+
+export interface ExportStats {
+  /** Patches left out because the image budget ran out. */
+  patchesOmitted: number
+}
+
+/**
+ * Which patches fit the budget, newest first.
+ *
+ * Rows past the budget are omitted ENTIRELY rather than stripped of their
+ * image, and the difference is data loss. `mergeBackups` is a union: a row
+ * absent from one side is kept from the other, so an omitted patch costs
+ * nothing. A row that arrived image-less could WIN on `updatedAt` and delete a
+ * photo that only existed on the receiving device. Never send a gutted patch.
+ */
+export function patchesWithinBudget(rows: CardPatch[], budget: number): { kept: CardPatch[]; omitted: number } {
+  const ordered = [...rows].sort((a, b) => b.updatedAt - a.updatedAt)
+  const kept: CardPatch[] = []
+  let spent = 0
+  let omitted = 0
+  for (const row of ordered) {
+    const cost = row.image?.length ?? 0
+    // A patch that is only text is effectively free and always travels.
+    if (cost && spent + cost > budget) {
+      omitted++
+      continue
+    }
+    spent += cost
+    kept.push(row)
+  }
+  return { kept, omitted }
+}
+
+export async function exportBackup(options: ExportOptions = {}): Promise<Backup> {
+  const patches = await db.patches.toArray()
+  const budgeted = options.imageBudget != null ? patchesWithinBudget(patches, options.imageBudget).kept : patches
   return {
     app: 'cardstock',
     version: 1,
@@ -891,8 +941,21 @@ export async function exportBackup(): Promise<Backup> {
     friends: await db.friends.toArray(),
     trades: await db.trades.toArray(),
     wants: await db.wants.toArray(),
-    patches: await db.patches.toArray(),
+    patches: budgeted,
   }
+}
+
+/** How much room the user's own card pictures are taking, for the UI. */
+export async function patchStorage(): Promise<{ count: number; withImage: number; chars: number }> {
+  const rows = await db.patches.toArray()
+  let chars = 0
+  let withImage = 0
+  for (const row of rows) {
+    if (!row.image) continue
+    withImage++
+    chars += row.image.length
+  }
+  return { count: rows.length, withImage, chars }
 }
 
 const NOT_A_BACKUP = 'Not a Cardstock backup file'

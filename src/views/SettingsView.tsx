@@ -5,8 +5,9 @@ import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
 import { isSignedIn } from '../lib/authsession'
 import { cardSourceAvailable, clearCardSourceMisses } from '../lib/cardsource'
+import { weightOfChars } from '../lib/cardimage'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
-import { clearAllData, db } from '../lib/db'
+import { clearAllData, db, patchStorage } from '../lib/db'
 import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
@@ -15,6 +16,9 @@ import { CloudSync } from '../components/CloudSync'
 import { useUi } from '../store/ui'
 
 const INSIGHT_DAYS = 30
+
+/** Matches `VAULT_IMAGE_BUDGET` in cloud.ts — the point the note starts to matter. */
+const VAULT_IMAGE_NOTE_CHARS = 6_000_000
 
 const ENGINE_LABEL: Record<string, string> = {
   gemini: 'Gemini',
@@ -396,7 +400,8 @@ function CardSourceSection() {
   const config = useSettings()
   const toast = useUi((s) => s.toast)
   const custom = useLiveQuery(() => db.patches.filter((row) => row.custom === true).count(), [])
-  const patches = useLiveQuery(() => db.patches.count(), [])
+  const store = useLiveQuery(() => patchStorage(), [])
+  const patches = store?.count ?? 0
   if (!cardSourceAvailable()) return null
   return (
     <section className="setsec">
@@ -406,6 +411,17 @@ function CardSourceSection() {
         those yourself on the card’s screen — that always works, offline, with no account.
         {patches ? ` You’ve fixed ${patches} card${patches === 1 ? '' : 's'} so far${custom ? `, ${custom} of which you added from scratch` : ''}.` : ''}
       </p>
+      {store && store.withImage > 0 && (
+        /* Storage is the cost of this feature, so it is stated rather than
+           discovered. Pictures are resized and re-compressed on the way in
+           (~57 KB each); this is what they add up to. */
+        <p className="setsec__note">
+          {store.withImage} picture{store.withImage === 1 ? '' : 's'} · {weightOfChars(store.chars)} on this device.
+          {store.chars > VAULT_IMAGE_NOTE_CHARS
+            ? ' Past about 6 MB, the newest pictures are the ones kept in the cloud backup — a JSON export or Drive backup still carries all of them.'
+            : ''}
+        </p>
+      )}
       <div className="setrow">
         <div className="setrow__text">
           <span>Fill in missing pictures</span>

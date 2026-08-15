@@ -330,12 +330,17 @@ Four things are load-bearing:
   `deletePatch` reads the outgoing patch **before** dropping it — undo needs to
   know what it covered.
 - **Images are bounded and inline.** `cardimage.ts` downscales to 720px and
-  walks a quality ladder under `MAX_IMAGE_BYTES` (~220 KB); `sanitizeImage`
-  accepts only `data:image/(png|jpeg|webp)` because the value becomes an
-  `<img src>` in a dozen places. They ride the backup and the vault, and are
-  **stripped from binder shares and want lists** (`httpsImage` in `social.ts`) —
-  a `#/x?d=…` link cannot carry them, and publishing someone's photo is not a
-  side effect of sharing a binder.
+  steps a quality/scale ladder down to `TARGET_IMAGE_BYTES` (64 KB) — a
+  **target, not a ceiling**: accepting the first encoding under the hard cap
+  put every picture at ~78 KB median / 105 KB p90, where targeting gives a flat
+  57 KB median. Don't "simplify" that back into a fits-under-the-cap check.
+  `sanitizeImage` accepts only `data:image/(png|jpeg|webp)` because the value
+  becomes an `<img src>` in a dozen places. They ride the backup and the vault
+  (the vault up to `VAULT_IMAGE_BUDGET`, newest first, rows past it omitted
+  **whole** — a gutted patch could win on `updatedAt` and delete a photo that
+  existed nowhere else), and are **stripped from binder shares and want lists**
+  (`httpsImage` in `social.ts`) — a `#/x?d=…` link cannot carry them, and
+  publishing someone's photo is not a side effect of sharing a binder.
 
 **The shared index makes us a source, not just a consumer** (`cardsource.ts`,
 migration `0013`). Reading is anonymous — `lookup_card_data()` is granted to

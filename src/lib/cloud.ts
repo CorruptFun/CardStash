@@ -37,6 +37,7 @@ import {
 } from './crypto'
 import { mergeBackups, type MergeReport } from './cloudmerge'
 import { exportBackup, importBackup, sanitizeBackup, type Backup } from './db'
+
 import { settings } from './settings'
 
 // Re-exported so existing callers (and the live harness) keep one import site
@@ -173,6 +174,19 @@ function deviceLabel(): string {
  * devices disagree is that each has cards the other lacks. A conflict from a
  * concurrent write is answered by going round again with the newer base.
  */
+/**
+ * How many characters of card imagery the vault may carry — about 100 pictures
+ * at the ~57 KB the encoder produces (`cardimage.ts`).
+ *
+ * Chosen against what the vault IS rather than against a storage limit: one
+ * row, re-encrypted and re-uploaded on every sync, on whatever connection a
+ * phone has. Six megabytes of base64 is already a slow sync; letting it grow
+ * unbounded would make backup fail exactly for the users who had put the most
+ * into it. Newest pictures win, and the rest are omitted rather than gutted —
+ * an omitted patch merges as "the other device keeps its own".
+ */
+const VAULT_IMAGE_BUDGET = 6_000_000
+
 export async function syncNow(): Promise<SyncOutcome> {
   const key = await ensureVaultKey()
   const salt = fromBase64(settings().cloudSalt || '')
@@ -180,7 +194,11 @@ export async function syncNow(): Promise<SyncOutcome> {
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const row = await fetchVault()
-    const local = await exportBackup()
+    // The one caller that passes an image budget. See `ExportOptions` in db.ts:
+    // the vault is a single text column rewritten on every sync, so the user's
+    // own card photographs ride it up to a bound and the complete set lives in
+    // the JSON export and the Drive backup, which are real file writes.
+    const local = await exportBackup({ imageBudget: VAULT_IMAGE_BUDGET })
     let toWrite: Backup = local
     let report: MergeReport | null = null
 

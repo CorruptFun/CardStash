@@ -202,13 +202,38 @@ places and cannot await Dexie to decide whether a picture exists.
 
 Images are bounded on the way in by `lib/cardimage.ts`: EXIF-correct decode
 through the scan pipeline's own decoder, downscaled to 720px on the long edge
-(catalog art is ~745), encoded WebP where available and JPEG otherwise, and
-walked down a quality/scale ladder until it fits `MAX_IMAGE_BYTES` (~220 KB).
+(catalog art is ~745; nothing in the app paints a card wider than ~200 CSS px,
+so that is ~3x headroom over the largest real render), encoded WebP where
+available and JPEG otherwise.
+
+**The byte budget is a target, not a ceiling, and that is the whole design of
+the ladder.** Accepting the first encoding that fits the hard cap means every
+picture lands just under the cap, because essentially every picture fits:
+measured on the committed card photographs, q0.82/720px gives a median of 78 KB
+and a p90 of 105 KB, all of it "fitting" a 220 KB limit. So the ladder steps
+down through quality — and then through scale — until it reaches
+`TARGET_IMAGE_BYTES` (64 KB of data-URL characters), falling back to the hard
+cap only for an image that genuinely will not compress. Measured result on the
+same photographs: **median 57 KB, max 62 KB**, in a flat band rather than one
+that scales with how busy the photo is, at a cost of ~0.9 dB PSNR at the size a
+card is actually painted. Roughly 27 MB for 500 patched cards.
+
 They are `data:` URLs rather than Blobs because a patched card has to render
 offline from a plain `<img src>`, survive a JSON export, and mean the same
-thing after a sync. Patches ride the backup and the vault; they are deliberately
+thing after a sync — base64's ~33% overhead is the price, and it is counted in
+the budget. Patches ride the backup and the vault; they are deliberately
 **stripped from binder shares and want lists** (`httpsImage` in `social.ts`) —
 a photo taken in someone's home is not a side effect of sharing a binder.
+
+**The vault carries pictures up to a bound** (`VAULT_IMAGE_BUDGET`, ~6 MB, the
+newest first) because it is one Postgres text column rewritten on every sync;
+unbounded, backup would get slower and eventually fail for exactly the users
+who had put the most into it. Rows past the budget are omitted **whole**, never
+stripped of their image: `mergeBackups` is a union, so an omitted row costs
+nothing, while a row arriving image-less could win on `updatedAt` and delete a
+photo that existed nowhere else. The JSON export and the Drive backup are real
+file writes and pass no budget, so the complete set always has somewhere to
+live. Settings states the total, so the cost is never discovered.
 
 ### The shared card index (`lib/cardsource.ts`)
 

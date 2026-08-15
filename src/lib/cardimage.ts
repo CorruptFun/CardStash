@@ -27,16 +27,51 @@ import { imageHash, MAX_IMAGE_BYTES, sanitizeImage } from './cardpatch'
  *
  * Sized against what it is compared with rather than against what a phone can
  * capture: catalog art is ~745px on the long edge (Scryfall "normal", the
- * Pokémon API's large), and the card sheet shows it no larger than that. More
- * pixels would cost bytes on every device that ever syncs this row and show
- * the user nothing.
+ * Pokémon API's large), and nothing in this app paints a card bigger than
+ * ~200 CSS px (the collection grid; the card sheet's is 108). 720 therefore
+ * already carries roughly 3x headroom over the largest real render, which is
+ * the right amount — a user's own photo sitting next to catalog art must not
+ * be the one that looks soft — and more would cost bytes on every device that
+ * ever syncs the row while showing nobody anything.
  */
 export const IMAGE_MAX_EDGE = 720
 
-/** Quality ladder, walked downwards until the result fits the byte budget. */
-const QUALITY_STEPS = [0.82, 0.7, 0.58, 0.46]
-/** If quality alone cannot make it fit, shrink and walk the ladder again. */
-const SCALE_STEPS = [1, 0.75, 0.55]
+/**
+ * THE BUDGET IS A TARGET, NOT A CEILING, and that distinction is the whole
+ * point of this ladder.
+ *
+ * The obvious implementation — encode at good quality, accept it if it fits
+ * under the hard cap — means every picture lands just under the cap, because
+ * essentially every picture fits. Measured on the committed card photographs
+ * (`tests/harness/photos`), q0.82 at 720px produces a median of 78 KB and a
+ * p90 of 105 KB, and all of it was "fitting" a 220 KB limit. Six hundred
+ * patched cards would then be ~47 MB of IndexedDB on a phone that evicts
+ * storage under pressure, and ~47 MB of base64 inside every backup.
+ *
+ * So the ladder steps DOWN until it reaches the target, and only falls back to
+ * the hard cap for an image that genuinely will not compress. What it costs is
+ * measurable and small: at the 420px a card is actually painted at, dropping
+ * q0.82 → q0.72 costs about 0.9 dB PSNR and saves ~30% of the bytes, and every
+ * step below that trades steadily less quality for steadily fewer bytes.
+ *
+ * Sizes here are data-URL CHARACTERS, which is what actually gets stored —
+ * base64 is ~33% larger than the raw image bytes, and that overhead is real
+ * cost, not an accounting detail.
+ */
+export const TARGET_IMAGE_BYTES = 64_000
+
+/**
+ * Quality ladder. Starts below the point where WebP stops buying visible
+ * quality on a photograph and walks down; the floor is where card text starts
+ * to smear, which matters because people photograph cards to read them.
+ */
+const QUALITY_STEPS = [0.8, 0.72, 0.64, 0.56, 0.48, 0.4]
+/**
+ * If quality alone cannot reach the target, shrink and walk again. A busy
+ * full-art holo under bad light is the case that gets here; 0.75 of 720 is
+ * 540px, still comfortably above the largest render.
+ */
+const SCALE_STEPS = [1, 0.75, 0.6]
 
 function canvasToDataUrl(canvas: HTMLCanvasElement, type: string, quality: number): string {
   return canvas.toDataURL(type, quality)
@@ -87,16 +122,34 @@ export interface CardImageResult {
  */
 export function encodeCardImage(source: HTMLCanvasElement): CardImageResult | null {
   const type = supportsWebp() ? 'image/webp' : 'image/jpeg'
+  /**
+   * The best thing seen so far that is at least STORABLE (under the hard cap),
+   * kept so a picture that never reaches the target still gets saved rather
+   * than refused. Smallest wins, because by the time we are here every
+   * candidate has already been judged too big.
+   */
+  let fallback: CardImageResult | null = null
+
   for (const scale of SCALE_STEPS) {
     const canvas = scaled(source, scale)
     for (const quality of QUALITY_STEPS) {
       const dataUrl = canvasToDataUrl(canvas, type, quality)
       const clean = sanitizeImage(dataUrl)
+      // `sanitizeImage` refuses anything over the hard cap, so a null here at
+      // high quality is "too big", not "broken" — keep stepping down.
       if (!clean) continue
-      return { dataUrl: clean, hash: imageHash(clean), width: canvas.width, height: canvas.height, bytes: clean.length }
+      const result = {
+        dataUrl: clean,
+        hash: imageHash(clean),
+        width: canvas.width,
+        height: canvas.height,
+        bytes: clean.length,
+      }
+      if (clean.length <= TARGET_IMAGE_BYTES) return result
+      if (!fallback || result.bytes < fallback.bytes) fallback = result
     }
   }
-  return null
+  return fallback
 }
 
 /**
@@ -122,11 +175,21 @@ export function cardImageFromCanvas(source: HTMLCanvasElement): CardImageResult 
   return encodeCardImage(sized)
 }
 
-/** Rough human size for the editor, so "too big" is never a surprise. */
-export function imageWeight(dataUrl: string): string {
-  // base64 carries 3 bytes per 4 characters; close enough for a hint.
-  const kb = Math.round((dataUrl.length * 0.75) / 1024)
+/**
+ * Rough human size for a count of data-URL characters.
+ *
+ * base64 carries 3 bytes per 4 characters, so the stored string is ~33% larger
+ * than the image it holds. This reports the IMAGE size, which is the number a
+ * person recognises from their photo library.
+ */
+export function weightOfChars(chars: number): string {
+  const kb = Math.round((chars * 0.75) / 1024)
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`
+}
+
+/** The same, for one encoded image — used by the editor. */
+export function imageWeight(dataUrl: string): string {
+  return weightOfChars(dataUrl.length)
 }
 
 export { MAX_IMAGE_BYTES }
