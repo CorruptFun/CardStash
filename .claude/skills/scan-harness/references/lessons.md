@@ -570,3 +570,37 @@ result seems absurd, check this list before writing code.
     forgive, and the forgiveness is precisely what manufactures the wrong card.
     Same reasoning as `TURNED_MATCH_THRESHOLD`, arrived at independently — when
     a match is the ONLY evidence, judge the whole printed name.
+
+## The OCR worker's afterlife (the null-postMessage round)
+
+58. **A terminated Tesseract worker is not inert — it is a trap, and the
+    trap is silent.** `worker.terminate()` nulls the port behind the handle,
+    and tesseract.js keeps no liveness flag. Every later call posts to that
+    null port, and the library **drops the promise its internal `send()`
+    returns** — so the `TypeError: Cannot read properties of null (reading
+    'postMessage')` escapes as an *unhandled rejection*, while the call's own
+    promise **never settles at all**. That second half is the vicious one:
+    `await worker.setParameters(...).catch(() => {})` looks defended and
+    hangs forever, because the `.catch()` is attached to a promise nothing
+    will ever reject. The restore-in-`finally` after a watchdog kill was
+    exactly that shape, and its comment claimed the catch covered it.
+59. **We are the only ones who terminate these workers, so every one of
+    those calls was ours to prevent.** `ocr.ts` now routes all of it: a
+    `terminated` WeakSet, `killWorker()` (terminate at most once, remember
+    it), `isLive()`, and `setPageMode()` for the PSM switches. Nothing calls
+    into a worker we killed. If you add a worker call, add it through those.
+60. **The race window was inside tesseract, not our code: it awaits the
+    image encode BEFORE it posts.** `loadImage()` on an HTMLCanvasElement
+    does `toBlob()` + `FileReader` — genuinely async, milliseconds — so a
+    terminate landing in that gap posts to null even though the worker was
+    alive when we called. Liveness checks cannot close it; `recognizeBounded`
+    encodes the PNG itself (the same bytes tesseract's own path produces) and
+    then checks, leaving no await between the check and the post.
+61. **The bug was only ever visible as a flake in `drive-scan-ui.mjs`.** The
+    matrix never sees it: it drives `identifyFrame` directly and nothing
+    calls `stopOcr()` mid-read. It takes the UI harness — a sheet opening, a
+    Page-mode toggle, `suspendWork()` firing while OCR is in flight — and it
+    reproduced roughly one run in two. When a browser harness fails its
+    "no uncaught page errors" check with a stack that is entirely inside a
+    dependency, look for OUR lifecycle call that put the dependency there;
+    the stack cannot name it, because the async boundary ate our frames.

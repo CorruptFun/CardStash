@@ -26,7 +26,10 @@ function wireUpdateFlow(
   const offer = (worker: ServiceWorker) => {
     onUpdateReady(() => worker.postMessage('SKIP_WAITING'))
   }
-  if (controlled && registration.waiting) offer(registration.waiting)
+  // Read the live getter once: narrowing it and then passing it is two reads,
+  // and the worker offer() captures outlives the check by as long as the toast.
+  const waiting = registration.waiting
+  if (controlled && waiting) offer(waiting)
   registration.addEventListener('updatefound', () => {
     const installing = registration.installing
     if (!installing || !controlled) return

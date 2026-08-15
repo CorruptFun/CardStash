@@ -23,6 +23,38 @@ let cornerWorker: any | null = null
  * terminated worker into the module slots. */
 let generation = 0
 
+/**
+ * Workers we have terminated. Tesseract's handle carries no liveness flag of
+ * its own: terminate() nulls the port behind it, and any call that reaches
+ * that port afterwards posts to null. The library drops the promise its
+ * internal send() returns, so the TypeError escapes as an UNHANDLED rejection
+ * and the call's own promise never settles — an `await` on it wedges the read
+ * for good, `.catch()` and all. We are the only ones who terminate these
+ * workers (the watchdog below, stopOcr), so the whole failure is ours to
+ * prevent: kill through killWorker, and never touch one afterwards.
+ */
+const terminated = new WeakSet<object>()
+
+const isLive = (worker: any): boolean => !!worker && !terminated.has(worker)
+
+/** Terminate a worker at most once, and remember that we did. */
+async function killWorker(worker: any): Promise<void> {
+  if (!isLive(worker)) return
+  terminated.add(worker)
+  try {
+    await worker.terminate()
+  } catch {
+    /* already dying */
+  }
+}
+
+/** Page-mode switches are the calls most likely to land on a worker that was
+ * terminated mid-read — the restores below run in a `finally`. */
+async function setPageMode(worker: any, mode: string): Promise<void> {
+  if (!isLive(worker)) return
+  await worker.setParameters({ tessedit_pageseg_mode: mode }).catch(() => {})
+}
+
 async function spawnWorker(): Promise<any> {
   // The prebuilt ESM bundle's only export is `default` (the namespace).
   const { default: Tesseract } = await import('tesseract.js/dist/tesseract.esm.min.js')
@@ -62,6 +94,19 @@ let ocrTimeoutCount = 0
  * the current frame keeps producing pathological OCR input. */
 export const ocrTimeouts = (): number => ocrTimeoutCount
 
+/** The same PNG bytes Tesseract's own canvas path would have produced, just
+ * encoded on our side of the call. Falls back to the canvas if the encode is
+ * refused, which only restores its behaviour. */
+async function toPng(canvas: HTMLCanvasElement): Promise<Uint8Array | HTMLCanvasElement> {
+  try {
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve))
+    if (!blob) return canvas
+    return new Uint8Array(await blob.arrayBuffer())
+  } catch {
+    return canvas
+  }
+}
+
 /**
  * Recognize with a hard timeout. On expiry the worker is terminated (the
  * only way to interrupt the wasm) and its slot cleared so the next read
@@ -69,20 +114,27 @@ export const ocrTimeouts = (): number => ocrTimeoutCount
  * that trigger this, that IS the honest reading.
  */
 async function recognizeBounded(worker: any, image: HTMLCanvasElement, timeoutMs: number): Promise<string> {
+  // Encode here rather than handing Tesseract the canvas: its own canvas path
+  // awaits toBlob() + FileReader BEFORE it posts to the worker, and a
+  // terminate landing inside that window posts to a null port. Doing the
+  // encode in front of the liveness check leaves no gap between the two.
+  const encoded = await toPng(image)
+  if (!isLive(worker)) return ''
   let timer: ReturnType<typeof setTimeout> | undefined
   const timedOut = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs)
   })
   try {
-    const result = await Promise.race([worker.recognize(image), timedOut])
+    const result = await Promise.race([worker.recognize(encoded), timedOut])
     if (result === 'timeout') {
-      ocrTimeoutCount++
-      traceEvent('ocr-timeout', { ms: timeoutMs })
-      try {
-        await worker.terminate()
-      } catch {
-        /* already dying */
+      // A worker someone else already terminated (stopOcr) stops answering
+      // too, but that says nothing about the input — don't charge it to the
+      // pathological-frame budget.
+      if (isLive(worker)) {
+        ocrTimeoutCount++
+        traceEvent('ocr-timeout', { ms: timeoutMs })
       }
+      await killWorker(worker)
       if ((await primaryPromise?.catch(() => null)) === worker) primaryPromise = null
       if (cornerWorker === worker) {
         cornerWorker = null
@@ -108,7 +160,7 @@ function ensureCornerWorker(): void {
     .then((worker) => {
       if (spawnedIn !== generation) {
         // stopOcr ran while this spawned — don't resurrect into the slots.
-        worker.terminate().catch(() => {})
+        void killWorker(worker)
         return null
       }
       cornerWorker = worker
@@ -647,12 +699,12 @@ export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 700)
   const started = Date.now()
-  await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
+  await setPageMode(worker, '3')
   let text = ''
   try {
     text = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
   } finally {
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+    await setPageMode(worker, '6')
   }
   const candidates = candidatesFromText(text)
   traceEvent('ocr-anywhere', { ms: Date.now() - started, raw: text.slice(0, 400), candidates })
@@ -667,12 +719,12 @@ export async function readCardNamesAnywhere(canvas: HTMLCanvasElement): Promise<
 export async function readSealedLines(canvas: HTMLCanvasElement): Promise<string[]> {
   const worker = await getWorker()
   const region = prepRegion(canvas, { x: 0, y: 0, w: 1, h: 1 }, 720)
-  await worker.setParameters({ tessedit_pageseg_mode: '3' }).catch(() => {})
+  await setPageMode(worker, '3')
   let text = ''
   try {
     text = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
   } finally {
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+    await setPageMode(worker, '6')
   }
   const seen = new Set<string>()
   const lines: string[] = []
@@ -767,13 +819,14 @@ export async function readRegionText(
   if (opts.sparse) {
     // Sparse segmentation on a 5×-upscaled crop is the slow kind of read
     // (layout analysis over magnified grain), so it gets the wide watchdog —
-    // same restore-in-finally shape as the other page-mode switchers, with
-    // the catch covering a worker the watchdog terminated mid-read.
-    await worker.setParameters({ tessedit_pageseg_mode: '11' }).catch(() => {})
+    // same restore-in-finally shape as the other page-mode switchers, and
+    // setPageMode is what keeps that restore off a worker the watchdog just
+    // terminated (a `.catch()` there would never have run — see killWorker).
+    await setPageMode(worker, '11')
     try {
       raw = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_WIDE_MS)
     } finally {
-      await worker.setParameters({ tessedit_pageseg_mode: '6' }).catch(() => {})
+      await setPageMode(worker, '6')
     }
   } else {
     raw = await recognizeBounded(worker, region, RECOGNIZE_TIMEOUT_MS)
@@ -810,9 +863,9 @@ export async function stopOcr(): Promise<void> {
   for (const promise of pending) {
     if (!promise) continue
     try {
-      await (await promise)?.terminate()
+      await killWorker(await promise)
     } catch {
-      /* already gone */
+      /* the spawn itself failed — nothing to terminate */
     }
   }
 }

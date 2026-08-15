@@ -258,6 +258,19 @@ spawns in the background so the collector-line read overlaps band reads instead
 of queueing behind them. Both run PSM 6 (single block) by default; passes that
 need PSM 3 or 11 switch and restore in a `finally`.
 
+**A terminated worker is never touched again.** Both the watchdog and
+`stopOcr()` terminate workers, and Tesseract's handle carries no liveness flag:
+`terminate()` nulls the port behind it, every later call posts to null, and the
+library drops the promise its internal `send()` returns — so the `TypeError`
+escapes as an unhandled rejection *and* the call's own promise never settles,
+wedging any `await` on it regardless of `.catch()`. So `ocr.ts` owns the
+lifecycle: `killWorker()` terminates at most once and records it, `isLive()`
+gates, and the PSM switches go through `setPageMode()`. There is one window
+liveness cannot cover — Tesseract awaits `toBlob()` + `FileReader` *before* it
+posts — so `recognizeBounded` encodes the PNG itself (byte-identical to what
+Tesseract would have made) and checks liveness after, leaving no gap between
+the check and the post. Add worker calls through those helpers, never directly.
+
 **Preprocessing** (`prepRegion` → `normalizeContrast`): crop, rescale toward a
 target width, grayscale, then a **locally adaptive** percentile contrast stretch
 — 4×4 tiles, bilinearly interpolated, so a glare streak saturates its own corner
