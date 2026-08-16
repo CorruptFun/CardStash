@@ -57,11 +57,25 @@ const IMAGE_MAGIC = [
   [0x52, 0x49], // webp (RIFF)
 ]
 
+/**
+ * One representative image URL per CDN host, for the CORS probe below. The
+ * art-hash work (comparing a captured art region against candidate printings'
+ * imageSmall) lives or dies on whether these hosts answer a cross-origin
+ * request with Access-Control-Allow-Origin — without it the canvas taints and
+ * getImageData throws in the app. Browsers enforce that; node does not, so CI
+ * (the only place with egress to these hosts) records what each would say.
+ */
+const corsProbeUrls = new Map()
+
 async function saveImage(rel, url) {
   const buf = await fetchRetry(url, { as: 'buffer' })
   if (buf.length < 8_000 || !IMAGE_MAGIC.some(([a, b]) => buf[0] === a && buf[1] === b)) {
     throw new Error(`Not a plausible image (${buf.length}B) from ${url}`)
   }
+  try {
+    const host = new URL(url).host
+    if (!corsProbeUrls.has(host)) corsProbeUrls.set(host, url)
+  } catch { /* relative or odd URL: nothing to probe */ }
   await save(rel, buf)
   return { rel, bytes: buf.length }
 }
@@ -826,6 +840,21 @@ for (const [name, step] of steps) {
     fail(name, err)
   }
 }
+
+// The deployed app's origin, so the probe asks the question the app would.
+// The header comes back the same for any origin when the CDN answers `*`,
+// which is the answer that matters; an echo or an absence is recorded as-is.
+manifest.corsProbe = {}
+for (const [host, url] of corsProbeUrls) {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Origin: 'https://corruptfun.github.io' } })
+    manifest.corsProbe[host] = { status: res.status, allowOrigin: res.headers.get('access-control-allow-origin') }
+  } catch (err) {
+    manifest.corsProbe[host] = { error: String(err?.message ?? err) }
+  }
+}
+console.log('\nCORS probe (allowOrigin per image host):')
+for (const [host, info] of Object.entries(manifest.corsProbe)) console.log(`  ${host}: ${JSON.stringify(info)}`)
 
 await save('manifest.json', manifest)
 console.log(`\n${manifest.fixtures.length} fixtures, ${failures.length} failures.`)

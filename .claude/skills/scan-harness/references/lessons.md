@@ -792,3 +792,32 @@ result seems absurd, check this list before writing code.
     clean cells but not the glare ones, where the model declines and describes
     nothing. If this is revisited, the shape to try is the open prompt WITH a
     candidate list appended, so `pick` can only ever add to `treatment`.
+77. **The art region can rank same-name printings with the hash the pipeline
+    already owns — but only through a shift-search, and the live-app half
+    still hangs on a CORS header nobody here can read.** Spiked for the case
+    nothing else reaches (Island #290 answered as #289: identical name, frame
+    and treatment, only the artwork differs — `printingTiebreak` exits at
+    `treatments.size < 2` and its non-regular rule would block a re-pick
+    anyway). `frameHash` (vision.ts, 128-bit mean+gradient 8×8) over an
+    approximate art rect, on the fixtures' two real same-name pairs (Lightning
+    Bolt MSC 806 vs borderless PW26 5; Tauros GX SM1 100 vs full-art 156):
+    aligned, same-art-degraded distances sit ≤30 while different-art sits
+    46–77 — but a 2% rect shift already costs 15–34 bits and by 4% the bands
+    OVERLAP (26–51 vs 46), so a single-rect comparison is dead on arrival;
+    detector jitter is the common case, not the corner case. A ±4% shift-search
+    on the capture side (25 hashes, each a 9×8 downsample — negligible)
+    restores it: capture degraded AND misaligned 3%/scale 1.03 ranked the true
+    printing argmin in 4/4 trials at margins 14v47, 22v36, 19v57, 17v47.
+    Design consequences if built: rank among exact-name candidates only (the
+    tie-break's own candidate rule), never an absolute threshold — the
+    borderless margin (22v36) is too thin for one; and the harness can develop
+    all of it taint-free (vite serves fixture images same-origin). What is NOT
+    answered: whether catalog CDNs let the LIVE app read pixels back —
+    cross-origin canvas taint — because this container's egress policy 403s
+    every card host (verified against the proxy's own status; policy denials,
+    not outages). `fetch-fixtures.mjs` now records each image host's
+    `access-control-allow-origin` into `manifest.corsProbe` with the app's
+    gh-pages origin on the request, so the next CI fixture run answers it from
+    where the egress is open. If a host answers no header, the approach dies
+    for that game's catalog and no client-side cleverness revives it — taint
+    is the server's decision, by design.
