@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { isSignedIn, signedInAs } from '../lib/authsession'
 import { suggestHandle } from '../lib/onboarding'
+import { redeemReferral } from '../lib/referral'
 import { useSettings } from '../lib/settings'
 import { claimHandle, loadMyProfile, type SocialProfile } from '../lib/socialcloud'
 import { useUi } from '../store/ui'
@@ -80,6 +81,10 @@ export function Welcome({ onDone }: { onDone: () => void }) {
    */
   const checkForProfile = useCallback(
     (email: string) => {
+      // There is an account now, so a referral banked from a friend's link can
+      // finally be attached to one. Never awaited and never surfaced: the
+      // welcome screen must not stall, or fail, on a discount.
+      void redeemReferral()
       setStage('checking')
       loadMyProfile()
         .then((found) => {
@@ -121,6 +126,9 @@ export function Welcome({ onDone }: { onDone: () => void }) {
       try {
         const name = config.profileName.trim() || handle
         const claimed = await claimHandle(handle, name)
+        // Second chance at the same no-op: the call above may have gone out
+        // while this device was still offline.
+        void redeemReferral()
         // A display name is what friends actually see; seed it from the
         // handle rather than leaving shares labelled "A Cardstock collector".
         if (!config.profileName.trim()) config.set({ profileName: claimed.handle })

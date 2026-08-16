@@ -12,6 +12,7 @@ import {
   unpublish,
   type SocialProfile,
 } from '../lib/socialcloud'
+import { redeemReferral } from '../lib/referral'
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
@@ -83,6 +84,10 @@ export function SocialPanel() {
       const next = await claimHandle(handle, name)
       setProfile(next)
       setHandle('')
+      // Fire and forget, never awaited: if the referral was banked from a
+      // friend's link it is redeemed here, and a failure must not turn a
+      // successful claim into a red toast about a discount.
+      void redeemReferral()
       toast(`You are @${next.handle}`, 'success')
     })
 
@@ -135,7 +140,12 @@ export function SocialPanel() {
           An account lets friends add you by <b>@handle</b> instead of a link, delivers trade offers straight into the
           app, and shows you who has the cards on your want list. Your collection stays on this device either way.
         </p>
-        <SignIn onSignedIn={() => loadMyProfile().then(setProfile).catch(() => setProfile(null))} />
+        <SignIn
+          onSignedIn={() => {
+            void redeemReferral()
+            loadMyProfile().then(setProfile).catch(() => setProfile(null))
+          }}
+        />
       </>
     )
   }

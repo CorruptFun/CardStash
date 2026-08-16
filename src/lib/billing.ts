@@ -22,6 +22,19 @@ import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
 /** Features one subscription buys. Mirrors FEATURES in `stripe-billing`. */
 const SUBSCRIPTION_FEATURES = ['cloud-scan', 'ai-builder'] as const
 
+/**
+ * The two prices, in words.
+ *
+ * Stripe holds the real ones — `STRIPE_PRICE_ID` and `STRIPE_FOUNDING_PRICE_ID`
+ * on the `stripe-billing` function — and its hosted checkout is the authority,
+ * so these are a COPY that has to move whenever a price does. They live here,
+ * once, so there is exactly one line to move: quoting one number on this screen
+ * and charging another at the till is the sort of thing a person discovers only
+ * after paying, and never forgives.
+ */
+export const YEARLY_PRICE = '$11.99'
+export const FOUNDING_PRICE = '$9.99'
+
 export interface SubscriptionState {
   /** Paid up right now. */
   active: boolean

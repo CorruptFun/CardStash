@@ -6,6 +6,7 @@ import { installAutoBackup } from './lib/autobackup'
 import { db, loadPatches, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
 import { runAutoBackup } from './lib/drive'
+import { captureReferral, redeemReferral } from './lib/referral'
 import { settings } from './lib/settings'
 import { startSocialLoop } from './lib/socialcloud'
 import { APP_VERSION } from './lib/version'
@@ -67,6 +68,12 @@ function announceVersion(storage: Storage, version: string, onNewVersion: (versi
 }
 
 async function boot(): Promise<void> {
+  // FIRST, ahead of everything that touches the URL. A referral rides in on the
+  // query string and has to be banked before the OAuth adopt below, the router,
+  // or a sign-in redirect rewrites what it arrived in — the Google round trip
+  // comes back to origin+pathname with nothing left of either. Storing it here
+  // is what makes it survive; see lib/referral.ts.
+  captureReferral()
   requestPersistence()
   // GoTrue hands OAuth tokens back in the URL fragment, and this app routes
   // on the fragment — so the session must be claimed and the hash cleared
@@ -112,6 +119,11 @@ async function boot(): Promise<void> {
   // The loop re-checks on every tick, and only publishes if they also turned
   // publishing on.
   startSocialLoop()
+  // The third redemption site, and the one that catches the case the other two
+  // cannot: someone already signed in who opens a friend's link never passes
+  // the welcome screen or the handle field again. A no-op unless there is
+  // something banked and unredeemed, so it costs nothing for everyone else.
+  void redeemReferral()
   // The daily Drive backup, deliberately late and deliberately quiet: it
   // no-ops unless the user turned it on, never opens a popup, and never
   // reports failure. 12s keeps it clear of first paint and of the camera

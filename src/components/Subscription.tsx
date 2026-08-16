@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { billingAvailable, startSubscriptionCheckout, subscriptionState, type SubscriptionState } from '../lib/billing'
+import {
+  billingAvailable,
+  FOUNDING_PRICE,
+  startSubscriptionCheckout,
+  subscriptionState,
+  YEARLY_PRICE,
+  type SubscriptionState,
+} from '../lib/billing'
 import { isSignedIn } from '../lib/authsession'
+import { foundingOffer, type FoundingOffer } from '../lib/referral'
 import { relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
 import { Icon } from './Icon'
@@ -27,6 +35,7 @@ import { Icon } from './Icon'
 export function Subscription() {
   const toast = useUi((s) => s.toast)
   const [state, setState] = useState<SubscriptionState | null>(null)
+  const [offer, setOffer] = useState<FoundingOffer | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -34,7 +43,11 @@ export function Subscription() {
       setState(null)
       return
     }
-    setState(await subscriptionState())
+    const next = await subscriptionState()
+    setState(next)
+    // Only asked of someone who might still buy — a subscriber is already past
+    // the price, and the seat count is not news to them.
+    setOffer(next.active ? null : await foundingOffer())
   }, [])
 
   useEffect(() => {
@@ -77,6 +90,15 @@ export function Subscription() {
         </div>
         {state.source === 'manual' ? (
           <p className="setsec__note">This one was granted directly rather than bought, so there is nothing to manage.</p>
+        ) : state.source === 'stripe-founding' ? (
+          // A founding purchase is a one-off charge with no Stripe subscription
+          // behind it, so the portal has nothing to show — and the Manage
+          // button would call /checkout, which finds no live subscription to
+          // manage and cheerfully sells them a second one.
+          <p className="setsec__note">
+            You are a founding member. That was a one-off payment and it does not expire, so there is nothing to renew,
+            manage or cancel.
+          </p>
         ) : (
           <div className="setrow">
             <div className="setrow__text">
@@ -92,6 +114,45 @@ export function Subscription() {
     )
   }
 
+  // The founding offer, shown only when the SERVER says both halves are true:
+  // this account was referred, and a place is genuinely still free.
+  // `reserve_founding_seat()` checks those same two facts at checkout, so copy
+  // driven by anything else — a settings flag, a cached count — eventually
+  // promises a price the till then refuses, which is worse than never having
+  // made the offer.
+  if (offer?.referred && offer.seatsLeft > 0) {
+    return (
+      <section className="setsec">
+        <h3>Subscription</h3>
+        <div className="audience audience--friends">
+          <Icon name="sparkle" size={15} />
+          <span>
+            You came in through a friend’s link, so one of the <b>first 100 founding places</b> is yours if you want it
+            — <b>{offer.seatsLeft}</b> {offer.seatsLeft === 1 ? 'is' : 'are'} left.
+          </span>
+        </div>
+        <p className="setsec__note">
+          Pay <b>{FOUNDING_PRICE} once</b> and <b>cloud rescue</b>, which reads the cards this device cannot, and the{' '}
+          <b>AI deck builder</b> are yours permanently. It is a single payment and not a subscription: it does not
+          renew, it does not run out, and there is nothing to cancel later. Everyone else pays {YEARLY_PRICE} a year for
+          the same two things. Scanning, your collection, decks, trades and backup stay free either way.
+        </p>
+        <div className="setrow">
+          <div className="setrow__text">
+            <span>Claim a founding place</span>
+            <em>
+              Card handled by Stripe — we never see the number. Your place is held while you pay, and released again if
+              you change your mind.
+            </em>
+          </div>
+          <button className="btn btn--primary btn--sm" onClick={go} disabled={busy}>
+            {busy ? 'Opening…' : `${FOUNDING_PRICE} once`}
+          </button>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="setsec">
       <h3>Subscription</h3>
@@ -103,7 +164,7 @@ export function Subscription() {
       <div className="setrow">
         <div className="setrow__text">
           <span>Subscribe</span>
-          <em>Card handled by Stripe — we never see the number. Cancel any time.</em>
+          <em>{YEARLY_PRICE} a year. Card handled by Stripe — we never see the number. Cancel any time.</em>
         </div>
         <button className="btn btn--primary btn--sm" onClick={go} disabled={busy}>
           {busy ? 'Opening…' : 'Subscribe'}

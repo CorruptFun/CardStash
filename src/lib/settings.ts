@@ -167,6 +167,26 @@ export interface Settings {
   /** Last successful social sync. */
   socialAt: number
   /**
+   * The `@handle` whose link brought this install here, or ''.
+   *
+   * Written once, at boot, from the URL — and never overwritten, because
+   * `claim_referral()` records one referrer per account for ever and a later
+   * link would leave the app crediting someone the server does not.
+   *
+   * It is stored rather than read where it is needed because sign-in destroys
+   * the URL it arrived in: the Google route returns to `origin + pathname` with
+   * the query string and the fragment both gone (see `lib/referral.ts`).
+   */
+  referralFrom: string
+  /**
+   * When the server last gave a FINAL answer about that referral — recorded or
+   * refused, both final. 0 means it has not been asked yet, and is the only
+   * thing stopping `claim_referral()` being re-sent on every launch for the
+   * rest of the install's life. Cleared on sign-out, because the next account
+   * on this device has its own referral to redeem.
+   */
+  referralAt: number
+  /**
    * May the app ask the shared card index about cards that have NO picture
    * (`cardsource.ts`)?
    *
@@ -230,6 +250,8 @@ export const useSettings = create<Settings>()(
       socialHandle: '',
       socialCursor: 0,
       socialAt: 0,
+      referralFrom: '',
+      referralAt: 0,
       cardSourceLookup: true,
       cardSourceShare: false,
       set: (patch) => set(patch),

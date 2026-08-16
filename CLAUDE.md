@@ -316,6 +316,33 @@ without a client id. `STRIPE_WEBHOOK_SECRET` takes a **comma-separated list** �
 a Connect platform needs two endpoints (platform scope for checkout/charge,
 connected-accounts scope for `account.updated`) and each has its own secret.
 
+## Referrals and the founding offer
+
+The first 100 people who arrive through a friend's link buy lifetime access for
+a one-off fee; everyone else buys the year. `supabase/migrations/0014` and
+`stripe-billing` decide all of it — `src/lib/referral.ts` is the client half and
+decides nothing. Read the section at the end of `docs/social.md` before touching
+it. Four things are load-bearing:
+
+- **`?via=<handle>` rides the SEARCH string, never the fragment.** `parseRoute`
+  reads the fragment and `decodeShareText` scans it for `[?&]d=`, so a code in
+  the search half can never be confused with a payload in either direction — and
+  it sits ahead of a blob that can run to 20k characters, which is the end a
+  chat app truncates. A sharer with **no handle** must keep getting a
+  byte-identical link; that is the serverless default, not a fallback.
+- **Capture at boot, redeem later, because sign-in destroys the URL.** The
+  Google round trip returns to `origin + pathname` with query and fragment both
+  gone, so `captureReferral()` is the first statement of `boot()` and
+  `redeemReferral()` runs once there is an `auth.uid()`. Reading the URL at the
+  moment of claiming works for an emailed code and never fires for Google.
+- **The first link wins and the server is asked once.** `referralFrom` is never
+  overwritten (one referrer per account, for ever); `referralAt` records that a
+  *final* answer arrived — a refusal is final, only being offline is not.
+- **Eligibility comes from the server, not from settings**, and the copy is
+  held to the same standard as the connect nudges: a one-off payment, stated as
+  one, with a seat count that is real. Nothing here may reach `track()` — a
+  handle is identity.
+
 ## Cards the catalogs got wrong, or never had
 
 A card with **no picture** (TCGCSV ships those constantly) and a card in **no

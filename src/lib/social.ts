@@ -1,5 +1,6 @@
 import { CONDITIONS, FINISH_LABEL, GAMES } from './games'
 import { conditionFactor, itemUnitPrice, mergePrices } from './prices'
+import { referralQuery } from './referral'
 import { sanitizeGrade } from './slab'
 import { settings } from './settings'
 import type {
@@ -567,9 +568,18 @@ export async function encodeBlob(payload: SocialPayload): Promise<string> {
   return `J${toB64url(new TextEncoder().encode(json))}`
 }
 
-/** The app URL that carries a blob — opening it lands on the import screen. */
+/**
+ * The app URL that carries a blob — opening it lands on the import screen.
+ *
+ * A collector who has claimed a handle also carries their referral code, ahead
+ * of the `#` and therefore ahead of the blob (see `REFERRAL_PARAM`): a friend
+ * who installs from this link and later subscribes can be offered the founding
+ * price. A collector **without** a handle — the serverless default this whole
+ * module exists for — gets exactly the URL they have always got, down to the
+ * byte. Nothing about sharing may start depending on an account.
+ */
 export function shareUrl(blob: string): string {
-  return `${location.origin}${location.pathname}#/x?d=${blob}`
+  return `${location.origin}${location.pathname}${referralQuery(settings().socialHandle)}#/x?d=${blob}`
 }
 
 export async function decodeBlob(blob: string): Promise<SocialPayload> {

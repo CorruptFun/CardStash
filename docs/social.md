@@ -77,11 +77,18 @@ therefore agree on the maths even if their app versions differ.
 ## Wire format
 
 ```
-link:  <origin><path>#/x?d=<blob>
+link:  <origin><path>[?via=<handle>]#/x?d=<blob>
 blob:  'D' + base64url(deflate-raw(JSON))     ← normal
        'J' + base64url(JSON)                   ← fallback where CompressionStream is missing
 file:  pretty-printed JSON, the same envelope
 ```
+
+`?via=` is the referral code (see *Referrals and the founding offer* below) and
+appears only for a sharer who has claimed a handle. It sits in the **search**
+string, never the fragment: `parseRoute` reads the fragment and
+`decodeShareText` scans it for `[?&]d=`, so the two can never be confused in
+either direction, and a chat app that truncates a 20k link eats the end of it
+rather than the code. A sharer with no handle gets the old URL byte for byte.
 
 `decodeShareText()` accepts any of: a full link, a bare blob, file JSON, or a
 sync-server binder response (`{updatedAt, payload}` — it unwraps `payload` so a
@@ -638,3 +645,48 @@ message channel between two people who are, by construction, in a dispute.
 **Verification** is `npm run test:escrow` (`tests/harness/escrow-rls.mjs`), the
 sibling of `test:social` — 45 assertions over buyer, seller, stranger and anon,
 ending in the same control tests so a refusal is provably a refusal.
+
+---
+
+## Referrals and the founding offer (v0.18.0)
+
+The first 100 people who arrive through a friend's link may buy lifetime access
+once, for a one-off fee; everyone else buys the yearly subscription. The rules
+all live in `supabase/migrations/0014` — `claim_referral()`, `founding_seats_left()`,
+`reserve_founding_seat()`, `claim_founding_seat()` — and `stripe-billing` reserves
+a seat and offers the one-off price on its own. `src/lib/referral.ts` is the whole
+client half, and it decides nothing.
+
+**Capture, then redeem — because sign-in destroys the URL.** A referral arrives
+on a device with no account, and `claim_referral()` needs an `auth.uid()`.
+Between the two sits sign-in, and `startGoogleSignIn()` returns the browser to
+`origin + pathname`: query string and fragment both gone, with
+`adoptOAuthRedirect()` rewriting whatever survives before the router reads it. So
+`captureReferral()` runs as the first statement of `boot()` in `main.tsx`, ahead
+of everything that touches the URL, and `redeemReferral()` runs later — after
+sign-in and after a handle claim (`Welcome.tsx`, `SocialPanel.tsx`), plus once at
+boot for someone who was already signed in when they opened the link. Anything
+that read the URL at the moment of claiming would work for an emailed code and
+silently never fire for Google.
+
+**The first link wins.** `settings.referralFrom` is written once and never
+overwritten: `claim_referral()` records one referrer per account for ever, so a
+later link would leave the app crediting someone the database does not.
+`referralAt` records that the server gave a *final* answer — recorded or refused,
+both final — which is what stops the RPC being re-sent on every launch; it is
+cleared on sign-out, because the next account on the device has its own referral.
+
+**Eligibility is read from the server, never from settings.** `foundingOffer()`
+asks `referrals` (read-own under RLS) and then `founding_seats_left()`, which are
+the same two facts `reserve_founding_seat()` checks at checkout. An account
+referred on another phone still sees the offer; a hand-edited settings key buys
+nothing but different words on a screen. Failures return `null` — offline is not
+"you were never referred", and withdrawing a real offer is the worse mistake.
+
+**Nothing about a referral is tracked.** A handle is identity; `redact()` drops
+the key already, and hashing one into an event instead would be the same leak
+wearing a hat.
+
+Verification is `tests/unit/referral.test.mjs`, which pins the two easiest things
+to break: a sharer without a handle gets a byte-identical link, and a payload and
+a referral in one URL never eat each other.
