@@ -1,0 +1,573 @@
+<title>Cardstock</title>
+<style>
+/* The three faces this page sets, referenced out of node_modules the same way
+ * src/fonts.css does. `npm run build:marketing` inlines them as data URIs so the
+ * published page is self-contained — an Artifact CSP blocks every font CDN. */
+@font-face{font-family:"Archivo Variable";font-style:normal;font-display:swap;
+  font-weight:100 900;font-stretch:62% 125%;
+  src:url(../node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2) format("woff2-variations");}
+@font-face{font-family:"Inter Variable";font-style:normal;font-display:swap;font-weight:100 900;
+  src:url(../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2) format("woff2-variations");}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:500;
+  src:url(../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2) format("woff2");}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:600;
+  src:url(../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2) format("woff2");}
+
+:root{
+  /* Ground — warm near-black, lifted from the app's own --ink ramp. */
+  --ink-000:#0a0908; --ink-050:#121010; --ink-100:#1a1614; --ink-150:#231e1a;
+  --ink-200:#2d2723; --rule:#221e1b; --rule-2:#332d28;
+  /* Paper — warm off-white, the app's --paper ramp. */
+  --paper:#f4efe8; --paper-2:#a89f95; --paper-3:#867d73;
+  /* Chroma spine — the app's --holo spectrum, promoted from data to identity. */
+  --c-cyan:#4fc7dd; --c-violet:#7b6bf5; --c-magenta:#d072c9;
+  --c-amber:#eaa85f; --c-mint:#6fd49c; --c-blue:#5cb6f0;
+  /* Per-game hues, exactly as the app assigns them. */
+  --g-mtg:#e57a55; --g-pkm:#6aa8e5; --g-ygo:#b083d0; --g-rft:#3fbfae;
+  --g-lor:#d4a94a; --g-op:#e0606b; --g-swu:#d9c04b; --g-dgm:#eb8f4a;
+  --g-gcg:#6f97dd; --g-spt:#5fbf6a;
+
+  --holo:linear-gradient(112deg,#4fc7dd 0%,#7b6bf5 18%,#d072c9 34%,#eaa85f 50%,#6fd49c 66%,#5cb6f0 82%,#4fc7dd 100%);
+  /* The diffraction grating. Pitch is in px on purpose: it is a property of
+     the stock, not of the element it lies on. */
+  --grain:repeating-linear-gradient(98deg,
+    rgba(255,255,255,0) 0px, rgba(120,226,255,.16) 1.5px,
+    rgba(255,255,255,.22) 2.5px, rgba(255,168,240,.16) 3.5px,
+    rgba(255,255,255,0) 6px);
+
+  --font-display:"Archivo Variable",system-ui,sans-serif;
+  --font-body:"Inter Variable",system-ui,-apple-system,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --hue:var(--c-cyan);
+  --col:min(1080px,100% - 2.5rem);
+  --r-2:14px; --r-1:8px;
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  background:var(--ink-000);
+  color:var(--paper);
+  font-family:var(--font-body);
+  font-size:1.0625rem;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+/* ---- The spectrum rail: page position, read as hue ---- */
+.rail{
+  position:fixed; inset:0 auto 0 0; width:3px; z-index:5;
+  background:linear-gradient(180deg,#4fc7dd,#7b6bf5 20%,#d072c9 40%,#eaa85f 60%,#6fd49c 80%,#5cb6f0);
+  opacity:.85; pointer-events:none;
+}
+
+.wrap{width:var(--col);margin-inline:auto}
+
+h1,h2,h3{
+  font-family:var(--font-display);
+  font-weight:750;
+  font-stretch:118%;
+  line-height:.98;
+  letter-spacing:-.018em;
+  text-wrap:balance;
+  margin:0;
+}
+
+p{margin:0;max-width:64ch}
+
+.eyebrow{
+  font-family:var(--font-mono); font-weight:600; font-size:.7rem;
+  letter-spacing:.19em; text-transform:uppercase;
+  color:var(--hue);
+  display:flex; align-items:center; gap:.7rem;
+  margin:0 0 1.1rem;
+}
+.eyebrow::before{
+  content:""; width:26px; height:2px; background:var(--hue); flex:none;
+}
+
+/* ---- Foil-filled type. The app fills type with --holo to mean "foil"; here it
+   runs on exactly one phrase, because a page of gradients reads as decoration
+   rather than as material. ---- */
+.holotext{
+  background-image:linear-gradient(112deg,rgba(255,255,255,0) 36%,rgba(255,255,255,.42) 46%,rgba(255,255,255,0) 56%),var(--holo);
+  background-size:auto,240% 100%;
+  -webkit-background-clip:text; background-clip:text;
+  color:transparent;
+  filter:drop-shadow(0 0 6px rgba(150,190,255,.18));
+  animation:holoshift 9s linear infinite;
+}
+@keyframes holoshift{0%{background-position:0 0,0% 50%}100%{background-position:0 0,240% 50%}}
+
+/* ---- Hero ---- */
+.hero{
+  position:relative;
+  padding:clamp(3.5rem,9vw,6.5rem) 0 clamp(3rem,6vw,5rem);
+  overflow:hidden;
+}
+.hero::before{
+  content:""; position:absolute; inset:-40% -20% auto -20%; height:120%;
+  background:radial-gradient(60% 50% at 50% 0%,rgba(123,107,245,.16),transparent 70%),
+             radial-gradient(45% 40% at 78% 12%,rgba(79,199,221,.12),transparent 70%);
+  pointer-events:none;
+}
+.hero .wrap{position:relative;display:grid;gap:clamp(2.5rem,5vw,4rem);
+  grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); align-items:center}
+@media (max-width:880px){.hero .wrap{grid-template-columns:1fr}}
+
+h1{font-size:clamp(2.7rem,7.4vw,5rem)}
+.lede{margin-top:1.4rem;color:var(--paper-2);font-size:clamp(1.02rem,1.6vw,1.18rem);max-width:52ch}
+.lede strong{color:var(--paper);font-weight:600}
+
+.cta{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:2.1rem}
+.btn{
+  font-family:var(--font-mono);font-weight:600;font-size:.8rem;
+  letter-spacing:.1em;text-transform:uppercase;text-decoration:none;
+  padding:.85rem 1.35rem;border-radius:var(--r-1);
+  border:1px solid var(--rule-2); color:var(--paper);
+  transition:border-color .16s cubic-bezier(.2,.75,.3,1),color .16s,transform .16s;
+}
+.btn--go{
+  border-color:transparent; color:#0a0908; position:relative; overflow:hidden;
+  background:var(--holo); background-size:220% 100%;
+}
+.btn--go::after{
+  content:""; position:absolute; inset:0; background:var(--grain); opacity:.5;
+  mix-blend-mode:overlay; pointer-events:none;
+}
+.btn:hover{transform:translateY(-1px);border-color:var(--hue)}
+.btn--go:hover{border-color:transparent}
+a:focus-visible,button:focus-visible{outline:2px solid var(--c-cyan);outline-offset:3px}
+
+/* ---- The mark: the app's own icon, at size, still diffracting ---- */
+.mark{position:relative;width:min(320px,72%);margin-inline:auto;aspect-ratio:1}
+.mark svg{width:100%;height:100%;display:block;
+  filter:drop-shadow(0 24px 50px rgba(0,0,0,.75))}
+.mark::after{
+  content:""; position:absolute; inset:0; border-radius:23%;
+  background:linear-gradient(105deg,transparent 43%,rgba(150,130,255,.1) 45.5%,
+    rgba(126,231,255,.22) 47.5%,rgba(255,255,255,.42) 50%,rgba(255,176,243,.24) 52.5%,
+    rgba(255,214,130,.12) 54.5%,transparent 57%);
+  background-size:260% 100%; background-position:180% 0;
+  mix-blend-mode:screen; pointer-events:none;
+  animation:sweep 7s cubic-bezier(.4,0,.3,1) infinite;
+}
+@keyframes sweep{0%,62%{background-position:180% 0}100%{background-position:-80% 0}}
+
+/* ---- Readout: what a scan actually resolves to ---- */
+.readout{
+  margin-top:1.8rem;border:1px solid var(--rule);border-radius:var(--r-2);
+  background:var(--ink-050);overflow:hidden;font-family:var(--font-mono);
+  font-size:.775rem;
+}
+.readout__row{display:flex;justify-content:space-between;gap:1rem;
+  padding:.62rem .95rem;border-bottom:1px solid var(--rule)}
+.readout__row:last-child{border-bottom:0}
+.readout__k{color:var(--paper-3);letter-spacing:.09em;text-transform:uppercase}
+.readout__v{color:var(--paper);font-variant-numeric:tabular-nums;text-align:right}
+.readout__v em{font-style:normal;color:var(--c-mint)}
+.cap{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--paper-3);margin-top:.7rem}
+
+/* ---- Games: ten hues, used as data ---- */
+.games{padding:clamp(2.5rem,5vw,3.5rem) 0;border-block:1px solid var(--rule)}
+.games__list{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.2rem;padding:0;list-style:none}
+.chip{
+  display:flex;align-items:center;gap:.5rem;
+  font-family:var(--font-mono);font-size:.76rem;font-weight:500;
+  padding:.45rem .8rem;border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--c) 34%,transparent);
+  background:color-mix(in srgb,var(--c) 9%,var(--ink-050));
+  color:var(--paper);
+}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
+.chip small{color:var(--paper-3);letter-spacing:.08em}
+
+/* ---- Sections ---- */
+section{padding:clamp(3.5rem,7vw,5.5rem) 0}
+.sec__head{max-width:60ch;margin-bottom:2.4rem}
+.sec__head h2{font-size:clamp(1.8rem,3.6vw,2.7rem)}
+.sec__head p{margin-top:.95rem;color:var(--paper-2)}
+
+.grid{display:grid;gap:1px;background:var(--rule);
+  border:1px solid var(--rule);border-radius:var(--r-2);overflow:hidden;
+  grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
+.cell{background:var(--ink-050);padding:1.6rem 1.5rem 1.7rem;display:flex;
+  flex-direction:column;gap:.6rem;transition:background .16s}
+.cell:hover{background:var(--ink-100)}
+.cell h3{font-size:1.12rem;font-stretch:112%;letter-spacing:-.008em}
+.cell p{color:var(--paper-2);font-size:.94rem;line-height:1.6}
+.stat{font-family:var(--font-mono);font-weight:600;font-variant-numeric:tabular-nums;
+  color:var(--hue);letter-spacing:-.01em}
+.cell__tag{font-family:var(--font-mono);font-size:.64rem;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--hue)}
+
+/* ---- Steps: a real sequence, so it gets numbers ---- */
+.steps{counter-reset:s;display:grid;gap:1.5rem;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.step{position:relative;padding-top:2.6rem;border-top:1px solid var(--rule-2)}
+.step::before{
+  counter-increment:s;content:counter(s,decimal-leading-zero);
+  position:absolute;top:.9rem;left:0;
+  font-family:var(--font-mono);font-size:.72rem;font-weight:600;
+  letter-spacing:.14em;color:var(--hue);
+}
+.step h3{font-size:1.05rem;margin-bottom:.5rem}
+.step p{color:var(--paper-2);font-size:.93rem}
+
+/* ---- Honest note ---- */
+.note{border:1px solid var(--rule);border-radius:var(--r-2);background:var(--ink-050);
+  padding:clamp(1.6rem,3vw,2.4rem)}
+.note ul{margin:1.1rem 0 0;padding-left:1.1rem;color:var(--paper-2);font-size:.95rem;
+  display:grid;gap:.6rem}
+.note li::marker{color:var(--hue)}
+
+footer{padding:3rem 0 4rem;border-top:1px solid var(--rule);color:var(--paper-3);
+  font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em}
+footer a{color:var(--paper-2)}
+
+/* ---- Reveal ---- */
+.rv{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.75,.3,1)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  .rv{opacity:1;transform:none;transition:none}
+  .mark::after{animation:none;background-position:60% 0}
+  .holotext{animation:none;background-position:0 0,50% 50%}
+  *{scroll-behavior:auto}
+}
+</style>
+
+<div class="rail" aria-hidden="true"></div>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Local-first · Installable · No account required</p>
+      <h1>Read it off<br><span class="holotext">the card itself.</span></h1>
+      <p class="lede">Cardstock is a camera-first collection tracker for nine trading card games
+      <strong>and sports cards</strong>. Identification runs on the device in your hand — the text
+      engine is served from our own origin, never a CDN — and scanning, your collection, decks
+      and link sharing all work with nothing signed in.</p>
+      <div class="cta">
+        <a class="btn btn--go" href="https://corruptfun.github.io/CardStash/">Open the app</a>
+        <a class="btn" href="https://github.com/CorruptFun/CardStash/tree/main/docs">Read the docs</a>
+      </div>
+    </div>
+    <div>
+      <div class="mark"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="cs-holo" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#25b6d4"/>
+      <stop offset=".22" stop-color="#6250f2"/>
+      <stop offset=".44" stop-color="#cb4dbf"/>
+      <stop offset=".64" stop-color="#e8952f"/>
+      <stop offset=".82" stop-color="#3fc98a"/>
+      <stop offset="1" stop-color="#2ea3ee"/>
+    </linearGradient>
+    
+    <linearGradient id="cs-spec" x1="0" y1="1" x2="1" y2="0">
+      <stop offset=".28" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".4" stop-color="#7ee7ff" stop-opacity=".16"/>
+      <stop offset=".47" stop-color="#fff" stop-opacity=".4"/>
+      <stop offset=".54" stop-color="#ffb0f3" stop-opacity=".18"/>
+      <stop offset=".64" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    
+    <pattern id="cs-grain" width="1.024" height="1.024"
+             patternTransform="rotate(-24)" patternUnits="userSpaceOnUse">
+      <rect width="1.024" height="0.307" fill="#fff" opacity=".06"/>
+    </pattern>
+    <radialGradient id="cs-ground" cx=".5" cy=".42" r=".72">
+      <stop offset="0" stop-color="#191410"/>
+      <stop offset=".55" stop-color="#0a0807"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <radialGradient id="cs-bloom" cx=".5" cy=".46" r=".5">
+      <stop offset="0" stop-color="#8ea6d8" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8ea6d8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="cs-cardclip">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"/>
+    </clipPath>
+    <filter id="cs-lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.152" stdDeviation="1.792"
+                    flood-color="#000" flood-opacity=".55"/>
+    </filter>
+    
+    <filter id="cs-rich" x="-5%" y="-5%" width="110%" height="110%">
+      <feColorMatrix type="saturate" values="1.35"/>
+    </filter>
+  </defs>
+
+  <rect rx="14.976" fill="url(#cs-ground)"/>
+  <rect width="64" height="64" rx="14.976" fill="url(#cs-bloom)"/>
+
+  <g transform="rotate(-8 32 32)" filter="url(#cs-lift)">
+    <g clip-path="url(#cs-cardclip)" filter="url(#cs-rich)">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-holo)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-grain)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-spec)"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="#0a0908" opacity=".62"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="none" stroke="#f4efe8" stroke-opacity=".28"
+            stroke-width="0.699"/>
+    </g>
+    <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"
+          fill="none" stroke="#f4efe8" stroke-width="1.664"/>
+  </g>
+</svg></div>
+      <div class="readout" role="img" aria-label="Illustration of a scan readout">
+        <div class="readout__row"><span class="readout__k">Game</span><span class="readout__v">Magic: The Gathering</span></div>
+        <div class="readout__row"><span class="readout__k">Collector line</span><span class="readout__v">2XM · 129/332 · EN</span></div>
+        <div class="readout__row"><span class="readout__k">Finish</span><span class="readout__v"><em>Foil detected</em></span></div>
+        <div class="readout__row"><span class="readout__k">Source</span><span class="readout__v">On-device OCR</span></div>
+      </div>
+      <p class="cap">Illustration of the scan readout</p>
+    </div>
+  </div>
+</header>
+
+<div class="games" style="--hue:var(--c-violet)">
+  <div class="wrap rv">
+    <p class="eyebrow">Nine catalogs, one camera — and sports, which has none</p>
+    <ul class="games__list">
+      <li class="chip" style="--c:var(--g-mtg)">Magic <small>MTG</small></li>
+      <li class="chip" style="--c:var(--g-pkm)">Pokémon <small>PKM</small></li>
+      <li class="chip" style="--c:var(--g-ygo)">Yu-Gi-Oh! <small>YGO</small></li>
+      <li class="chip" style="--c:var(--g-rft)">Riftbound <small>RIFT</small></li>
+      <li class="chip" style="--c:var(--g-lor)">Lorcana <small>LOR</small></li>
+      <li class="chip" style="--c:var(--g-op)">One Piece <small>OP</small></li>
+      <li class="chip" style="--c:var(--g-swu)">Star Wars: Unlimited <small>SWU</small></li>
+      <li class="chip" style="--c:var(--g-dgm)">Digimon <small>DIGI</small></li>
+      <li class="chip" style="--c:var(--g-gcg)">Gundam <small>GCG</small></li>
+      <li class="chip" style="--c:var(--g-spt)">Sports <small>SPT</small></li>
+    </ul>
+  </div>
+</div>
+
+<section style="--hue:var(--c-cyan)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">The scanner</p>
+      <h2>Text recognition, a pixel check, and the number printed on the card.</h2>
+      <p>Point the camera and the card resolves itself. Nothing is uploaded, nothing is
+      queued for a server, and it all still works in aeroplane mode.</p>
+    </div>
+    <div class="grid rv">
+      <div class="cell">
+        <span class="cell__tag">On device</span>
+        <h3>OCR that never phones home</h3>
+        <p>The text engine is self-hosted and runs in the browser. It reads the card
+        name and the collector line, and a pixel check spots foil sheen.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Any language</span>
+        <h3>The collector line rescues the read</h3>
+        <p>When a name can't be read, the printed numbers can: Magic by set and number,
+        Yu-Gi-Oh! by its 8-digit passcode, Pokémon by a multi-language sweep.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Slabs</span>
+        <h3>Graded holders read as themselves</h3>
+        <p>PSA, BGS, SGC and CGC labels read as company, grade, qualifier and cert. A PSA 10 is
+        tracked as its own copy and never merges with your raw one. On PSA holders the cert
+        can resolve to the exact card, quota permitting.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Whole pages</span>
+        <h3>Scan a binder page at a time</h3>
+        <p>Up to twelve card regions are found in one photo, cropped and identified one by one,
+        then reviewed before anything is added. Uploading a photo beats scanning a page live,
+        and the app tells you so.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-amber)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Sports cards</p>
+      <h2>No catalog exists, so the card is built from what's printed on it.</h2>
+      <p>No free API publishes the set of printed sports cards. The scanner reads the year,
+      brand, set, card number, player, parallel and serial numbering, and constructs the
+      card from that — on device, like everything else.</p>
+    </div>
+    <div class="grid rv">
+      <div class="cell">
+        <span class="cell__tag">Honest by design</span>
+        <h3>Your figure, not ours</h3>
+        <p>Sports cards carry no prices. Value is the number you set, next to a one-tap
+        eBay sold-comps link built from every attribute the scanner read.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Guarded</span>
+        <h3>It would rather not guess</h3>
+        <p>A misread here would invent a card that doesn't exist, so a confidence floor
+        and closed vocabularies keep it from doing that.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-mint)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Collection &amp; decks</p>
+      <h2>A portfolio that happens to be made of cardboard.</h2>
+    </div>
+    <div class="grid rv">
+      <div class="cell">
+        <span class="cell__tag">Value</span>
+        <h3>Cost basis, P&amp;L, movers</h3>
+        <p>Portfolio value with 30-day insights, priced per finish and condition.
+        CSV import and export, JSON backups.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Decks</span>
+        <h3>Built by hand, or by model</h3>
+        <p>Mana curve, colour and type stats, and owned-versus-missing costing that won’t
+        let two decks both claim the same copy. The AI builder — which researches the
+        current meta and designs around seed cards you pick — is part of the subscription.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Binders</span>
+        <h3>Binders that exist on a shelf</h3>
+        <p>Custom binders with their own audience, page numbers stamped by a page scan,
+        and a printed QR label that opens the right binder from any phone camera.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-magenta)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Friends &amp; trades</p>
+      <h2>Sharing works with nobody signed in.</h2>
+      <p>A share link <em>is</em> the data — your binder compressed into the URL — so nothing is
+      published anywhere unless you send it to someone.</p>
+    </div>
+    <div class="steps rv">
+      <div class="step">
+        <h3>Mark what's for trade</h3>
+        <p>Set how many copies of a card you're willing to move. It never exceeds what you own.</p>
+      </div>
+      <div class="step">
+        <h3>Send a link or a file</h3>
+        <p>Your binder, or your whole collection, travels as a link. Wants ride along, so both
+        sides see matches highlighted.</p>
+      </div>
+      <div class="step">
+        <h3>Propose card by card</h3>
+        <p>Both sides priced. The reply travels back the same way, and booking the trade
+        updates both inventories.</p>
+      </div>
+      <div class="step">
+        <h3>Or claim a handle</h3>
+        <p>Optional. Friends add you by <span style="font-family:var(--font-mono)">@handle</span>,
+        offers arrive in the app, and binders refresh themselves.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-violet)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Built to be checked</p>
+      <h2>A scanner is only as good as the battery you point at it.</h2>
+      <p>Card identification is graded against committed real imagery, not vibes. These are
+      counts from the repository, not estimates.</p>
+    </div>
+    <div class="grid rv">
+      <div class="cell">
+        <span class="cell__tag">Fixtures</span>
+        <h3><span class="stat">289</span> real photographs</h3>
+        <p>44&nbsp;MB of hand-curated card photos, binder pages and handheld video frames,
+        committed to the repo — because a photograph can’t be regenerated.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Degradations</span>
+        <h3><span class="stat">18</span> seeded camera faults</h3>
+        <p>Soft focus, rotation, perspective, glare, low light and foil sheen, applied from a
+        fixed seed so any two runs are comparable cell by cell.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Unit tests</span>
+        <h3><span class="stat">395</span> cases, <span class="stat">1,001</span> assertions</h3>
+        <p>Including the QR encoder, decoded by a third-party decoder at every version the app
+        emits — the label ends up glued to a binder.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Harnesses</span>
+        <h3><span class="stat">19</span> test entry points</h3>
+        <p>Camera release, the built bundle booting, and live database checks proving a stranger
+        can’t read a friends-only binder or a private conversation.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Sources</span>
+        <h3><span class="stat">6</span> upstream catalogs</h3>
+        <p>Scryfall, pokemontcg.io, TCGdex, YGOPRODeck, Lorcast and the TCGplayer catalog —
+        across nine games, plus sealed product for every one of them.</p>
+      </div>
+      <div class="cell">
+        <span class="cell__tag">Shipping</span>
+        <h3><span class="stat">~200&nbsp;KB</span> gzipped</h3>
+        <p>Three caches: a build-keyed shell, card art capped at 480 images, and the text engine.
+        Prices are never cached — a stale price is worse than no price.</p>
+      </div>
+    </div>
+    <p class="cap rv" style="margin-top:1.4rem">Identification rates are measured per battery and
+    published in the repo’s docs. We don’t quote a single headline number, because a battery of
+    stills can’t bound how a live scanner behaves.</p>
+  </div>
+</section>
+
+<section style="--hue:var(--c-blue)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">What we can and can't see</p>
+      <h2>Everything lives on your device until you decide otherwise.</h2>
+    </div>
+    <div class="note rv">
+      <ul>
+        <li>Your collection is stored in your browser. Scanning, collection, decks and
+        link-based sharing need no account and no server, and work offline.</li>
+        <li>Camera frames are processed on your device. One opt-in extra — cloud rescue, off
+        unless you switch it on — sends a single frame when a scan is stuck, and that is the
+        only path by which a picture of a card leaves the device.</li>
+        <li>Sign in and your collection is backed up automatically. It is encrypted at rest with
+        a key our server mints, which makes it protected storage and <em>not</em> end-to-end
+        encryption — we could read it, and we would rather say so than imply otherwise.</li>
+        <li>Google Drive backup is separate and opt-in, into a private folder in <em>your</em>
+        Drive that nothing else can enumerate. Your browser talks to Google directly.</li>
+        <li>A published binder is plaintext to us, because a friend’s app has to read it. A
+        “public” binder means any signed-in collector — never the open web.</li>
+        <li>Diagnostics are content-free — no card names, no queries, no keys, never tied to your
+        account — and are on by default outside the EU, EEA and UK, where you’re asked first.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Cardstock v0.17.0 · <a href="https://corruptfun.github.io/CardStash/">corruptfun.github.io/CardStash</a>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var els=document.querySelectorAll('.rv');
+  if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in')});return}
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})
+  },{rootMargin:'0px 0px -8% 0px',threshold:.08});
+  els.forEach(function(e){io.observe(e)});
+})();
+</script>

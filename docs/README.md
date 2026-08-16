@@ -29,6 +29,7 @@ Live: <https://corruptfun.github.io/CardStash/> · Source of truth: `main`.
 | 9 | [privacy.md](privacy.md) | What leaves the device, when, and the rules that keep it that way. |
 | 10 | [extending.md](extending.md) | Task-shaped playbooks: add a game, a source, a screen, a table, a setting, a release. |
 | 11 | [decisions.md](decisions.md) | The load-bearing decisions and why they are what they are. |
+| 12 | [marketing.md](marketing.md) | The landing page's source of truth: the position, what each claim is backed by, and the claims we don't make. |
 
 The table above is what the app **is** today. [roadmap.md](roadmap.md) is what
 happens next and why — the plan of record for measurement, free-tier cloud
