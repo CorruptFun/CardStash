@@ -127,6 +127,16 @@ Readers filter to `currency === 'USD'` — one line, one currency.
 Capped at 30 rows (`SCAN_TRAY_LIMIT`). Re-scanning the card already at the head
 refreshes that row instead of stacking a duplicate tile.
 
+Removing a scan only clears the tile — a card collect mode already filed stays
+filed, and is removed in Collection. What the tray *shows* is narrower than
+what it stores: `ScanView` hides a scan whose card has a collection row touched
+at or after `at`, so a card you have since filed stops offering itself for a
+second add, while a card you already owned before the scan (a price check)
+keeps its tile. The rule is derived from the two tables by the live query, not
+stamped on the record, so undoing the add brings the tile back and no second
+copy of the fact can drift. Collect mode is exempt: it files every confident
+scan itself, so the filter would empty the tray on every hit.
+
 `finish` and `grade` are what the scanner READ off the physical copy, kept so
 the batch-add screen files the copy that was in frame rather than the printing's
 default; a re-scan that reads a finish replaces a blank one but never clears a

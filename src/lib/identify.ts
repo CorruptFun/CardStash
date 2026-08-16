@@ -1109,9 +1109,15 @@ async function identifyViaOcr(
       }
       // Name pinned the card; now read the printed collector line to pin
       // the exact edition, and check the surface for a foil sheen.
-      const refined = await refineFromCorner(best.card, canvas, cornerText, !!gameHint, mapRect, config.pokemonKey).catch(
-        () => null,
-      )
+      const refined = await refineFromCorner(
+        best.card,
+        canvas,
+        cornerText,
+        !!gameHint,
+        mapRect,
+        config.pokemonKey,
+        !!gameHint,
+      ).catch(() => null)
       let card = refined?.card ?? best.card
       const foil = detectFoil(canvas)
       traceEvent('refine', {
@@ -1262,7 +1268,10 @@ async function identifyViaOcr(
       // scan's cards get the short sweep from the start, because nine of them
       // share one user's patience and one phone's thermal headroom.
       const cornerPasses = Math.min(budget.cornerPasses, outOfOcrRoad() ? 2 : budget.cornerPasses)
-      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect, true, cornerPasses)
+      const read = await readCornerInfo(gameHint, canvas, cornerText, cornerText != null, mapRect, {
+        thorough: true,
+        passBudget: cornerPasses,
+      })
       let card: Card | null = null
       if (gameHint === 'pokemon' && read.number && read.total && (!read.fused || read.setCode)) {
         // A printed slash stands alone; a RECONSTRUCTED fraction ("0207066"
@@ -1609,6 +1618,28 @@ function frameLuma(canvas: HTMLCanvasElement): number {
 /** Under this mean luma the frame counts as dark for the fail-fast path. */
 const DARK_FRAME_LUMA = 55
 
+/**
+ * Bands of the RAW frame — not of the detected card region — that the printed
+ * line falls into when the crop detector's floor lands above it. Left first:
+ * every modern card prints there. The right band is where vintage Pokémon and
+ * MTG put it, and without it a Base Set Charizard's "4/102" is unreadable at
+ * every tier, however much magnification is thrown at the wrong rectangle.
+ */
+const RAW_BOTTOM_BANDS: OcrRect[] = [
+  { x: 0, y: 0.9, w: 0.55, h: 0.1 },
+  { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },
+]
+/**
+ * The raw bands get their OWN budget rather than whatever the mapped-region
+ * loops leave behind — which is nothing. Measured on `charizard-base`: two
+ * variants over four regions is eight passes against a budget of four or five,
+ * so these bands, the only ones that can read a line the card region excludes,
+ * had never once run. A last-resort pass reached only when it wasn't needed is
+ * not a last resort. They still cost nothing when a region already read the
+ * line, because every pass short-circuits on a finished read.
+ */
+const RAW_BAND_PASSES = 3
+
 function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false
   const norm = (value: string) => value.toLowerCase().replace(/^0+(?=\d)/, '')
@@ -1662,9 +1693,18 @@ async function readCornerInfo(
   cornerText: Promise<string> | null,
   cornerIsExact: boolean,
   mapRect: (rect: OcrRect) => OcrRect,
-  thorough = false,
-  passBudget?: number,
+  opts: {
+    thorough?: boolean
+    passBudget?: number
+    /**
+     * Refine-path escalation: how many EXTRA magnified passes the read may
+     * spend if the cheap tier found nothing. Zero (the default) is the old
+     * behaviour — see the call in `refineFromCorner` for why it isn't always.
+     */
+    deepPasses?: number
+  } = {},
 ): Promise<CornerRead> {
+  const { thorough = false, passBudget, deepPasses = 0 } = opts
   const done = (read: CornerRead) =>
     thorough
       ? !!(
@@ -1696,7 +1736,9 @@ async function readCornerInfo(
   // Japanese card is a few pixels of type that 3× upscale smears) and sparse
   // segmentation, which mines the small detached line the default
   // single-block mode drops in favour of the rules box above it.
-  const zoom = thorough ? { upscale: 5, maxWidth: 1600, sparse: true } : {}
+  let zoom: { upscale?: number; maxWidth?: number; sparse?: boolean } = thorough
+    ? { upscale: 5, maxWidth: 1600, sparse: true }
+    : {}
   let read = parseCornerInfo(game, cornerText ? await cornerText : '')
   // Escalation is bounded: these passes run only after every name read has
   // already failed, and each is a full-magnification OCR — an unbounded
@@ -1726,12 +1768,53 @@ async function readCornerInfo(
   // stays non-sparse: block segmentation reads the set-code/language line
   // ("NEO・JP") that sparse mode shreds into fragments.
   if (thorough) {
-    const bottom: OcrRect = { x: 0, y: 0.9, w: 0.55, h: 0.1 }
-    await pass(bottom, { variant: 'normal' })
-    await pass(bottom, { variant: 'normal', sparse: false })
+    budget = RAW_BAND_PASSES
+    await pass(RAW_BOTTOM_BANDS[0], { variant: 'normal' })
+    await pass(RAW_BOTTOM_BANDS[0], { variant: 'normal', sparse: false })
+    await pass(RAW_BOTTOM_BANDS[1], { variant: 'normal', sparse: false })
+  }
+  // The refine path's deep tier. Everything above it is one wide strip plus
+  // two binarized slivers at 3× — and on a hand-held photo the collector line
+  // is about 2% of the card's height, routinely below what that resolves. The
+  // sole-evidence tier reads exactly this type, so borrow the half of it that
+  // is cheap: its badge-tight REGIONS at 5× magnification, in both polarities.
+  // Not its sparse segmentation — layout analysis over a magnified crop is the
+  // slow half, and this runs while the user is still watching "Identifying…".
+  if (deepPasses > 0 && !done(read)) {
+    zoom = { upscale: 5, maxWidth: 1600 }
+    budget = deepPasses
+    // Both region lists: the sole-evidence windows are aimed bottom-LEFT
+    // where every modern card prints, and the retry list carries the vintage
+    // bottom-RIGHT one — which is where Base Set puts "4/102", and Base Set
+    // Charizard mis-editioned is the single most expensive way to be wrong in
+    // this game. They were already tried binarized at 3×; 5× and Tesseract's
+    // own local binarization are new evidence, not a repeat.
+    const deepRegions = [...(SOLE_EVIDENCE_REGIONS[game] ?? []), ...(CORNER_RETRY_REGIONS[game] ?? [])]
+    for (const variant of ['normal', 'binary'] as const) {
+      for (const rect of deepRegions) await pass(mapRect(rect), { variant })
+    }
+    // Every region above is mapped through the DETECTED card region, and when
+    // that region's floor lands inside the card — a full-bleed capture whose
+    // bottom line hugs the edge — all of them sit a few percent too high, on
+    // the flavour text instead of the number. Measured on `charizard-base`:
+    // the crop ended at 0.93 of the frame and "4/102" prints at 0.96.
+    budget = RAW_BAND_PASSES
+    for (const rect of RAW_BOTTOM_BANDS) await pass(rect, { variant: 'normal' })
   }
   return read
 }
+
+/**
+ * Games where the collector line does not merely REFINE the printing — it is
+ * the only thing that decides it. A Pokémon species name answers to twenty
+ * years of reprints, so a name match alone lands on whichever edition the
+ * catalog listed first: measured on the matrix, 16 of 43 identified Pokémon
+ * cells, including a Base Set Charizard reported as a $3 Celebrations promo.
+ * These get the deep corner tier when the cheap passes miss the line.
+ */
+const PRINTING_RIDES_ON_THE_LINE = new Set<Game>(['pokemon'])
+/** Extra magnified corner passes those games may spend inside a refine. */
+const REFINE_DEEP_PASSES = 4
 
 async function refineFromCorner(
   card: Card,
@@ -1740,9 +1823,17 @@ async function refineFromCorner(
   cornerIsExact: boolean,
   mapRect: (rect: OcrRect) => OcrRect,
   pokemonKey?: string,
+  /** A game was picked, so a retry here taxes no other game's wait. */
+  hinted = false,
 ): Promise<{ card: Card; read: CornerRead; viaCollector?: boolean } | null> {
   // This read is what tells "Tauros" from "Tauros ex" — it earns the work.
-  const read = await readCornerInfo(card.game, canvas, cornerText, cornerIsExact, mapRect)
+  const read = await readCornerInfo(card.game, canvas, cornerText, cornerIsExact, mapRect, {
+    // Escalate only where the edition genuinely hangs on this read, and only
+    // with a hint: in the auto fan-out this retry would spend the shared
+    // budget every other game is waiting on (the cost asymmetry that
+    // `ApiKeys.thorough` exists for), for a line auto mode cannot act on.
+    deepPasses: hinted && PRINTING_RIDES_ON_THE_LINE.has(card.game) ? REFINE_DEEP_PASSES : 0,
+  })
   if (!read.setCode && !read.number) return null
   // The printed fraction is independent of whatever the name band read, and
   // it is the SAME evidence the corner-only path identifies on. When it
@@ -1763,6 +1854,15 @@ async function refineFromCorner(
   if (card.game === 'yugioh') {
     exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null
   } else if (card.game === 'pokemon') {
+    // Verified inside `matchPokemon`, against the printed SET SIZE rather than
+    // here against the number — measured, that distinction is the whole
+    // lesson. A `collectorEq` veto at this layer looks like the check MTG and
+    // Yu-Gi-Oh do, but the two halves of a Pokémon fraction fail
+    // independently: `rayquaza-vmax` reads "70/203", a mangled number beside a
+    // clean total, and the total alone correctly pins Evolving Skies. Vetoing
+    // on the number threw that away and fell back to a Celebrations promo — a
+    // guard that turns a right answer into a wrong one. The size check
+    // belongs where the set is known, and that is the match layer.
     exact = await matchPokemon(card.name, read.setCode, read.number, pokemonKey, read.total)
   } else if (card.game === 'mtg' && !read.setCode && read.number) {
     // Number without a set code: pick the newest printing carrying it.

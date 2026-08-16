@@ -648,3 +648,72 @@ result seems absurd, check this list before writing code.
     marks the edition unread and puts the picker one tap away. The harness
     reports the same split: `N wrong while claiming the code was read` is the
     only class the user cannot catch, and it is 0 on the photos.
+
+## Right card, wrong version (the edition round)
+
+67. **A grader that asks only for the NAME cannot see the failure a user
+    reports as "wrong version," and the matrix had been scoring it as a pass
+    for its whole life.** `graded()` compares game + name similarity, on
+    purpose — a wrong card is the worst class and every threshold is tuned
+    against it. But the fixture manifest carries `setCode` and `number` and
+    nothing ever read them. Twenty minutes of grading code turned an
+    unfalsifiable user report into a number: **16 of 43** identified Pokémon
+    cells landed on the wrong edition, including a Base Set Charizard reported
+    as a Celebrations TG03 — a four-figure card priced as a three-dollar one,
+    with a green tick beside it. Before theorising about a report you cannot
+    reproduce, check whether the harness is even ASKING the question the report
+    is about; the cheapest bug to find is the one your grader was ignoring.
+68. **Every corner region is mapped through the DETECTED card region, so a crop
+    whose floor lands inside the card moves the collector line out of all of
+    them at once.** `charizard-base` clean: crop bottom at 0.928 of the frame,
+    "4/102" printed at ~0.96. Nine successive OCR passes — three cheap, then
+    four magnified 5× — every one of them read the flavour text, because the
+    rectangles were computed from a card that the detector said ended above the
+    line. More magnification on the wrong rectangle is worth exactly nothing,
+    and a trace full of confident-looking crops at plausible coordinates hides
+    it well. When every pass returns the same wrong text, stop tuning the
+    passes and check what the coordinates are relative TO.
+69. **The raw-frame fallback existed, was left-handed, and had never once
+    run.** `readCornerInfo`'s thorough tier already carried the escape hatch
+    for lesson 68 — a band of the raw frame rather than of the card region —
+    and it was broken two ways at the same time. It sat at `{x: 0, w: 0.55}`,
+    the modern bottom-left position, so it could not see the vintage
+    bottom-RIGHT line that is exactly the case it was written for. And it drew
+    on the SHARED pass budget after the region loops, which spend two variants
+    over four regions — eight passes against a budget of five — so it was
+    unreachable in every run that needed it. Both bugs are invisible in the
+    summary and obvious in a trace: count the `ocr-region` events and check
+    that the passes you think you added are among them. A last-resort pass
+    reached only when it isn't needed is not a last resort; give it its own
+    budget (`RAW_BAND_PASSES`), which costs nothing because every pass
+    short-circuits on a finished read.
+70. **Pokémon's edition is decided by the collector line, not refined by it.**
+    For most games the name narrows the printing and the line confirms it; a
+    Pokémon species name answers to twenty years of reprints priced decades
+    apart, so a missed line means the edition is whatever the catalog listed
+    first — and pokemontcg.io being stale means "first" is often a card the
+    user has never seen. That asymmetry is why `PRINTING_RIDES_ON_THE_LINE`
+    gets a deep refine tier that other games do not, and why it is hinted-only
+    (lesson: the cost asymmetry — the same retry in the auto fan-out taxes
+    every other game's shared wait).
+71. **The two halves of a Pokémon fraction fail INDEPENDENTLY, so the guard
+    goes on the set size and not on the number.** Pokémon was the one game
+    accepting whatever `matchPokemon` returned — MTG matches `collectorEq`,
+    Yu-Gi-Oh the passcode — so the obvious fix was to copy their check. It cost
+    a cell immediately: `rayquaza-vmax` reads "70/203", a mangled number beside
+    a clean total, and the total alone correctly pins Evolving Skies #218. A
+    `collectorEq` veto threw that away and fell back to a Celebrations promo —
+    a guard that manufactures the exact failure it was added to prevent. The
+    check that IS right is on the printed set size, and it belongs in
+    `matchPokemon`, where the candidate sets are still in hand: a read total
+    that no catalog can honour returns null rather than a printing at another
+    printing's price. Copying a sibling implementation's guard is not the same
+    as copying its reasoning — MTG's collector numbers are dense and
+    self-checking, a Pokémon fraction's halves are two separate reads.
+72. **A fix that measures as no-change may still be two bugs deep.** The first
+    edition round moved the aggregate by zero, and the temptation was to
+    conclude the deep tier does not help. The per-cell diff said one cell moved
+    (the wrong way, lesson 71) and the trace said the new passes had run but
+    the ones that mattered had not (lesson 69). Diff the CELLS, not the
+    summary: 43/90 to 43/90 hid one regression and one silently skipped code
+    path, and either alone would have been read as noise.

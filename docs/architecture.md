@@ -81,7 +81,7 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `diagconfig.ts` | 32 | Where diagnostics post: `ingest_events()` on the app's own project. No credential of its own — see decision 20. |
 | `importexport.ts` / `csv.ts` | 241 / 62 | Collection CSV import/export and a CSV parser. |
 | `demo.ts` | 431 | `?demo=1` seed data. |
-| `fetchJson.ts` | 40 | `fetch` + JSON + timeout + abort linking. Every card API uses it. |
+| `fetchJson.ts` | 100 | `fetch` + JSON + timeout + abort linking + opt-in 429/5xx retry. Every card API uses it. |
 | `util.ts` | 122 | ids, dates, money formatting, Levenshtein/`similarity`/`nameScore`/`normalizeName`, external links, haptics. |
 | `version.ts` | 3 | `APP_VERSION` — one source of truth. |
 
@@ -153,10 +153,15 @@ cards") instead of an unhandled rejection. New write paths must use it.
 ## Cross-cutting mechanisms
 
 **HTTP.** `fetchJson()` wraps every card-API call: JSON, a default 12s timeout,
-non-2xx → `Error("HTTP <status>: <body slice>")`, and `linkAbort()` so a
-caller's `AbortSignal` cancels the request. `isAbort()` distinguishes
-abort/timeout from real failures — used everywhere to decide whether to fall
-back or to propagate.
+non-2xx → `Error("HTTP <status>: <body slice>")` **with the status attached**,
+and `linkAbort()` so a caller's `AbortSignal` cancels the request. `isAbort()`
+distinguishes abort/timeout from real failures — used everywhere to decide
+whether to fall back or to propagate; `httpStatus()` tells "no such card" (404)
+from "we are being throttled" (429) without matching on message text. `retries`
+is opt-in and covers 429/5xx only, honouring a clamped `Retry-After`: it stays
+OFF for the scan pipeline, whose lookup budget is shared across games, and ON
+for the searches a user is sitting and watching. Per-service request spacing
+lives in the service module — see `scryfall()` in `docs/card-data.md`.
 
 **Aborts.** The search box aborts on every keystroke; the scanner aborts its
 in-flight identification when stopped. One deliberate exception: `tcgcsv.ts`

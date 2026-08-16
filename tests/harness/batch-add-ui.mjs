@@ -128,6 +128,24 @@ try {
       }
       if (cards.length === 5) break
     }
+    // The tray hides a scan whose card was filed SINCE it was read, so the
+    // seed has to say which of the two came first. A demo collection written
+    // moments ago and scans back-dated a few seconds reads as "already filed"
+    // and empties the strip — which is the filter working, not a bug. Model
+    // the real case instead: these are cards the user already owned and has
+    // just re-scanned (a price check), so the collection rows predate them.
+    const older = Date.now() - 3_600_000
+    const ownedRows = await all('collection')
+    const ctx = db.transaction('collection', 'readwrite')
+    const cstore = ctx.objectStore('collection')
+    for (const item of ownedRows) {
+      if (!seen.has(item.cardId ?? item.card?.id)) continue
+      cstore.put({ ...item, addedAt: older, updatedAt: older })
+    }
+    await new Promise((res, rej) => {
+      ctx.oncomplete = res
+      ctx.onerror = () => rej(ctx.error)
+    })
     const tx = db.transaction('scans', 'readwrite')
     const store = tx.objectStore('scans')
     cards.forEach((card, i) => {

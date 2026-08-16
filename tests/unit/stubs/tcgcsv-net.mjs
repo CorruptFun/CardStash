@@ -29,3 +29,8 @@ export async function fetchJson(url) {
 export function isAbort() {
   return false
 }
+
+/** Mirrors fetchJson's real export: the status rides on the rejection. */
+export function httpStatus(err) {
+  return typeof err?.status === 'number' ? err.status : null
+}

@@ -1,9 +1,67 @@
-import { fetchJson } from './fetchJson'
+import { fetchJson, httpStatus, type FetchJsonOptions } from './fetchJson'
 import { mergePrices } from './prices'
 import type { Card, Finish, PriceEntry } from './types'
-import { ebaySoldLink, tcgplayerSearchLink } from './util'
+import { ebaySoldLink, sleep, tcgplayerSearchLink } from './util'
 
 const API = 'https://api.scryfall.com'
+
+/**
+ * Scryfall asks every client for 50–100ms between requests and answers 429 —
+ * with a block that outlives the burst — when one ignores that. Nothing here
+ * spaced requests, and a scan session is the opposite of spaced: the fan-out
+ * runs a lookup per OCR candidate, per band, per orientation, so a user
+ * working through a stack of cards could earn a block and then be told a card
+ * they are holding "isn't in the database". Coming back later worked, which
+ * is exactly what a temporary block looks like from the outside.
+ *
+ * One request at a time with a minimum gap, measured from each request's
+ * START: a request slower than the gap has already paid it, so on the network
+ * this app actually runs on, the queue costs a scan nothing it wasn't already
+ * waiting for.
+ */
+const MIN_REQUEST_GAP_MS = 100
+let chain: Promise<unknown> = Promise.resolve()
+let lastRequestAt = 0
+
+function scryfall<T = any>(url: string, options?: FetchJsonOptions): Promise<T> {
+  const run = async (): Promise<T> => {
+    const gap = MIN_REQUEST_GAP_MS - (Date.now() - lastRequestAt)
+    if (gap > 0) await sleep(gap)
+    if (options?.signal?.aborted) throw options.signal.reason
+    lastRequestAt = Date.now()
+    return fetchJson<T>(url, options)
+  }
+  const queued = chain.then(run, run)
+  // The chain itself must never carry a rejection forward, or one failed
+  // lookup would reject every request queued behind it.
+  chain = queued.then(
+    () => undefined,
+    () => undefined,
+  )
+  return queued
+}
+
+/**
+ * Scryfall answers 404 for "no card matches", which is an answer, not a fault.
+ * The status is the real test; the message is a fallback for errors built
+ * without one. Anchored either way — the old `message.includes('404')` would
+ * read a 404 out of any response body that happened to mention one.
+ */
+function isNotFound(err: unknown): boolean {
+  const status = httpStatus(err)
+  if (status != null) return status === 404
+  return /^HTTP 404\b/.test(String((err as { message?: unknown } | null)?.message ?? ''))
+}
+
+/**
+ * A throttled client can still meet a block earned earlier in the session, and
+ * "HTTP 429: {json}" tells a user nothing they can act on.
+ */
+function friendlier(err: unknown): unknown {
+  return httpStatus(err) === 429
+    ? new Error('Scryfall is rate-limiting this device — wait a moment and search again')
+    : err
+}
 
 function toCard(raw: any): Card {
   const entries: PriceEntry[] = []
@@ -75,11 +133,14 @@ function primaryType(typeLine: string): string {
 export async function searchMtg(query: string, signal?: AbortSignal): Promise<Card[]> {
   const url = `${API}/cards/search?q=${encodeURIComponent(query)}&unique=cards&order=name`
   try {
-    const res = await fetchJson(url, { signal })
+    // A user typed this and is watching the screen: one retry through a 429 or
+    // a 502 is worth more to them than an instant "no results" for a card they
+    // are holding in their hand.
+    const res = await scryfall(url, { signal, retries: 2 })
     return (res.data ?? []).slice(0, 30).map(toCard)
-  } catch (err: any) {
-    if (err.message.includes('404')) return []
-    throw err
+  } catch (err) {
+    if (isNotFound(err)) return []
+    throw friendlier(err)
   }
 }
 
@@ -99,11 +160,11 @@ export async function mtgBySetNumber(setCode: string, number: string, printedTot
   try {
     const set = setCode.toLowerCase()
     if (printedTotal != null) {
-      const info = await fetchJson(`${API}/sets/${set}`)
+      const info = await scryfall(`${API}/sets/${set}`)
       const size = Number(info?.printed_size ?? info?.card_count)
       if (!Number.isFinite(size) || size !== Number(printedTotal)) return null
     }
-    const res = await fetchJson(`${API}/cards/${set}/${encodeURIComponent(number.toLowerCase())}`)
+    const res = await scryfall(`${API}/cards/${set}/${encodeURIComponent(number.toLowerCase())}`)
     return res?.id ? toCard(res) : null
   } catch {
     return null
@@ -114,7 +175,7 @@ export async function mtgBySetNumber(setCode: string, number: string, printedTot
 export async function matchMtg(name: string, setCode?: string | null, number?: string | null): Promise<Card | null> {
   try {
     if (setCode && number) {
-      const res = await fetchJson(`${API}/cards/${setCode.toLowerCase()}/${encodeURIComponent(number)}`)
+      const res = await scryfall(`${API}/cards/${setCode.toLowerCase()}/${encodeURIComponent(number)}`)
       return toCard(res)
     }
   } catch {
@@ -123,7 +184,7 @@ export async function matchMtg(name: string, setCode?: string | null, number?: s
   try {
     const params = new URLSearchParams({ fuzzy: name })
     if (setCode) params.set('set', setCode.toLowerCase())
-    const res = await fetchJson(`${API}/cards/named?${params}`)
+    const res = await scryfall(`${API}/cards/named?${params}`)
     return toCard(res)
   } catch {
     return setCode ? matchMtg(name) : null
@@ -136,11 +197,14 @@ export async function mtgCollection(ids: string[]): Promise<Map<string, Card>> {
   for (let i = 0; i < ids.length; i += 75) {
     const chunk = ids.slice(i, i + 75)
     try {
-      const res = await fetchJson(`${API}/cards/collection`, {
+      const res = await scryfall(`${API}/cards/collection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifiers: chunk.map((id) => ({ id })) }),
         timeoutMs: 20_000,
+        // A dropped chunk is 75 cards silently missing their new prices, and
+        // this is the endpoint a bulk refresh hammers hardest.
+        retries: 1,
       })
       for (const raw of res.data ?? []) found.set(raw.id, toCard(raw))
     } catch {
@@ -152,7 +216,7 @@ export async function mtgCollection(ids: string[]): Promise<Map<string, Card>> {
 
 export async function mtgById(id: string): Promise<Card | null> {
   try {
-    return toCard(await fetchJson(`${API}/cards/${id}`))
+    return toCard(await scryfall(`${API}/cards/${id}`))
   } catch {
     return null
   }
@@ -172,11 +236,13 @@ export async function rawPrintings(name: string, setCode?: string | null, signal
     .join(' ')
   const url = `${API}/cards/search?q=${encodeURIComponent(query)}&unique=prints&order=released&dir=desc`
   try {
-    const res = await fetchJson(url, { signal })
+    // Also user-initiated — this is the printings picker, opened by someone who
+    // already knows the scanner picked the wrong edition.
+    const res = await scryfall(url, { signal, retries: 2 })
     return res.data ?? []
-  } catch (err: any) {
-    if (err.message?.includes('404')) return []
-    throw err
+  } catch (err) {
+    if (isNotFound(err)) return []
+    throw friendlier(err)
   }
 }
 

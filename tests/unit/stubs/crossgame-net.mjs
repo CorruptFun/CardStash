@@ -46,7 +46,7 @@ export async function fetchJson(url) {
   requested.push(url)
 
   // The primary Pokémon API is down — the condition that leaves the field open.
-  if (url.includes('api.pokemontcg.io')) throw new Error('HTTP 500 for ' + url)
+  if (url.includes('api.pokemontcg.io')) throw Object.assign(new Error('HTTP 500 for ' + url), { status: 500 })
 
   // TCGdex (the Pokémon fallback) has no card by this name.
   if (url.includes('api.tcgdex.net')) {
@@ -55,7 +55,7 @@ export async function fetchJson(url) {
   }
 
   // Scryfall answers "no card matched".
-  if (url.includes('api.scryfall.com')) throw new Error('HTTP 404 for ' + url)
+  if (url.includes('api.scryfall.com')) throw Object.assign(new Error('HTTP 404 for ' + url), { status: 404 })
 
   // Lorcast has nothing either.
   if (url.includes('api.lorcast.com')) return { results: [] }
@@ -77,7 +77,12 @@ export async function fetchJson(url) {
     }
   }
 
-  throw new Error('HTTP 404 for ' + url)
+  throw Object.assign(new Error('HTTP 404 for ' + url), { status: 404 })
 }
 
 export { COLLIDING_READ }
+
+/** Mirrors fetchJson's real export: the status rides on the rejection. */
+export function httpStatus(err) {
+  return typeof err?.status === 'number' ? err.status : null
+}

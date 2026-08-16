@@ -22,17 +22,22 @@ export async function fetchJson(url) {
   if (m) {
     const set = SETS[m[1]]
     if (set) return set
-    throw new Error(`HTTP 404 for ${url}`)
+    throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   }
   m = u.pathname.match(/^\/cards\/([^/]+)\/([^/]+)$/)
   if (m) {
     const print = PRINTS[`${m[1]}/${m[2]}`]
     if (print) return print
-    throw new Error(`HTTP 404 for ${url}`)
+    throw Object.assign(new Error(`HTTP 404 for ${url}`), { status: 404 })
   }
   throw new Error(`scryfall-net stub: unexpected url ${url}`)
 }
 
 export function isAbort() {
   return false
+}
+
+/** Mirrors fetchJson's real export: the status rides on the rejection. */
+export function httpStatus(err) {
+  return typeof err?.status === 'number' ? err.status : null
 }
