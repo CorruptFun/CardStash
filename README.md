@@ -13,8 +13,9 @@ storage all work from there.
 
 - **Scan** — live camera identification that runs **entirely on your device**:
   text recognition reads the card name and the collector line, a pixel check
-  spots foil sheen, price chip pops up, one tap to collect. No image ever leaves
-  the phone, no account and no API key are needed, and it works offline.
+  spots foil sheen, price chip pops up, one tap to collect. No account is needed
+  and it works offline. No image leaves the phone unless you switch on cloud
+  rescue, which is off by default and only fires on a scan already in trouble.
 - **Search** — Scryfall (Magic), pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!),
   Lorcast (Lorcana) and TCGplayer data via TCGCSV (Riftbound, One Piece, Star
   Wars: Unlimited, Digimon, Gundam) — with prices, comps, printings and history.
@@ -24,8 +25,9 @@ storage all work from there.
   and builds the card from that, entirely on-device. Value is your own figure,
   next to a one-tap eBay sold-comps link built from every attribute it read.
 - **Graded slabs** — scan a PSA, BGS, SGC or CGC holder and it reads the label:
-  company, grade, qualifier and cert number. On PSA holders the cert resolves to
-  the exact card automatically — no key to bring, nothing to set up. Grades work
+  company, grade, qualifier and cert number. On PSA holders the cert can resolve
+  to the exact card — no key to bring, nothing to set up, though the lookup runs
+  on a shared daily quota and is an enhancement rather than a promise. Grades work
   on every game, not just sports — a PSA 10 is tracked as its own copy and never
   merges with your raw one.
 - **Collection** — portfolio value, 30-day insights, cost basis / P&L, movers,
@@ -33,9 +35,10 @@ storage all work from there.
 - **Decks** — build by hand from search or your collection, assign cards you own
   to decks from the card view (and see which decks a card is in), mana curve /
   color / type stats, owned-vs-missing costing.
-- **AI builder** — bring a free Gemini key; it researches the current meta with
-  live search and proposes decks from your collection, optionally built around
-  specific seed cards you pick.
+- **AI builder** — researches the current meta with live search and proposes
+  decks from your collection, optionally built around specific seed cards you
+  pick. It runs on our hosted key, so it needs an account: a free monthly
+  allowance of builds, raised by a subscription.
 - **Friends & trades** — mark copies "for trade", share your binder (or whole
   collection) as a link or file, follow friends' binders the same way (host the
   file at a stable URL — e.g. a GitHub Gist — and refresh anytime), then
@@ -45,13 +48,20 @@ storage all work from there.
   wants travel with your binder share, so both sides see matches highlighted:
   cards of theirs you're hunting, cards of yours they're hunting, one-tap
   select in the trade composer, and +added/−removed diffs on every refresh.
-- **An account (optional)** — sign in with an emailed code and claim an
-  `@handle`. Friends then add you by handle instead of a link, trade offers
-  arrive in the app, friends' binders refresh themselves, and you can see which
-  collectors are offering the cards on your want list. Claiming a handle
-  publishes **no cards**; putting your binder up is a separate switch, and what
-  you share decides who can read it — a for-trade list is findable by any
-  signed-in collector, a whole collection only by friends you accept.
+- **An account** — sign in with an emailed code (an email address *is* the
+  account; there is no separate sign-up) and your collection **backs itself up
+  from then on**, with no switch to find and no passphrase to remember; sign in
+  on a second device and the cards come down to it. Claim an `@handle` and
+  friends add you by handle instead of a link, trade offers arrive in the app,
+  friends' binders refresh themselves, and you can see which collectors anywhere
+  are offering the cards on your want list. Claiming a handle publishes **no
+  cards**; putting your binder up is a separate switch, and what you share
+  decides who can read it — a for-trade list is findable by any signed-in
+  collector, a whole collection only by friends you accept.
+
+  The server copy is **not optional once you are signed in**, and it is
+  encrypted at rest with a key held server-side — protected storage, not
+  end-to-end encryption. See [`docs/privacy.md`](docs/privacy.md).
 
 - **Backup (optional)** — keep a daily copy of everything in **your own Google
   Drive**, in a private folder only this app can see. Your browser talks to
@@ -61,12 +71,14 @@ storage all work from there.
 
 Everything is stored locally (IndexedDB). **No account and no server required**
 — that stays true however far the app grows: scanning, your collection, decks
-and link-based sharing all work offline with nothing signed in. API keys live
-on-device and are sent only to their own services. Social works serverlessly by
-default: a share link *is* the data (compressed into the URL), so nothing is
-published anywhere unless you send it to someone. The optional extras — Drive
-backup, the encrypted cloud vault, an account for friends and trades — are
-things you switch on, never things you're switched into.
+and link-based sharing all work offline with nothing signed in. Social works
+serverlessly by default: a share link *is* the data (compressed into the URL),
+so nothing is published anywhere unless you send it to someone.
+
+Signing in is the one thing that changes that, and it changes it deliberately:
+from then on your collection is also copied to our server, automatically, so a
+lost phone is not a lost collection. That copy is not a switch you can leave
+off while signed in — Drive backup and *publishing* a binder still are.
 
 ## Documentation
 
