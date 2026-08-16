@@ -269,6 +269,17 @@ export interface CollectionItem {
   purchasePrice?: number
   /** Copies of this row offered for trade (0..qty); absent = none. */
   forTrade?: number
+  /**
+   * The physical binder this row is filed in (`Binder.id`), if any.
+   *
+   * Part of a row's IDENTITY, like `grade` and `opened`: the same printing in
+   * two binders is two rows, because "which binder is my second Charizard in"
+   * is the question a binder label exists to answer, and one merged row of
+   * qty 2 cannot answer it. Rows with no binder merge as they always did.
+   */
+  binderId?: string
+  /** 1-based page within that binder, when a page scan knew which page it was. */
+  binderPage?: number
   note?: string
   addedAt: number
   /**
@@ -290,6 +301,28 @@ export interface Tombstone {
   /** The deleted CollectionItem's id. */
   id: string
   at: number
+}
+
+/**
+ * A physical binder, box or shelf the user keeps cards in.
+ *
+ * This is a LOCATION, not a second collection: a binder holds no cards of its
+ * own, it is a label collection rows point at (`CollectionItem.binderId`).
+ * Deleting one therefore deletes a label and never a card — see
+ * `deleteBinder` in db.ts.
+ *
+ * Nothing about it is shared. `binders` on the server (docs/social.md) is the
+ * unrelated published-trade-binder document; these never leave the device
+ * except inside the user's own backup and vault.
+ */
+export interface Binder {
+  id: string
+  name: string
+  /** Where the physical thing lives — "shelf 2, left" — free text on the label. */
+  note?: string
+  createdAt: number
+  /** Last rename/edit; the field the vault merge decides collisions on. */
+  updatedAt: number
 }
 
 export type DeckBoard = 'main' | 'side' | 'extra'

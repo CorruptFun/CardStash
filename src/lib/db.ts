@@ -1,9 +1,11 @@
 import Dexie, { type Table } from 'dexie'
 import { sanitizeGrade } from './slab'
+import { binderId as newBinderId, cleanBinderName, cleanBinderNote, cleanBinderPage, sanitizeBinder } from './binders'
 import { customCard, mergePatch, mergePatches, sanitizePatch, unmergePatch } from './cardpatch'
 import { GAMES, FINISH_LABEL } from './games'
 import { ygoPrintingVariants } from './ygo'
 import type {
+  Binder,
   Card,
   CardPatch,
   CatalogCache,
@@ -50,6 +52,7 @@ class CardstockDB extends Dexie {
   wants!: Table<WantRow, string>
   tombstones!: Table<Tombstone, string>
   patches!: Table<CardPatch, string>
+  binders!: Table<Binder, string>
 
   constructor() {
     super('cardstock')
@@ -126,6 +129,24 @@ class CardstockDB extends Dexie {
     this.version(8).stores({ patches: 'cardId, game, updatedAt' })
 
     /**
+     * v9: binders — the physical shelf, box or ring binder a card is filed in
+     * (`lib/binders.ts`). The table holds only the label; the link lives on the
+     * collection row, which is why `collection` is restated here to index
+     * `binderId`. Without that index "show me this binder" is a full scan of
+     * the collection on every render of a screen whose whole job is that one
+     * query.
+     *
+     * Binders are NOT tombstoned, exactly as decks are not. A deleted binder
+     * resurrecting from another device costs the user a stale label they can
+     * delete again; the alternative is mixing two kinds of id into a table the
+     * collection merge reads by id, which costs them cards.
+     */
+    this.version(9).stores({
+      binders: 'id, name, updatedAt',
+      collection: 'id, cardId, game, name, addedAt, updatedAt, binderId',
+    })
+
+    /**
      * Stamped by hook rather than at the ~14 call sites that write collection
      * rows. A hook cannot be forgotten by the next write path somebody adds,
      * which is the entire difference between a seam and a game of whack-a-mole.
@@ -195,6 +216,10 @@ export interface AddOptions {
   grade?: GradeInfo
   /** Collector-set value per copy, USD. */
   marketValue?: number
+  /** The physical binder this copy is being filed into. */
+  binderId?: string
+  /** Which page of that binder — 1-based, from a page scan. */
+  binderPage?: number
 }
 
 /** Normalize a for-trade count against a row's qty (0 stores as absent). */
@@ -226,6 +251,19 @@ function sameOpened(a: { opened?: boolean }, b: { opened?: boolean }): boolean {
   return (a.opened ?? false) === (b.opened ?? false)
 }
 
+/**
+ * Copies filed in different binders are different rows.
+ *
+ * The same reasoning as `sameGrade`: the printing is identical, the holding is
+ * not. A binder label answers "what is in THIS binder", and one merged row of
+ * qty 2 spanning two binders cannot answer it — the second binder would list a
+ * card that is not in it, or lose one that is. Unfiled rows (no binder on
+ * either side) merge exactly as they always have.
+ */
+function sameBinder(a: { binderId?: string }, b: { binderId?: string }): boolean {
+  return (a.binderId ?? '') === (b.binderId ?? '')
+}
+
 /** Add copies to the collection, merging into an existing printing+finish+condition row. */
 export async function addToCollection(card: Card, opts: AddOptions = {}): Promise<CollectionItem> {
   const finish = opts.finish ?? 'nonfoil'
@@ -242,6 +280,7 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
           item.condition === condition &&
           samePrinting(item, card) &&
           sameOpened(item, { opened }) &&
+          sameBinder(item, opts) &&
           sameGrade(item, { grade: opts.grade }),
       )
       .first()
@@ -255,6 +294,10 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
         qty: existing.qty + qty,
         forTrade: tradeCount((existing.forTrade ?? 0) + (opts.forTrade ?? 0), existing.qty + qty),
         purchasePrice,
+        // Same binder by definition (it is part of the match), but a second
+        // page scan of the same card in the same binder knows a page the first
+        // one may not have.
+        binderPage: existing.binderPage ?? cleanBinderPage(opts.binderPage),
         card,
       }
       await db.collection.put(merged)
@@ -274,6 +317,8 @@ export async function addToCollection(card: Card, opts: AddOptions = {}): Promis
       qty,
       opened,
       forTrade: tradeCount(opts.forTrade, qty),
+      binderId: opts.binderId || undefined,
+      binderPage: opts.binderId ? cleanBinderPage(opts.binderPage) : undefined,
       purchasePrice: opts.purchasePrice,
       note: opts.note,
       addedAt: Date.now(),
@@ -330,7 +375,17 @@ export async function updateItem(
   patch: Partial<
     Pick<
       CollectionItem,
-      'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade' | 'grade' | 'marketValue'
+      | 'finish'
+      | 'condition'
+      | 'opened'
+      | 'purchasePrice'
+      | 'note'
+      | 'card'
+      | 'forTrade'
+      | 'grade'
+      | 'marketValue'
+      | 'binderId'
+      | 'binderPage'
     >
   >,
 ): Promise<CollectionItem | null> {
@@ -349,6 +404,7 @@ export async function updateItem(
           other.condition === edited.condition &&
           samePrinting(other, edited) &&
           sameOpened(other, edited) &&
+          sameBinder(other, edited) &&
           sameGrade(other, edited),
       )
       .first()
@@ -379,6 +435,95 @@ export async function removeItems(ids: string[]): Promise<void> {
     await db.collection.bulkDelete(ids)
     await tombstone(ids)
   })
+}
+
+/* --- binders (where the physical card actually is) ------------------------ */
+
+/**
+ * Binders are labels, and everything here follows from that.
+ *
+ * `deleteBinder` unfiles cards and never deletes one — the user is throwing
+ * away a label, and a delete that quietly took 400 cards with it would be
+ * discovered far too late. `setItemsBinder` goes row by row through
+ * `Table.update` rather than `bulkPut` so the `updating` hook stamps
+ * `updatedAt` on each one, which is what the vault merge decides on: a bulk
+ * write that skipped the hook would file cards here and lose them on the next
+ * sync from another device.
+ */
+export async function createBinder(name: string, note?: string): Promise<Binder> {
+  const now = Date.now()
+  const binder: Binder = {
+    id: newBinderId(),
+    name: cleanBinderName(name) || 'Untitled binder',
+    note: note ? cleanBinderNote(note) || undefined : undefined,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await db.binders.add(binder)
+  return binder
+}
+
+export async function updateBinder(id: string, patch: { name?: string; note?: string }): Promise<void> {
+  const changes: Partial<Binder> = { updatedAt: Date.now() }
+  if (patch.name != null) changes.name = cleanBinderName(patch.name) || 'Untitled binder'
+  if (patch.note != null) changes.note = cleanBinderNote(patch.note) || undefined
+  await db.binders.update(id, changes)
+}
+
+/**
+ * Drop the label. Returns how many collection rows were unfiled, so the caller
+ * can say so — "deleted, 214 cards kept" is the sentence that makes this
+ * button safe to press.
+ */
+export async function deleteBinder(id: string): Promise<number> {
+  return db.transaction('rw', [db.binders, db.collection], async () => {
+    const unfiled = await db.collection
+      .where('binderId')
+      .equals(id)
+      .modify((item) => {
+        delete item.binderId
+        delete item.binderPage
+      })
+    await db.binders.delete(id)
+    return unfiled
+  })
+}
+
+/** File (or unfile, with `null`) a set of collection rows. */
+export async function setItemsBinder(ids: string[], binderId: string | null, page?: number): Promise<void> {
+  const cleanPage = cleanBinderPage(page)
+  await db.transaction('rw', db.collection, async () => {
+    for (const id of ids) {
+      await db.collection.update(id, {
+        binderId: binderId || undefined,
+        binderPage: binderId ? cleanPage : undefined,
+      })
+    }
+  })
+}
+
+/** Binder id → name, for the exports that must write a name rather than an id. */
+export async function binderNameMap(): Promise<Map<string, string>> {
+  const rows = await db.binders.toArray()
+  return new Map(rows.map((binder) => [binder.id, binder.name]))
+}
+
+/** Find a binder by name (case-insensitively), or make it — the CSV importer's door. */
+export async function binderByName(name: string): Promise<Binder> {
+  const clean = cleanBinderName(name)
+  const key = clean.toLowerCase()
+  return db.transaction('rw', db.binders, async () => {
+    const existing = (await db.binders.toArray()).find((binder) => binder.name.toLowerCase() === key)
+    if (existing) return existing
+    const now = Date.now()
+    const binder: Binder = { id: newBinderId(), name: clean || 'Untitled binder', createdAt: now, updatedAt: now }
+    await db.binders.add(binder)
+    return binder
+  })
+}
+
+export function binderItems(id: string): Promise<CollectionItem[]> {
+  return db.collection.where('binderId').equals(id).toArray()
 }
 
 /* --- friends & trades (social) ------------------------------------------- */
@@ -902,6 +1047,13 @@ export interface Backup {
   trades: TradeRecord[]
   wants: WantRow[]
   /**
+   * The user's binder labels. Optional on the way IN (every backup written
+   * before v9 lacks them and must still restore), always written on the way
+   * out — a restore that brought the cards back and left every one of them
+   * unfiled would silently undo an evening of scanning a shelf into order.
+   */
+  binders?: Binder[]
+  /**
    * User-authored card data. Optional on the way IN — every backup written
    * before v8 lacks it and must still restore — but always written on the way
    * out. A photo the user took of their own card exists nowhere else in the
@@ -972,6 +1124,7 @@ export async function exportBackup(options: ExportOptions = {}): Promise<Backup>
     friends: await db.friends.toArray(),
     trades: await db.trades.toArray(),
     wants: await db.wants.toArray(),
+    binders: await db.binders.toArray(),
     patches: budgeted,
   }
 }
@@ -1040,6 +1193,10 @@ export function sanitizeBackup(raw: unknown): Backup {
       qty: cleanQty,
       opened: typeof entry.opened === 'boolean' ? entry.opened : undefined,
       forTrade: tradeCount(asPositive(entry.forTrade), cleanQty),
+      // The spread above would carry any shape at all through; a binder id is
+      // a key another table is looked up by, so it is coerced explicitly.
+      binderId: asString(entry.binderId),
+      binderPage: asString(entry.binderId) ? cleanBinderPage(entry.binderPage) : undefined,
       purchasePrice: asPositive(entry.purchasePrice),
       grade: sanitizeGrade(entry.grade),
       marketValue: asPositive(entry.marketValue),
@@ -1114,6 +1271,12 @@ export function sanitizeBackup(raw: unknown): Backup {
     if (want) wants.push(want)
   }
 
+  const binders: Binder[] = []
+  for (const entry of asArray(raw.binders)) {
+    const binder = sanitizeBinder(entry)
+    if (binder) binders.push(binder)
+  }
+
   const patches: CardPatch[] = []
   for (const entry of asArray(raw.patches)) {
     // Same sanitizer a pasted link and the shared index go through: a backup
@@ -1133,6 +1296,7 @@ export function sanitizeBackup(raw: unknown): Backup {
     friends,
     trades,
     wants,
+    binders,
     patches,
   }
 }
@@ -1141,7 +1305,18 @@ export async function importBackup(raw: unknown): Promise<void> {
   const backup = sanitizeBackup(raw)
   await db.transaction(
     'rw',
-    [db.collection, db.decks, db.deckCards, db.history, db.friends, db.trades, db.wants, db.tombstones, db.patches],
+    [
+      db.collection,
+      db.decks,
+      db.deckCards,
+      db.history,
+      db.friends,
+      db.trades,
+      db.wants,
+      db.binders,
+      db.tombstones,
+      db.patches,
+    ],
     async () => {
       await db.collection.bulkPut(backup.collection)
       // Restoring a row is the user un-deleting it. Leave the tombstone in
@@ -1154,6 +1329,7 @@ export async function importBackup(raw: unknown): Promise<void> {
       await db.friends.bulkPut(backup.friends)
       await db.trades.bulkPut(backup.trades)
       await db.wants.bulkPut(backup.wants)
+      if (backup.binders?.length) await db.binders.bulkPut(backup.binders)
       if (backup.patches?.length) await db.patches.bulkPut(backup.patches)
     },
   )
@@ -1174,6 +1350,7 @@ export async function clearAllData(): Promise<void> {
       db.friends,
       db.trades,
       db.wants,
+      db.binders,
       db.tombstones,
       db.patches,
     ],
@@ -1191,6 +1368,7 @@ export async function clearAllData(): Promise<void> {
         db.friends.clear(),
         db.trades.clear(),
         db.wants.clear(),
+        db.binders.clear(),
         db.patches.clear(),
       ])
     },

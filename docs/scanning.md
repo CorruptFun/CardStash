@@ -524,6 +524,34 @@ Three constants carry the design:
 
 `MAX_PAGE_CARDS` is 12.
 
+### Page after page — one binder, one review
+
+A binder is not one page, and the person filing one shoots the lot. So a page
+scan opens a **session** rather than a screen: "Next page" parks the review
+behind the viewfinder, the next tap appends that page's rows under their own
+heading, and the confirm at the end files everything at once.
+
+Three things hold it together:
+
+- `scanPage({ page })` stamps a 1-based page number on every `PageCard` (and
+  into its row key, so ids stay unique across pages). A page that reads nothing
+  gives its number back rather than leaving a hole in the numbering of a real
+  binder.
+- The review screen is **parked, never unmounted** (`.binder--parked` is
+  `display: none`). Remounting would reset every tick the user had already
+  made on the earlier pages and the binder they had already chosen — the exact
+  silent undo the review exists to prevent. `ScanView` keeps the accumulated
+  cards; `BinderReview` appends new ones through an id set, because a partial
+  save removes rows it filed and matching on the current list would put them
+  straight back.
+- While parked the camera is live (the review no longer counts as `reviewOpen`)
+  and a resume bar is on screen — it is the only route back to cards that are
+  not saved anywhere yet.
+
+The binder is chosen once, on the review screen, and rides onto every filed row
+as `binderId` + `binderPage`. That is what a printed QR label points at later
+(data-model.md, `Binder`).
+
 ## 6a. Batch add — the tray as a review screen (`components/ScanBatch.tsx`)
 
 Single scanning has always logged every hit to `db.scans` and shown the last

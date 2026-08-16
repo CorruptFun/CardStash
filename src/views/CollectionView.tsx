@@ -4,6 +4,7 @@ import { SPORT_LABEL, SPORTS } from '../lib/sports'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatedNumber, CardImg, Empty, Modal } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
+import { BinderPickerModal } from './BindersView'
 import { Icon } from '../components/Icon'
 import { track } from '../lib/analytics'
 import { refreshCards, resolveImportRows } from '../lib/cardsearch'
@@ -12,6 +13,8 @@ import {
   addToCollection,
   addCardToDeck,
   applyCardUpdate,
+  binderByName,
+  binderNameMap,
   db,
   exportBackup,
   historySince,
@@ -131,6 +134,7 @@ export function CollectionView() {
   const [dataOpen, setDataOpen] = useState(false)
   const [busyText, setBusyText] = useState<string | null>(null)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
+  const [binderPickOpen, setBinderPickOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const refreshingRef = useRef(false)
   const refreshAbortRef = useRef<AbortController | null>(null)
@@ -340,7 +344,9 @@ export function CollectionView() {
 
   const exportCsv = async () => {
     const scope = exportScope(all, shown, editMode, selected)
-    downloadFile(`cardstock-${scope.name}-${ymd()}.csv`, collectionToCsv(scope.rows), 'text/csv')
+    // Names, not ids: a CSV is read on another machine, or by another app.
+    const names = await binderNameMap()
+    downloadFile(`cardstock-${scope.name}-${ymd()}.csv`, collectionToCsv(scope.rows, names), 'text/csv')
     setDataOpen(false)
     toast(
       scope.name === 'selection'
@@ -395,6 +401,8 @@ export function CollectionView() {
     const rows = parseCollectionCsv(text)
     setBusyText(`Importing 0/${rows.length}…`)
     const startedAt = performance.now()
+    /** Binder name (lowercased) → id, so one shelf is created once per file. */
+    const binderCache = new Map<string, string>()
     let done = 0
     let failed = 0
     const stats = await resolveImportRows(rows, {
@@ -402,6 +410,20 @@ export function CollectionView() {
       onRow: async (row, card) => {
         if (card) {
           const csvRow = row as CsvImportRow
+          // A "Binder"/"Location" column names a shelf, so the shelf gets made
+          // once and reused — a file with 300 rows in "Rares" must not leave
+          // 300 binders behind it.
+          let binder: string | undefined
+          if (csvRow.binder) {
+            binder = binderCache.get(csvRow.binder.toLowerCase())
+            if (!binder) {
+              const made = await guarded(() => binderByName(csvRow.binder!), 'Import')
+              if (made) {
+                binder = made.id
+                binderCache.set(csvRow.binder.toLowerCase(), made.id)
+              }
+            }
+          }
           const saved = await guarded(
             () =>
               addToCollection(card, {
@@ -410,6 +432,8 @@ export function CollectionView() {
                 qty: csvRow.qty,
                 purchasePrice: csvRow.purchasePrice,
                 forTrade: csvRow.forTrade,
+                binderId: binder,
+                binderPage: csvRow.binderPage,
               }),
             'Import',
           )
@@ -613,6 +637,9 @@ export function CollectionView() {
         >
           <Icon name="pencil" size={15} /> Edit
         </button>
+        <a className="btn btn--ghost btn--sm" href="#/binders">
+          <Icon name="binder" size={15} /> Binders
+        </a>
         <button className="btn btn--ghost btn--sm" onClick={() => setDataOpen(true)}>
           <Icon name="download" size={15} /> Data
         </button>
@@ -692,6 +719,11 @@ export function CollectionView() {
           <button className="btn btn--ghost btn--sm" onClick={() => setDeckPickOpen(true)}>
             <Icon name="decks" size={15} /> Deck
           </button>
+          {/* Where the card physically is, for the rows that were in the app
+            * long before their binder was. */}
+          <button className="btn btn--ghost btn--sm" onClick={() => setBinderPickOpen(true)}>
+            <Icon name="binder" size={15} /> Binder
+          </button>
           <button
             className="btn btn--ghost btn--sm"
             onClick={() => {
@@ -720,6 +752,14 @@ export function CollectionView() {
         onBuildNew={buildAroundSelection}
         buildLabel={`Build a deck around ${selected.size === 1 ? 'this card' : 'these cards'}`}
         emptyHint="No decks yet — the AI builder can design one around your selection, or create one on the Decks tab first."
+      />
+      <BinderPickerModal
+        open={binderPickOpen}
+        ids={[...selected]}
+        onClose={() => {
+          setBinderPickOpen(false)
+          setSelected(new Set())
+        }}
       />
       <DataMenu
         open={dataOpen}

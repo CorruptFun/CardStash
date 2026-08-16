@@ -52,8 +52,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   after applying `0013` and after any migration touching the card index; it is
   what proves the anon-read / authenticated-write asymmetry actually holds,
   which no schema read can show.
+- `npm run test:binder` — the binder screens end to end (filing, the label, the
+  link a printed QR carries, and the delete that must keep every card). No
+  camera, no fixtures.
 - `npm run test:unit` — node tests (corner parsing, name candidates, card
-  patches, harness stubs). `npm run test:scan` — the real-image scan regression matrix
+  patches, the QR encoder against a real decoder, harness stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
   machine-generated `harness-fixtures` branch — never merge it).
   `npm run test:photos` runs the hand-curated real photographs in
@@ -82,7 +85,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
   an `opened` flag and stop counting at the sealed price once opened),
   multi-card / binder scanning (`multiscan.ts` — detect regions, crop, identify
-  each on a reduced per-card budget; the UI reviews before anything is added),
+  each on a reduced per-card budget; the UI reviews before anything is added,
+  and a session spans page after page of one binder), binders and their printed
+  QR labels (`binders.ts` + the dependency-free `qr.ts`),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
@@ -415,6 +420,41 @@ quota is now shared across all users rather than per-person. Certs cache for
 months and a 429 stands lookups down for hours. The real fix is a proxy holding
 the token server-side — point `VITE_PSA_ENDPOINT` at one and nothing else
 changes.
+
+## Binders — where the card physically is
+
+A binder is a **label on a real object, not a second collection**. Cards point
+at it (`CollectionItem.binderId` + `binderPage`); it holds nothing itself.
+`lib/binders.ts` is the pure core (names, printable ids, the label URL, page
+grouping, `sanitizeBinder`), `db.ts` owns the `binders` table (Dexie v9) and the
+CRUD, `views/BindersView.tsx` is the screen, `components/BinderLabel.tsx` the
+printed sheet and `lib/qr.ts` the encoder behind it. Read decision 23 and
+`docs/data-model.md` before touching any of it.
+
+Four things are load-bearing:
+
+- **Deleting a binder deletes no cards.** `deleteBinder` unfiles its rows and
+  returns how many, so the UI can say "214 cards kept". Nothing in this feature
+  may ever become a way to lose a card.
+- **The printed QR is a plain URL to this deployment** — `…#/binders/<id>`,
+  built from the app's own `location`, riding the FRAGMENT so a label works
+  offline and the id never reaches a server. Any phone camera opens it; it
+  carries no collection, so a stranger who scans it gets nothing. `#/binders/:id`
+  is printed on paper: it is the one route that can never be renamed.
+- **The encoder is ours and stays ours.** You print a label in the room the
+  binder is in. `tests/unit/qr.test.mjs` decodes what it emits with a real
+  decoder — a subtly wrong encoder still renders a plausible square, and the
+  sticker is already glued down by the time anyone notices.
+- **Binder is part of a collection row's identity** (`sameBinder`, beside
+  `sameGrade`/`sameOpened`): the same card in two binders is two rows, because
+  one merged row of qty 2 cannot say what is in *this* binder. Unfiled rows
+  merge exactly as they always did.
+
+A page scan is a **session**, not a screen: "Next page" parks the review behind
+the viewfinder and the next page's rows append under their own heading. The
+review is parked with `display:none`, never unmounted — remounting would throw
+away every tick already made and the binder already chosen. Run
+`npm run test:binder` (no camera, no fixtures) after touching any of it.
 
 ## Planned paid tier — binder scanning and photo upload
 

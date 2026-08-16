@@ -189,6 +189,29 @@ const PATHS: Record<string, JSX.Element> = {
   heart: (
     <path d="M12 20.2C6.8 16.7 3.6 13.5 3.6 10c0-2.6 2-4.8 4.6-4.8 1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9 2.6 0 4.6 2.2 4.6 4.8 0 3.5-3.2 6.7-8.4 10.2Z" />
   ),
+  /* A ring binder seen edge-on: covers, spine rings, pages. */
+  binder: (
+    <>
+      <path d="M7 4h11a1.6 1.6 0 0 1 1.6 1.6v12.8A1.6 1.6 0 0 1 18 20H7Z" />
+      <path d="M7 4a2.6 2.6 0 0 0-2.6 2.6v10.8A2.6 2.6 0 0 0 7 20" />
+      <path d="M7.6 8.4h1.8M7.6 12h1.8M7.6 15.6h1.8" />
+    </>
+  ),
+  qr: (
+    <>
+      <rect x="3.6" y="3.6" width="6.4" height="6.4" rx="1" />
+      <rect x="14" y="3.6" width="6.4" height="6.4" rx="1" />
+      <rect x="3.6" y="14" width="6.4" height="6.4" rx="1" />
+      <path d="M14 14h2.6v2.6H14zM17.8 17.8h2.6v2.6h-2.6zM14 20.4h1M20.4 14h-1" />
+    </>
+  ),
+  printer: (
+    <>
+      <path d="M7 9V4.6h10V9" />
+      <path d="M7 17.5H5.4A1.4 1.4 0 0 1 4 16.1v-4.7A1.4 1.4 0 0 1 5.4 10h13.2a1.4 1.4 0 0 1 1.4 1.4v4.7a1.4 1.4 0 0 1-1.4 1.4H17" />
+      <rect x="7" y="14.6" width="10" height="4.8" rx="1" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

@@ -12,6 +12,7 @@ import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
 import { CardEditorHost } from './components/CardEditor'
 import { CardSheetHost } from './views/CardSheet'
+import { BindersView } from './views/BindersView'
 import { CollectionView } from './views/CollectionView'
 import { DecksView } from './views/DecksView'
 import { FriendBinderView } from './views/FriendBinderView'
@@ -27,6 +28,8 @@ type Route =
   | { name: 'scan' }
   | { name: 'search' }
   | { name: 'collection' }
+  /** The binders screen, and the target a printed QR label opens: `#/binders/<id>`. */
+  | { name: 'binders'; binderId: string | null }
   | { name: 'decks'; deckId: string | null }
   | { name: 'builder' }
   | { name: 'settings' }
@@ -47,6 +50,8 @@ function parseRoute(hash: string): Route {
       return { name: 'search' }
     case 'collection':
       return { name: 'collection' }
+    case 'binders':
+      return { name: 'binders', binderId: parts[1] ? decodeURIComponent(parts[1]) : null }
     case 'decks':
       return { name: 'decks', deckId: parts[1] ?? null }
     case 'builder':
@@ -69,7 +74,7 @@ function parseRoute(hash: string): Route {
 const TABS: { route: string; icon: IconName; label: string; match: string[] }[] = [
   { route: '#/scan', icon: 'scan', label: 'Scan', match: ['scan'] },
   { route: '#/search', icon: 'search', label: 'Search', match: ['search'] },
-  { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection'] },
+  { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection', 'binders'] },
   { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'ingest'] },
   { route: '#/decks', icon: 'decks', label: 'Decks', match: ['decks', 'builder'] },
   { route: '#/settings', icon: 'settings', label: 'Settings', match: ['settings'] },
@@ -112,6 +117,9 @@ export function App() {
         </div>
         {route.name === 'search' && <SearchView />}
         {route.name === 'collection' && <CollectionView />}
+        {route.name === 'binders' && (
+          <BindersView key={route.binderId ?? 'all'} binderId={route.binderId} navigate={navigate} />
+        )}
         {route.name === 'decks' && <DecksView deckId={route.deckId} navigate={navigate} />}
         {route.name === 'builder' && <BuilderView navigate={navigate} />}
         {route.name === 'settings' && <SettingsView />}

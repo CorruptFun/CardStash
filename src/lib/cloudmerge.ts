@@ -151,6 +151,11 @@ export function mergeBackups(local: Backup, remote: Backup): MergeResult {
     friends: mergeTable(local.friends, remote.friends, byField('id'), 'addedAt', remoteWins, report),
     trades: mergeTable(local.trades, remote.trades, byField('id'), 'createdAt', remoteWins, report),
     wants: mergeTable(local.wants, remote.wants, byField('key'), 'addedAt', remoteWins, report),
+    // A binder is a label the user renames in place, so `updatedAt` decides —
+    // the device that last renamed it wins, whichever vault is newer overall.
+    // Deleting one is the known union gap (see above): it comes back until
+    // every device has seen the delete, and a stale label costs a tap.
+    binders: mergeTable(local.binders ?? [], remote.binders ?? [], byField('id'), 'updatedAt', remoteWins, report),
     // One patch per card, keyed by the card it patches, and it carries its own
     // `updatedAt` — so the device that most recently corrected a card wins,
     // regardless of which vault is newer overall.

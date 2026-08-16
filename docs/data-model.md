@@ -64,7 +64,7 @@ readers can filter those rows out instead of mislabelling them as dollars.
 One row = *N copies of one printing in one finish and one condition*.
 
 Row identity for merging is **cardId + finish + condition + setCode + number
-+ opened + grade**. `addToCollection` and `updateItem` both merge into an existing row
++ opened + grade + binderId**. `addToCollection` and `updateItem` both merge into an existing row
 on that identity; `updateItem` additionally merges when an edit collides with
 another row, summing quantities and quantity-weighting the cost basis.
 
@@ -76,12 +76,42 @@ another row, summing quantities and quantity-weighting the cost basis.
 | `marketValue` | Collector-set value per copy, USD. **Overrides every computed price** and is deliberately *not* scaled by the condition factor — they priced the copy in front of them. For sports it is the only figure there is (no price feed exists). |
 | `purchasePrice` | Per-copy cost basis, USD. Merges are quantity-weighted averages. |
 | `forTrade` | Copies offered for trade, `0 ≤ forTrade ≤ qty`. **Every write clamps through `tradeCount()`**; `0` stores as `undefined`. |
+| `binderId` | The physical binder this row is filed in (`Binder.id`). **Part of the merge key** (`sameBinder`), for the same reason `grade` is: the printing is identical, the holding is not, and one merged row of qty 2 cannot answer "what is in *this* binder". Rows with no binder merge exactly as they always did. Indexed (v9). |
+| `binderPage` | 1-based page within that binder, stamped by a page scan or typed in a CSV. Only meaningful with `binderId`; cleared with it. |
 | `card` | A denormalized snapshot of the `Card`, so the collection renders offline. `applyCardUpdate()` pushes fresh prices into every row that shows a card. |
 
 `applyCardUpdate` reshapes a freshly fetched card to the row's chosen printing
 (`cardForItem`): games where a printing is its own api id match directly; a YGO
 row re-picks its set variant so a refresh doesn't silently revert it to the
 default printing.
+
+### `Binder` — a label, not a container
+
+`{ id, name, note?, createdAt, updatedAt }`. A binder holds no cards: cards
+point at it. That one sentence decides the rest of the design.
+
+- **Deleting a binder deletes no cards.** `deleteBinder` clears `binderId` and
+  `binderPage` off its rows and drops the label, returning how many rows it
+  unfiled so the UI can say "214 cards kept".
+- **The id is printed on paper.** `binderId()` mints 10 characters of lowercase
+  base32 with `i`, `l`, `o`, `0` and `1` left out — it rides a QR code and gets
+  typed back off a scuffed sticker, so it avoids the glyphs a person confuses.
+  Ids are never reissued and never edited.
+- **A label is a URL, not a lookup.** `binderUrl()` builds
+  `<origin><path>#/binders/<id>` from the app's own location, so a label
+  printed from the deployed site opens the deployed site and one printed from a
+  self-hosted copy opens that. It rides the FRAGMENT: a printed label must work
+  offline, and a fragment never reaches a server even where one is listening.
+- **No tombstones**, exactly as decks have none. A deleted binder resurrecting
+  from an unsynced device costs a stale label; mixing binder ids into the
+  tombstone table the collection merge reads would cost cards.
+
+`lib/binders.ts` is the pure half (naming, ids, links, page grouping,
+`sanitizeBinder`), `db.ts` owns the table and the CRUD, `views/BindersView.tsx`
+is the screen and `components/BinderLabel.tsx` the printed sheet.
+`lib/qr.ts` is a dependency-free QR encoder that exists solely for that sheet —
+you print a label in the room the binder is in, which is exactly where an image
+API would fail.
 
 ### `GradeInfo` — a grade is a property of the copy
 
@@ -216,6 +246,7 @@ function.
 | 6 | `wants: 'key, game, addedAt'` |
 | 7 | `collection` gains `updatedAt`, `tombstones: 'id, at'`; **upgrade** backfills `updatedAt` from `addedAt` |
 | 8 | `patches: 'cardId, game, updatedAt'` — user-authored card images and fields. `custom` is deliberately **not** indexed: it is a boolean, IndexedDB has no boolean key type, and an index on one silently stores nothing |
+| 9 | `binders: 'id, name, updatedAt'`, and `collection` restated to index `binderId` — "show me this binder" is otherwise a full scan of the collection on every render of the screen whose whole job is that query |
 
 Adding a version: append a `this.version(n).stores({...})` block, never edit an
 existing one, and supply `.upgrade()` if stored rows need reshaping. See
@@ -228,7 +259,8 @@ collection rows must uphold them.
 
 1. `forTrade` is clamped to `[0, qty]` on **every** path — add, qty change,
    remove copies, edit, backup import, trade application.
-2. Sealed vs opened rows never merge (`sameOpened`).
+2. Sealed vs opened rows never merge (`sameOpened`), and rows in different
+   binders never merge (`sameBinder`).
 3. Cost bases combine as quantity-weighted averages (`averagePrice`).
 4. `applyTradeToCollection` decrements the *given* side preferring the exact
    printing, then rows already flagged for trade; copies the collection no
@@ -296,9 +328,16 @@ directly.
   "app": "cardstock", "version": 1, "exportedAt": "<ISO>",
   "collection": [...], "decks": [...], "deckCards": [...],
   "history": [...], "friends": [...], "trades": [...], "wants": [...],
-  "patches": [...]
+  "binders": [...], "patches": [...]
 }
 ```
+
+`binders` is optional on the way **in** (backups written before v9 lack it) and
+always written out: a restore that brought the cards back and left every one of
+them unfiled would silently undo an evening spent scanning a shelf into order.
+Rows go through `sanitizeBinder`, and a collection row's `binderId` is coerced
+explicitly rather than riding the row spread — it is a key another table is
+looked up by.
 
 `patches` is optional on the way **in** (every backup written before v8 lacks
 it) and always written on the way **out** — a photo the user took of their own

@@ -904,3 +904,59 @@ index. Or contributions arriving faster than one person can moderate, at which
 point the flag threshold stops being enough and this needs a review queue —
 that is a scale problem to solve when it exists, not a reason to build a
 moderation console for a table with nothing in it.
+
+---
+
+### 23. A binder is a label on a real object, and its QR is a link to nothing but this app
+
+**Why.** Somebody who scans a whole binder into the app has done the hard part
+and still cannot answer the only question they will actually ask afterwards:
+*which* binder is this card in, and where in it. So binders are first-class —
+but as **locations**, not as a second collection. A binder holds no cards; cards
+point at one (`CollectionItem.binderId`). Everything else follows from that:
+deleting a binder unfiles cards and deletes none, a card can be found without
+opening a binder, and the shelf can be reorganized without touching the
+collection.
+
+**The physical half is a printed QR, and it decides the design.** A sticker
+outlives the session that made it, the device that made it, and often the
+person's memory of making it. So:
+
+- **It carries a plain URL to this deployment**, `…#/binders/<id>`, built from
+  the app's own `location` — never a shortener, never an id that needs a server
+  to resolve. Any phone camera opens it; no account, no install, no network
+  beyond loading the app itself. A stranger who scans it sees whatever *their*
+  app has, which is nothing: the link carries no collection.
+- **It rides the fragment**, like every other route here, so a printed label
+  keeps working offline and never sends the id to a server even where one is
+  listening. (The referral code is the mirror image — `?via=` rides the search
+  string precisely so the two can never be confused; decision on referrals in
+  social.md.)
+- **The encoder is ours** (`lib/qr.ts`, ~400 lines, no dependency). You print a
+  label in the room the binder is in, frequently on a laptop that has never
+  signed into anything. An image API or a CDN script would be the one part of
+  this feature that fails while the rest of the app works. `tests/unit/qr.test.mjs`
+  decodes what it produces with a real decoder, because "it looks like a QR
+  code" is not evidence and a subtly wrong encoder produces a sticker that is
+  discovered to be useless weeks later, already glued down.
+- **The id is designed to be typed back.** Ten characters of base32 without
+  `i`, `l`, `o`, `0` or `1`, printed under the symbol in two groups of five. A
+  scuffed sticker is a solvable problem; an unprintable id is not.
+
+**The cost, stated plainly.** Binder + page make a collection row's identity
+(`sameBinder`, beside `sameGrade` and `sameOpened`), so the same card in two
+binders is two rows. That is the honest model — one merged row of qty 2 cannot
+say what is in *this* binder — but it does mean a collection filed across
+several binders has more rows than one that is not, and code that assumes one
+row per printing (there is none today) would need to say which it means.
+Binders are also **not tombstoned**, exactly as decks are not: a binder deleted
+on one device comes back until every device has synced, which costs a tap. The
+alternative — mixing binder ids into the tombstone table the collection merge
+reads by id — costs cards, and that trade is not close.
+
+**What would reopen it.** Slots rather than pages (a 3x3 page has nine
+positions, and the detector already returns them in reading order), which is a
+strictly additive field on the same rows. Or sharing a binder *label* with a
+friend, which would be the first thing here to leave the device — and is
+exactly what the current design refuses, because the QR is a route into your own
+app and nothing else.

@@ -21,6 +21,7 @@
     "test:foiltext": "node tests/harness/run-matrix.mjs --degradations=foil-text,foil-text-silver,foil-text-worst --mode=hinted",
     "test:photos": "node tests/harness/run-matrix.mjs --photos-only",
     "test:clips": "node tests/harness/run-matrix.mjs --clips-only --pages=1",
+    "test:binder": "node tests/harness/binder-ui.mjs",
     "test:install": "node tests/harness/install-prompt.mjs",
     "test:cloud": "node tests/harness/cloud-live.mjs",
     "test:social": "node tests/harness/social-rls.mjs",
@@ -44,6 +45,7 @@
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
+    "jsqr": "^1.4.0",
     "playwright-core": "^1.62.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.4"

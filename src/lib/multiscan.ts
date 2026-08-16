@@ -57,8 +57,17 @@ const KEEP_QUALITY = 0.82
 const CROP_PAD = 0.035
 
 export interface PageCard {
-  /** Stable key for the review list. */
+  /** Stable key for the review list, unique across the pages of one session. */
   id: string
+  /**
+   * Which page of the binder this crop came from, 1-based.
+   *
+   * A binder is scanned page after page into ONE review screen, so the page
+   * number is the only thing that survives to say where a card physically is.
+   * It rides onto the collection row as `binderPage` when the page is filed —
+   * which is what turns "somewhere in this binder" into "page 7".
+   */
+  page: number
   region: CardDetection
   /**
    * JPEG data URL of the crop: the review row's thumbnail, and the input a
@@ -144,8 +153,15 @@ function release(canvas: HTMLCanvasElement): void {
  */
 export async function scanPage(
   source: HTMLCanvasElement,
-  opts: { signal?: AbortSignal; maxCards?: number; onProgress?: (progress: PageScanProgress) => void } = {},
+  opts: {
+    signal?: AbortSignal
+    maxCards?: number
+    onProgress?: (progress: PageScanProgress) => void
+    /** Which page of the binder this frame is; 1 when nobody is counting. */
+    page?: number
+  } = {},
 ): Promise<PageCard[]> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1))
   const regions = inReadingOrder(detectCardRegions(source, opts.maxCards ?? MAX_PAGE_CARDS))
   const out: PageCard[] = []
   opts.onProgress?.({ done: 0, total: regions.length })
@@ -172,7 +188,13 @@ export async function scanPage(
       }
       outcome = { ok: false, reason: 'ocr-miss', message: String(err?.message ?? err).slice(0, 120) }
     }
-    out.push({ id: `${i}:${region.x.toFixed(3)}:${region.y.toFixed(3)}`, region, image: keepAsJpeg(crop), outcome })
+    out.push({
+      id: `${page}:${i}:${region.x.toFixed(3)}:${region.y.toFixed(3)}`,
+      page,
+      region,
+      image: keepAsJpeg(crop),
+      outcome,
+    })
     release(crop)
     opts.onProgress?.({ done: i + 1, total: regions.length })
   }

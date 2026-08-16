@@ -225,6 +225,16 @@ function CardSheet() {
 
   const comps = useMemo(() => groupComps(card.prices.entries), [card.prices.entries])
   const sortedCopies = useMemo(() => sortCopies(copies ?? []), [copies])
+  /**
+   * Which binder each copy is filed in. Looked up once for the sheet rather
+   * than per row — "where is this card" is the question a shelf full of
+   * labelled binders exists to answer, and it belongs beside the copy it is
+   * true of.
+   */
+  const binderNames = useLiveQuery(
+    async () => new Map((await db.binders.toArray()).map((binder) => [binder.id, binder.name])),
+    [],
+  )
   const copiesValue = useMemo(() => collectionValue(sortedCopies), [sortedCopies])
   const copiesCount = sortedCopies.reduce((sum, row) => sum + row.qty, 0)
   const trend = useMemo(() => cardTrend(history ?? []), [history])
@@ -488,7 +498,12 @@ function CardSheet() {
             </span>
           </div>
           {sortedCopies.map((row) => (
-            <CopyRow key={row.id} row={row} game={card.game} />
+            <CopyRow
+              key={row.id}
+              row={row}
+              game={card.game}
+              binderName={row.binderId ? binderNames?.get(row.binderId) : undefined}
+            />
           ))}
         </section>
       )}
@@ -771,7 +786,7 @@ function SportsFacts({ card }: { card: Card }) {
   )
 }
 
-function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
+function CopyRow({ row, game, binderName }: { row: CollectionItem; game: Game; binderName?: string }) {
   const toast = useUi((s) => s.toast)
   const sealed = row.opened != null || !!row.card.sealed
   const [editing, setEditing] = useState(false)
@@ -846,6 +861,12 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
             <span className="tradechip">
               <Icon name="swap" size={11} /> {row.forTrade}
             </span>
+          )}
+          {binderName && (
+            <a className="binderchip" href={`#/binders/${row.binderId}`} title={`In ${binderName}`}>
+              <Icon name="binder" size={11} /> {binderName}
+              {row.binderPage ? ` · p${row.binderPage}` : ''}
+            </a>
           )}
         </span>
         <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>
