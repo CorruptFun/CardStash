@@ -59,6 +59,52 @@ const args = Object.fromEntries(
 const cloudKey = args.gemini ? (process.env.GEMINI_API_KEY ?? '').trim() : ''
 /** Empty = whatever the app pins as CLOUD_SCAN_MODEL; set it to A/B a model. */
 const cloudModel = typeof args['gemini-model'] === 'string' ? args['gemini-model'] : ''
+/** Why a bridged cloud call produced nothing — surfaced so a run of zero
+ * useful answers cannot be mistaken for "the model had no opinion". */
+const cloudErrors = []
+
+/**
+ * The server half of the hosted rescue, mirrored for the bridge above.
+ *
+ * Kept WORD FOR WORD in step with `supabase/functions/scan-card/index.ts`,
+ * which is itself kept in step with `CARD_PROMPT` in `src/lib/gemini.ts`. A
+ * prompt that drifts here measures a different question from the one the app
+ * asks, which is worse than not measuring at all.
+ */
+const CLOUD_SCAN_MODEL = 'gemini-3.1-flash-lite'
+const SCAN_PROMPT =
+  'You are reading a trading card photograph for a collection app. ' +
+  'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
+  "(ex, GX, V, VMAX, VSTAR) and any possessive prefix (\"Iono's\", \"Team Rocket's\"). " +
+  'Also return the collector number and printed set total from the small collector line ' +
+  '(for "055/086": number "055", printedTotal "086"), and the printed set code if visible. ' +
+  'Magic cards print that line as two rows in a bottom corner — "0321 U" over "MSH★EN" — ' +
+  'giving number "0321" and setCode "MSH", with no printed total to return. Its separator ' +
+  'is sometimes a star (★) rather than a dot (•), and its number is sometimes higher than the set ' +
+  'actually holds; both mark a special printing, so transcribe the digits exactly as they ' +
+  'appear and do not normalise them. On full-art and borderless cards this line is printed ' +
+  'over the artwork in small light or dark type close to the card edge — look for it there too. ' +
+  'Then judge the FRAME and return treatment: "borderless" when the artwork runs to the card ' +
+  'edges with no border at all, "extended" when a thin border remains but the art reaches the ' +
+  'sides, "showcase" for an alternate stylised frame, "retro" for an old-style frame, ' +
+  '"regular" for the ordinary modern frame; and foil: true only when the surface clearly ' +
+  'shows holographic shine. Those two describe the printing rather than transcribe it, so ' +
+  'answer them only when the card is clearly enough visible to judge. ' +
+  'CRITICAL: omit any field you cannot actually read on the card. Never guess a number. ' +
+  'An omitted field is correct; an invented one is not.'
+const SCAN_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    name: { type: 'STRING' },
+    number: { type: 'STRING' },
+    printedTotal: { type: 'STRING' },
+    setCode: { type: 'STRING' },
+    game: { type: 'STRING' },
+    treatment: { type: 'STRING' },
+    foil: { type: 'BOOLEAN' },
+  },
+  required: ['name'],
+}
 let cloudCalls = 0
 if (args.gemini && !cloudKey) {
   console.error('--gemini needs GEMINI_API_KEY in the environment (not as a flag — argv leaks into history).')
@@ -455,6 +501,64 @@ async function main() {
         cloudCalls++
         return route.continue()
       }
+      // The HOSTED rescue's edge function, bridged straight to Gemini.
+      //
+      // The app has exactly one cloud route left: `readCardHosted` POSTs the
+      // frame to our own `scan-card`, which holds the key and checks
+      // entitlement. The harness cannot call that — it would need a real
+      // account, a live entitlement row and a token that expires mid-run — so
+      // this stands in for the server half ONLY: same prompt, same schema, same
+      // pinned model, same response shape, real traffic to the real model.
+      //
+      // What that measures and what it does not, stated plainly: everything in
+      // `identify.ts` is exercised for real — the arming checks, the race, the
+      // thresholds, `relatedNames`, the tie-break's guards and the merge. Auth,
+      // entitlement and the monthly meter are NOT, because the function they
+      // live in is the part being stood in for. A green run here says the model
+      // and the pipeline agree; it says nothing about whether a given user is
+      // owed the call.
+      if (cloudKey && /\/functions\/v1\/scan-card$/.test(url)) {
+        cloudCalls++
+        let body = null
+        try {
+          const sent = JSON.parse(route.request().postData() ?? '{}')
+          if (!sent?.image) throw new Error('no image')
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${cloudModel || CLOUD_SCAN_MODEL}:generateContent`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cloudKey },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: SCAN_PROMPT }, { inline_data: { mime_type: 'image/jpeg', data: sent.image } }] }],
+                // maxOutputTokens is load-bearing: a low cap makes a thinking
+                // model burn its budget and return an empty body at full price.
+                generationConfig: {
+                  temperature: 0,
+                  maxOutputTokens: 2000,
+                  responseMimeType: 'application/json',
+                  responseSchema: SCAN_SCHEMA,
+                },
+              }),
+            },
+          )
+          if (res.ok) {
+            const raw = await res.json()
+            const text = raw?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
+            const parsed = JSON.parse(text)
+            if (parsed?.name) body = { ...parsed, remaining: 999 }
+          } else {
+            cloudErrors.push(`gemini ${res.status}`)
+          }
+        } catch (err) {
+          cloudErrors.push(String(err).slice(0, 120))
+        }
+        // A refusal must look to the client exactly like the edge function's
+        // own — non-200, no explanation. `readCardHosted` maps every failure to
+        // null, and the pipeline must fall through to the local answer.
+        return body
+          ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+          : route.fulfill({ status: 502, contentType: 'application/json', body: '{"error":"unreadable"}' })
+      }
       const hit = stubs.handle(url, route.request())
       if (hit) return route.fulfill({ status: hit.status, contentType: hit.contentType, body: hit.body })
       return route.abort('failed')
@@ -666,7 +770,7 @@ async function main() {
       binders: binderResults,
       clips: clipResults,
       stubCalls: stubs.stats.calls,
-      cloud: cloudKey ? { model: cloudModel, calls: cloudCalls } : null,
+      cloud: cloudKey ? { model: cloudModel, calls: cloudCalls, errors: cloudErrors } : null,
       unknownHosts: [...new Set(stubs.stats.unknown)],
       cells: results,
     }
@@ -754,6 +858,20 @@ async function main() {
         `\n=== cloud rescue: ${cloudCalls} call(s) to ${cloudModel || '(app default)'}` +
           ` · ~$${(cloudCalls * each).toFixed(4)} ($${each.toFixed(5)}/call) ===`,
       )
+      // Zero calls means the cloud path was never REACHED, which reads exactly
+      // like "the model changed nothing" on a summary line and is the trap
+      // lesson 55 names. Say so loudly rather than letting the run be read as
+      // evidence about the model.
+      if (!cloudCalls) {
+        console.error('  CLOUD NEVER FIRED — --gemini was set but no call was made.')
+        console.error('  This measures NOTHING about the cloud path. Check the arming gate')
+        console.error('  (isSignedIn) and the /functions/v1/scan-card interception.')
+      }
+      if (cloudErrors.length) {
+        const tally = {}
+        for (const e of cloudErrors) tally[e] = (tally[e] ?? 0) + 1
+        console.log(`  cloud failures: ${Object.entries(tally).map(([e, n]) => `${e}×${n}`).join(', ')}`)
+      }
     }
     if (report.unknownHosts.length) console.log(`  unstubbed hosts hit: ${report.unknownHosts.join(', ')}`)
     console.log(`  report: ${out}`)

@@ -1494,7 +1494,29 @@ async function identifyViaOcr(
         confidence: CLOUD_CONFIDENCE,
         via: 'cloud',
         foil: detectFoil(reading.canvas) ? true : undefined,
-        pinned: !!read.number,
+        // NEVER pinned, however confidently the model transcribed a number.
+        //
+        // `pinned` means the PRINTED LINE chose this printing, and it is what
+        // the sheet believes when it stops offering the picker. A model's
+        // number is not that: it is one reading of the whole card, and it is
+        // the part measured to be least reliable. `!!read.number` also could
+        // not be repaired by verifying the number against the card, the way
+        // `linePinnedPrinting` does for OCR — the card was SELECTED by that
+        // number, so the two agree circularly.
+        //
+        // Measured: on the `worst` degradation the model answered Arceus VSTAR
+        // as BRS 176 when the card is BRS 184, and Lugia VSTAR as SIT 202 when
+        // it is SIT 211 — in both cases the base printing's number for an
+        // alt-art card, both sharing the alt art's printed total, so even
+        // corroborating on `printedTotal` would have agreed. Those two arrived
+        // as "wrong printing while claiming the code was read", the one class
+        // the user has no way to catch, and they are the whole reason this is
+        // false rather than clever.
+        //
+        // The card itself still stands: these were MISSES before the rescue
+        // read them. Identifying the card and pinning the edition are separate
+        // achievements and are reported separately.
+        pinned: false,
       },
     }
   }
