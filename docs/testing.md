@@ -11,6 +11,7 @@ Layered, each covering something the others structurally cannot.
 | Install banner | `npm run test:install` | headless Chromium, seconds | no |
 | Scan UI (upload + page review) | `npm run test:scanui` | headless Chromium, ~2 min | **yes** |
 | Batch add | `npm run test:batch` | headless Chromium, ~30s | no |
+| Invite links | `npm run test:invite` | headless Chromium, ~30s | no |
 
 ## The rule
 
@@ -220,6 +221,31 @@ console must stay clean. It catches wiring the type checker can't — JSX
 structure, store subscriptions, dead imports — in the artifact users actually
 get.
 
+## Invite links (`test:invite`)
+
+An invite is two halves that never run on the same device — `InvitePanel`
+writes the URL, `captureReferral()` reads it back on a stranger's phone at boot
+— and the second half is invisible to every other test: it is the first
+statement of `boot()`, it writes a settings key nothing displays, and it fires
+long before there is an account. A regression there is silent and permanent.
+
+So this harness copies the link off the real screen and then opens **that
+string** in a fresh browser context with no storage, which is as close to the
+actual journey as a local run can get. It also pins the rule that costs money
+to get wrong: a second link must not overwrite the first, because
+`claim_referral()` records one referrer per account for ever and the app must
+not credit someone the database does not.
+
+It cannot reach the server half — `befriend_referrer()` needs a real project
+and a real account. That is `tests/harness/social-rls.mjs` §6b, which needs
+`SUPABASE_SECRET`.
+
+Two things it deliberately fakes, both for the same reason (a real one hangs
+rather than fails in headless): `navigator.clipboard.writeText` is stubbed so
+the assertion is what the button hands over, and the signed-in account is stood
+in for by seeding `socialHandle` — the localStorage cache every "are they set
+up?" check already reads.
+
 ## The two review screens (`test:scanui`, `test:batch`)
 
 Both drive the real app to a Dexie write, and between them they cover every
@@ -326,6 +352,7 @@ npm run test:capture        # only if camera.ts or the scan screen changed
 npm run test:camera         # ditto — camera on/off lifecycle, both platforms
 npm run test:install        # only if the install banner or its triggers changed
 npm run test:batch          # only if the scan tray, batch add or db.scans changed
+npm run test:invite         # only if invites, referrals or the Friends screen changed
 ```
 
 If the change touches `detectCardRegions` or anything multi-card, also run

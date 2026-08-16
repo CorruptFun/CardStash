@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { isSignedIn, signedInAs } from '../lib/authsession'
 import { suggestHandle } from '../lib/onboarding'
-import { redeemReferral } from '../lib/referral'
+import { announceReferrer } from './InvitePanel'
 import { useSettings } from '../lib/settings'
 import { claimHandle, loadMyProfile, type SocialProfile } from '../lib/socialcloud'
 import { useUi } from '../store/ui'
@@ -82,9 +82,11 @@ export function Welcome({ onDone }: { onDone: () => void }) {
   const checkForProfile = useCallback(
     (email: string) => {
       // There is an account now, so a referral banked from a friend's link can
-      // finally be attached to one. Never awaited and never surfaced: the
-      // welcome screen must not stall, or fail, on a discount.
-      void redeemReferral()
+      // finally be attached to one — and if this account already has a handle
+      // (a returning collector on a new phone), the friendship it promised is
+      // made here too. Never awaited and never surfaced: the welcome screen
+      // must not stall, or fail, on a discount.
+      void announceReferrer(toast)
       setStage('checking')
       loadMyProfile()
         .then((found) => {
@@ -104,7 +106,7 @@ export function Welcome({ onDone }: { onDone: () => void }) {
           setStage('handle')
         })
     },
-    [config],
+    [config, toast],
   )
 
   // Someone who signed in, closed the app mid-flow and came back should land
@@ -127,8 +129,9 @@ export function Welcome({ onDone }: { onDone: () => void }) {
         const name = config.profileName.trim() || handle
         const claimed = await claimHandle(handle, name)
         // Second chance at the same no-op: the call above may have gone out
-        // while this device was still offline.
-        void redeemReferral()
+        // while this device was still offline. It is also the FIRST chance at
+        // the introduction — the handle it needs did not exist until this line.
+        void announceReferrer(toast)
         // A display name is what friends actually see; seed it from the
         // handle rather than leaving shares labelled "A Cardstock collector".
         if (!config.profileName.trim()) config.set({ profileName: claimed.handle })

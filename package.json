@@ -14,6 +14,7 @@
     "test:scan": "node tests/harness/run-matrix.mjs",
     "test:scanui": "node tests/harness/drive-scan-ui.mjs",
     "test:batch": "node tests/harness/batch-add-ui.mjs",
+    "test:invite": "node tests/harness/invite-ui.mjs",
     "test:lowlight": "node tests/harness/run-matrix.mjs --degradations=lowlight,dim,dark --mode=hinted --stack=3",
     "test:capture": "node tests/harness/capture-stack.mjs",
     "test:camera": "node tests/harness/camera-lifecycle.mjs",

@@ -114,6 +114,24 @@ export function referralQuery(handle: string): string {
 }
 
 /**
+ * The link to hand someone, or '' when there is nobody to credit.
+ *
+ * `origin + pathname` and never `location.href`, for the same reason
+ * `referralQuery` exists: whatever screen the inviter happens to be looking at
+ * is not part of the invitation, and a fragment carried along would drop the
+ * person arriving onto a trade or an import screen instead of the app.
+ *
+ * The empty answer is a real answer and the caller has to handle it — a
+ * referral is a handle, so an account that never claimed one cannot be
+ * credited, and a link that silently credited nobody would look identical to
+ * one that worked.
+ */
+export function inviteLink(handle: string, origin = location.origin, pathname = location.pathname): string {
+  const query = referralQuery(handle)
+  return query ? `${origin}${pathname}${query}` : ''
+}
+
+/**
  * Remember the referral this launch arrived with; returns what is now stored.
  *
  * THE FIRST LINK WINS, permanently. `claim_referral()` records one referrer per

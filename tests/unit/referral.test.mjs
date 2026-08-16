@@ -33,6 +33,7 @@ const {
   foundingOffer,
   normalizeReferral,
   redeemReferral,
+  inviteLink,
   referralFromUrl,
   referralQuery,
 } = await bundleImport('src/lib/referral.ts', { alias: hosts(STUB) })
@@ -283,4 +284,43 @@ test('an unrecognised tier falls back to standard, never to a discount', async (
   reset()
   fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'platinum' }, { body: 5 })
   assert.equal((await foundingOffer()).tier, 'standard')
+})
+
+/* ------------------------------------------------------------------ inviting */
+
+test('the invite link is the whole round trip: what one side sends, the other reads', () => {
+  // The single test worth having here. An invite is only ever two halves —
+  // inviteLink() writes the URL, captureReferral() reads it back on a stranger's
+  // phone — and everything between them is chat apps and an OAuth redirect.
+  // Proving the halves agree is what says the feature works at all.
+  const link = inviteLink('rae', 'https://cards.example', '/app/')
+  assert.equal(link, 'https://cards.example/app/?via=rae')
+  const url = new URL(link)
+  assert.equal(referralFromUrl(url.search, url.hash), 'rae')
+  assert.equal(captureReferral(url.search, url.hash), 'rae', 'and it banks on arrival')
+})
+
+test('no handle means no link, and the caller has to notice', () => {
+  // '' rather than a bare origin, which would be a link that credits nobody
+  // while looking exactly like one that works. The UI shows "claim a handle
+  // first" on this answer.
+  assert.equal(inviteLink('', 'https://cards.example', '/'), '')
+  assert.equal(inviteLink('me', 'https://cards.example', '/'), '', 'too short to be a handle')
+  assert.equal(inviteLink('   ', 'https://cards.example', '/'), '')
+})
+
+test('an invite carries the handle and nothing else about where it was made', () => {
+  // origin + pathname only. Whatever screen the inviter was on is not part of
+  // the invitation: a fragment carried along would land the new person on a
+  // trade or an import screen instead of the app.
+  assert.equal(inviteLink('@Rae', 'https://cards.example', '/app/'), 'https://cards.example/app/?via=rae')
+})
+
+test('an invite link and a binder link cannot be confused for one another', () => {
+  // Same rule as the share payload, from the other direction: the invite is
+  // pure query, so appending a payload fragment leaves both readable.
+  const link = inviteLink('rae', 'https://cards.example', '/') + '#/x?d=BLOB'
+  const url = new URL(link)
+  assert.equal(referralFromUrl(url.search, url.hash), 'rae')
+  assert.equal(url.hash, '#/x?d=BLOB', 'the payload is untouched')
 })

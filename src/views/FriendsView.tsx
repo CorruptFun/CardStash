@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { ShareActions, type SharePack } from '../components/ShareActions'
+import { InvitePanel } from '../components/InvitePanel'
 import { SocialPanel } from '../components/SocialPanel'
 import { SellerPanel } from '../components/SellerPanel'
 import { track } from '../lib/analytics'
@@ -382,6 +383,11 @@ export function FriendsView() {
         <h3>My account</h3>
         <SocialPanel />
       </section>
+
+      {/* Below the account on purpose: the link IS the handle, so this reads as
+        * a dead end until there is one, and the thing that fixes it is
+        * directly above. */}
+      <InvitePanel />
 
       <SellerPanel />
 

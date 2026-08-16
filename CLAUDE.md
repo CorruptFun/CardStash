@@ -342,6 +342,13 @@ it. Four things are load-bearing:
   held to the same standard as the connect nudges: a one-off payment, stated as
   one, with a seat count that is real. Nothing here may reach `track()` — a
   handle is identity.
+- **An invite ends in a friendship** (`0017`, `components/InvitePanel.tsx`).
+  `befriend_referrer()` takes **no argument** — the `referrals` row is the only
+  thing that authorises the accepted edge, which is why this does not breach
+  0002's consent gate: both sides acted, one by inviting and one by following.
+  A `blocked` row in either direction ends the call untouched; an invite must
+  never launder a refusal. `seedFriendRows()` gives an accepted friend a local
+  row before they publish, or the Friends screen contradicts the toast.
 
 ## Cards the catalogs got wrong, or never had
 
