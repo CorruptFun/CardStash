@@ -764,3 +764,31 @@ result seems absurd, check this list before writing code.
     UI. When a guard exists to repair a state, gate it on the state's own
     predicate — never on a proxy that is usually equal to it, because "usually
     equal" is a description of the cells where the bug is not.
+
+76. **Asking the model to CHOOSE from the catalog's printings measured worse
+    than asking it to describe the frame, and the reason generalises.** The
+    open rescue prompt asks for a transcription plus `treatment`; the closed
+    one hands over the exact-name printing list and asks which number it is.
+    Closed sounds strictly safer — a pick outside the list is discarded, so the
+    wrong-card class becomes unreachable rather than merely unlikely — and on
+    one fixture it is: `counterspell-retro` went wrong → ok on the clean cells,
+    which the treatment path had never got. But the full matrix came back
+    **179/223 against 180/223, MTG 33/47 against 34/47**, and the printing gate
+    failed it at `mtg 72% → 70%`. It trades cells rather than adding them, at a
+    larger prompt.
+    Two mechanisms, both worth knowing before trying this again.
+    **The cap must protect the ANSWER, not the favourite.** Ordering the
+    shortlist by the believed set is what a first cut does, and it is exactly
+    backwards: the believed set is the one the fuzzy match got WRONG, so twenty
+    slots filled with MSC printings of Lightning Bolt while the borderless
+    PW26 #5 — the reason the tie-break ran at all — never made the list. The
+    model answered `unsure`, correctly, and four cells that had been right went
+    wrong. Taking one printing per distinct treatment first recovered them.
+    **A prompt that asks a new question stops answering the old one.** With the
+    choose prompt in place, `tiebreak-read` came back `treatment: null` on every
+    call, so the frame path that was doing the real work went silent — the
+    closed question did not beat treatment, it REPLACED it. Asking for both
+    explicitly ("answer `treatment` even when you set `unsure`") recovered the
+    clean cells but not the glare ones, where the model declines and describes
+    nothing. If this is revisited, the shape to try is the open prompt WITH a
+    candidate list appended, so `pick` can only ever add to `treatment`.
