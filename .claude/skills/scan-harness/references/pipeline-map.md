@@ -167,6 +167,22 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    marker so a stray "ex" in flavour text is not a declaration. Measured over
    162 captured Pokémon cells: 60 fires, 60 correct, 0 false, silent on every
    cell of the one no-suffix fixture.
+   **Mega (2026) is the same trap on a PREFIX, and it broke this guard from
+   the inside**: "Darkrai", "Darkrai ex" and "Mega Darkrai ex" are three
+   cards at three prices, and a bare "Darkrai" read off the third — rules box
+   declaring ex — made the guard swap to "Darkrai ex", manufacturing a wrong
+   card at 1.0 because the right name was not in its vocabulary.
+   `parsePokemonMega`/`pokemonNameMega` (corner.ts) add the axis: a strip
+   declaring Mega ("Mega Evolution ex rule" on the 2026 frame, "Mega
+   Evolution Rule" on XY-era M cards — the header itself also declares ex,
+   since the 2026 body never says "Pokémon ex") must resolve to a name
+   carrying it, tried under the modern word then the XY "M", or the match is
+   refused. Same contract: fires only when the matched name LACKS what the
+   frame declares; anchored so Mega Turbo's "Mega Evolution Pokémon" effect
+   text is not a declaration. Validated over the full matrix's traces: 2154
+   raw OCR texts, 0 fires (no Mega fixture exists yet — a fire would be a
+   false positive), and the captured TCGdex universe already resolves
+   "Mega Darkrai ex", so the swap target is real on-device.
 11. **Candidates below `MIN_NAME_LETTERS` (3) are never looked up** (ocr.ts).
    `trimTrailingJunk` could shed everything but a two-letter head ("gr ee" →
    "gr"); the matrix spent 119 lookups on such fragments and not one ever

@@ -412,6 +412,10 @@ const POKEMON_VARIANT_RULES: readonly (readonly [RegExp, string])[] = [
   [/v\s*star\s*(rule|power)/, 'VSTAR'],
   [/pokemon\s*g\s*x/, 'GX'],
   [/g\s*x\s*rule/, 'GX'],
+  // The 2026 Mega header declares ex by itself — "Mega Evolution ex rule" —
+  // and its body ("When your Mega Evolution ex is Knocked Out…") never says
+  // "Pokémon ex", so without this row a Mega frame declares nothing.
+  [/mega\s*evolution\s*ex/, 'ex'],
   [/pokemon\s*ex(\s|$)/, 'ex'],
   [/pokemon\s*v(\s|$)/, 'V'],
 ]
@@ -443,4 +447,38 @@ export function parsePokemonVariant(text: string): string | null {
   const flat = flattenText(text)
   for (const [pattern, suffix] of POKEMON_VARIANT_RULES) if (pattern.test(flat)) return suffix
   return null
+}
+
+/**
+ * Mega rule-box phrasings. Anchored the way the variant rules are: on the
+ * words printed beside the marker, so a trainer whose effect mentions "Mega
+ * Evolution Pokémon" (Mega Turbo) is not read as a declaration. The 2026
+ * frame prints "Mega Evolution ex rule"; the XY-era M cards print "Mega
+ * Evolution Rule". Nothing else on a card prints either phrase.
+ */
+const POKEMON_MEGA_RULES: readonly RegExp[] = [/mega\s*evolution\s*ex/, /mega\s*evolution\s*rule/]
+
+/**
+ * Does the rules box declare the card a MEGA?
+ *
+ * The 2026 Mega mechanic makes the suffix parser's answer incomplete rather
+ * than wrong: "Darkrai", "Darkrai ex" and "Mega Darkrai ex" are three cards
+ * at three prices, and a rules box reading "Mega Evolution ex rule" declares
+ * the third while `parsePokemonVariant` alone can only name the second. Same
+ * contract as the variant parser — strictly evidence, only ever says the card
+ * carries something the matched name lacks, never loosens a match.
+ */
+export function parsePokemonMega(text: string): boolean {
+  const flat = flattenText(text)
+  return POKEMON_MEGA_RULES.some((pattern) => pattern.test(flat))
+}
+
+/**
+ * Does the card NAME already say Mega? Modern names lead with the word
+ * ("Mega Darkrai ex"); the XY-era catalog abbreviates it ("M Charizard-EX").
+ * First word only: "Meganium" flattens to one word and never matches.
+ */
+export function pokemonNameMega(name: string): boolean {
+  const first = flattenText(name).split(' ')[0]
+  return first === 'mega' || first === 'm'
 }

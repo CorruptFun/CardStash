@@ -11,7 +11,9 @@ import {
   looksLikeCollectorLine,
   parseCornerInfo,
   parsePasscode,
+  parsePokemonMega,
   parsePokemonVariant,
+  pokemonNameMega,
   pokemonNameSuffix,
   sameYgoCode,
   SOLE_EVIDENCE_REGIONS,
@@ -1088,22 +1090,41 @@ async function identifyViaOcr(
       // when it does not, refuse rather than answer with the species: the
       // frame says the two disagree, and a confident wrong card is the
       // costlier way to be wrong (wrong price, auto-collected in collect
-      // mode). Strictly narrowing — it only ever fires when the matched name
-      // carries no suffix at all, so a name band that DID read one is left
-      // alone.
-      if (best.card.game === 'pokemon' && !pokemonNameSuffix(best.card.name)) {
-        const declared = parsePokemonVariant(await cornerText)
-        if (declared) {
-          const wanted = `${best.card.name} ${declared}`
-          const variant = await matchPokemon(wanted, undefined, undefined, config.pokemonKey).catch(() => null)
-          const ok = variant && normalizeName(variant.name) === normalizeName(wanted)
+      // mode). Strictly narrowing — the suffix half only ever fires when the
+      // matched name carries no suffix at all, so a name band that DID read
+      // one is left alone.
+      //
+      // Mega is the same trap on a PREFIX. "Mega Darkrai ex" is a third card
+      // beside "Darkrai" and "Darkrai ex", and a name read that drops the
+      // leading word lands on either sibling exactly — including through this
+      // very guard, which used to answer the ex sibling because the right
+      // name was not in its vocabulary. The frame declares Mega in the same
+      // strip ("Mega Evolution ex rule"), so a declared Mega must resolve to
+      // a name that carries it — under the modern word or the XY-era "M" —
+      // or the match is refused.
+      if (best.card.game === 'pokemon') {
+        const strip = await cornerText
+        const suffix = pokemonNameSuffix(best.card.name)
+        const declared = suffix ? null : parsePokemonVariant(strip)
+        const mega = parsePokemonMega(strip) && !pokemonNameMega(best.card.name)
+        if (declared || mega) {
+          const base = declared ? `${best.card.name} ${declared}` : best.card.name
+          const wanteds = mega ? [`Mega ${base}`, `M ${base}`] : [base]
+          let variant: Card | null = null
+          for (const wanted of wanteds) {
+            const hit = await matchPokemon(wanted, undefined, undefined, config.pokemonKey).catch(() => null)
+            if (hit && normalizeName(hit.name) === normalizeName(wanted)) {
+              variant = hit
+              break
+            }
+          }
           traceEvent('variant-declared', {
             read: name,
             card: best.card.name,
-            declared,
-            resolved: ok ? variant.name : null,
+            declared: mega ? ['Mega', declared].filter(Boolean).join(' ') : declared,
+            resolved: variant ? variant.name : null,
           })
-          if (!ok) continue
+          if (!variant) continue
           best = { ...best, card: variant }
         }
       }
