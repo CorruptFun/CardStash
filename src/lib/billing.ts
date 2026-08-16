@@ -33,7 +33,10 @@ const SUBSCRIPTION_FEATURES = ['cloud-scan', 'ai-builder'] as const
  * after paying, and never forgives.
  */
 export const YEARLY_PRICE = '$11.99'
-export const FOUNDING_PRICE = '$9.99'
+export const REFERRED_PRICE = '$9.99'
+export const FOUNDING_PRICE = '$6.99'
+/** What a referrer earns per paying referral. Mirrors `referral_bounty_cents()`. */
+export const REFERRAL_BOUNTY = '$2'
 
 export interface SubscriptionState {
   /** Paid up right now. */
@@ -105,6 +108,45 @@ export async function startSubscriptionCheckout(): Promise<{ url: string; managi
     throw new CloudError('Could not open the payment page')
   }
   return { url: payload.url, managing: payload.managing === true }
+}
+
+export interface ReferralEarnings {
+  referrals: number
+  earnedCents: number
+  owedCents: number
+  cap: number
+}
+
+/**
+ * What this account has earned by introducing people.
+ *
+ * Recording is the server's — `record_referral_reward()` runs with the service
+ * role after a payment clears — so this only reads. A founding purchase earns
+ * the referrer nothing by design: a one-off lifetime fee has no recurring
+ * revenue to share out of.
+ */
+export async function referralEarnings(): Promise<ReferralEarnings | null> {
+  if (!CLOUD_AVAILABLE || !isSignedIn()) return null
+  try {
+    const token = await freshToken()
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/referral_earnings`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    if (!res.ok) return null
+    const rows = (await res.json()) as { referrals: number; earned_cents: number; owed_cents: number; cap: number }[]
+    const row = Array.isArray(rows) ? rows[0] : undefined
+    if (!row) return null
+    return {
+      referrals: Number(row.referrals) || 0,
+      earnedCents: Number(row.earned_cents) || 0,
+      owedCents: Number(row.owed_cents) || 0,
+      cap: Number(row.cap) || 0,
+    }
+  } catch {
+    return null
+  }
 }
 
 export { SUBSCRIPTION_FEATURES }

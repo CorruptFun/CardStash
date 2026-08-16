@@ -2,14 +2,18 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   billingAvailable,
   FOUNDING_PRICE,
+  REFERRAL_BOUNTY,
+  REFERRED_PRICE,
+  referralEarnings,
   startSubscriptionCheckout,
   subscriptionState,
   YEARLY_PRICE,
+  type ReferralEarnings,
   type SubscriptionState,
 } from '../lib/billing'
 import { isSignedIn } from '../lib/authsession'
 import { foundingOffer, type FoundingOffer } from '../lib/referral'
-import { relativeAge } from '../lib/util'
+import { money, relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
 import { Icon } from './Icon'
 
@@ -36,6 +40,7 @@ export function Subscription() {
   const toast = useUi((s) => s.toast)
   const [state, setState] = useState<SubscriptionState | null>(null)
   const [offer, setOffer] = useState<FoundingOffer | null>(null)
+  const [earned, setEarned] = useState<ReferralEarnings | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -48,6 +53,9 @@ export function Subscription() {
     // Only asked of someone who might still buy — a subscriber is already past
     // the price, and the seat count is not news to them.
     setOffer(next.active ? null : await foundingOffer())
+    // Asked of everyone, subscriber or not: what you have earned by introducing
+    // people does not stop mattering once you have paid.
+    setEarned(await referralEarnings())
   }, [])
 
   useEffect(() => {
@@ -110,6 +118,7 @@ export function Subscription() {
             </button>
           </div>
         )}
+        {earned && <Earnings earned={earned} />}
       </section>
     )
   }
@@ -153,23 +162,75 @@ export function Subscription() {
     )
   }
 
+  // Referred, but the hundred are gone: the middle price. Stated as a discount
+  // off the standard one, because that is what it is and hiding the comparison
+  // would make the number look arbitrary.
+  const referredPrice = offer?.tier === 'referred'
+
   return (
     <section className="setsec">
       <h3>Subscription</h3>
       <p className="setsec__note">
-        Scanning, your collection, decks, trades and backup are all free and always will be. A subscription adds the two
-        things that cost us money to run: <b>cloud rescue</b>, which reads the cards this device cannot, and the{' '}
-        <b>AI deck builder</b>, which studies the current meta and builds around what you own.
+        Scanning, your collection, decks, trades and backup are all free and always will be — including{' '}
+        <b>50 cloud rescues</b> and <b>3 AI deck builds</b> a month. A subscription raises those to 1,000 and 12: the
+        two things that cost us money to run.
       </p>
+      {referredPrice && (
+        <div className="audience audience--friends">
+          <Icon name="heart" size={15} filled />
+          <span>
+            You came in through a friend’s link, so yours is <b>{REFERRED_PRICE} a year</b> rather than {YEARLY_PRICE}.
+          </span>
+        </div>
+      )}
       <div className="setrow">
         <div className="setrow__text">
           <span>Subscribe</span>
-          <em>{YEARLY_PRICE} a year. Card handled by Stripe — we never see the number. Cancel any time.</em>
+          <em>
+            {referredPrice ? REFERRED_PRICE : YEARLY_PRICE} a year. Card handled by Stripe — we never see the number.
+            Cancel any time.
+          </em>
         </div>
         <button className="btn btn--primary btn--sm" onClick={go} disabled={busy}>
           {busy ? 'Opening…' : 'Subscribe'}
         </button>
       </div>
+      {earned && <Earnings earned={earned} />}
     </section>
+  )
+}
+
+/**
+ * What someone has earned by introducing people, and what is still owed.
+ *
+ * A FIXED BOUNTY, NOT A SHARE OF PROFIT. "A portion of the profit" cannot be
+ * checked by the person earning it — profit per user depends on how much they
+ * scan and is not known until long after. A flat amount per paying referral is
+ * a number both sides can count.
+ *
+ * Founding purchases earn nothing, and the copy says so rather than leaving
+ * someone to work out why a referral did not appear: a one-off lifetime fee has
+ * no recurring revenue behind it to share.
+ *
+ * Renders nothing until there is something to report — an empty earnings panel
+ * is an advert for a scheme, and this is meant to reward word of mouth rather
+ * than solicit it.
+ */
+function Earnings({ earned }: { earned: ReferralEarnings }) {
+  if (earned.referrals < 1) return null
+  return (
+    <div className="setrow">
+      <div className="setrow__text">
+        <span>
+          You’ve introduced {earned.referrals} {earned.referrals === 1 ? 'subscriber' : 'subscribers'}
+        </span>
+        <em>
+          {money(earned.earnedCents / 100)} earned at {REFERRAL_BOUNTY} each
+          {earned.owedCents > 0 ? `, ${money(earned.owedCents / 100)} still to come` : ' and paid'}. Up to{' '}
+          {earned.cap} referrals count; founding places earn nothing, since a one-off fee has no yearly revenue to
+          share.
+        </em>
+      </div>
+    </div>
   )
 }

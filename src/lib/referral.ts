@@ -172,6 +172,14 @@ export interface FoundingOffer {
   referred: boolean
   /** How many of the hundred are still available. */
   seatsLeft: number
+  /**
+   * Which of the three prices this account gets: 'founding' | 'referred' |
+   * 'standard'. From `referral_tier()`, the SAME function `/checkout` asks —
+   * so the number quoted on this screen is the number charged at the till.
+   * Deriving it separately here is how those two drift apart, and a price that
+   * changes at the till is discovered only after paying.
+   */
+  tier: 'founding' | 'referred' | 'standard'
 }
 
 /**
@@ -196,7 +204,18 @@ export async function foundingOffer(): Promise<FoundingOffer | null> {
     const mine = await fetch(`${SUPABASE_URL}/rest/v1/referrals?select=user_id&limit=1`, { headers })
     if (!mine.ok) return null
     const rows = (await mine.json().catch(() => [])) as unknown[]
-    if (!Array.isArray(rows) || !rows.length) return { referred: false, seatsLeft: 0 }
+    // Nobody referred them: their tier is 'standard' by definition and the
+    // server would only say the same, so it is not worth a round trip. Most
+    // accounts take this branch, and it is one request rather than three.
+    if (!Array.isArray(rows) || !rows.length) return { referred: false, seatsLeft: 0, tier: 'standard' }
+
+    const tierRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/referral_tier`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    const raw = tierRes.ok ? String(await tierRes.json().catch(() => 'standard')) : 'standard'
+    const tier = raw === 'founding' || raw === 'referred' ? raw : 'standard'
 
     const seats = await fetch(`${SUPABASE_URL}/rest/v1/rpc/founding_seats_left`, {
       method: 'POST',
@@ -207,7 +226,11 @@ export async function foundingOffer(): Promise<FoundingOffer | null> {
     // Clamped because it lands in a sentence: a number the server got wrong
     // should read as "none left", never as "-3 places remain".
     const left = Number(await seats.json().catch(() => 0))
-    return { referred: true, seatsLeft: Number.isFinite(left) ? Math.min(100, Math.max(0, Math.trunc(left))) : 0 }
+    return {
+      referred: true,
+      seatsLeft: Number.isFinite(left) ? Math.min(100, Math.max(0, Math.trunc(left))) : 0,
+      tier,
+    }
   } catch {
     // Offline is not "you were never referred" — say nothing rather than
     // withdraw an offer the account actually holds.

@@ -102,6 +102,8 @@ export interface SubscriptionEvent {
    * seat has to be claimed against it.
    */
   founding?: boolean
+  /** 'referred' | 'standard' — which price was sold, for the referral bounty. */
+  tier?: string
 }
 
 /**
@@ -157,6 +159,9 @@ export function subscriptionFromEvent(event: unknown): SubscriptionEvent | null 
       status: 'active',
       periodEnd: 0,
       subscriptionId: typeof object.subscription === 'string' ? object.subscription : '',
+      tier: typeof (metadata as Record<string, unknown>).tier === 'string'
+        ? String((metadata as Record<string, unknown>).tier)
+        : '',
     }
   }
 

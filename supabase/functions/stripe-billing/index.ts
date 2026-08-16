@@ -56,8 +56,12 @@ const GRACE_DAYS = Number(Deno.env.get('STRIPE_GRACE_DAYS') ?? '3')
 const FEATURES = ['cloud-scan', 'ai-builder'] as const
 
 const PRICE_ID = Deno.env.get('STRIPE_PRICE_ID') ?? ''
-/** The one-off founding price. Empty = the offer is off and everyone buys yearly. */
+/** $6.99 once, lifetime. Empty = the offer is off and referred users buy yearly. */
 const FOUNDING_PRICE_ID = Deno.env.get('STRIPE_FOUNDING_PRICE_ID') ?? ''
+/** $9.99/year for someone referred after the hundred seats went. Falls back to
+ *  the standard price when unset, so a half-configured deployment overcharges
+ *  nobody by accident — it simply fails to discount. */
+const REFERRED_PRICE_ID = Deno.env.get('STRIPE_REFERRED_PRICE_ID') ?? ''
 const RETURN_URL = Deno.env.get('STRIPE_BILLING_RETURN_URL') ?? 'https://cardstock.corrupt.solutions/'
 
 async function stripe(path: string, key: string, form: Record<string, string>): Promise<Response | null> {
@@ -123,13 +127,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // FOUNDING SEAT, if the offer is on and this person qualifies. The SQL
-    // decides both halves — that they were referred, and that a seat is free —
-    // so neither can be skipped by calling the function directly. A seat is
-    // RESERVED here and only claimed when the money lands; an abandoned
-    // checkout releases it when the reservation lapses (migration 0014).
+    // WHICH OF THE THREE PRICES. The SQL decides — it reads `auth.uid()`, so a
+    // client cannot ask for a tier it has not earned, and the same functions
+    // back the copy in Settings so the quote and the till agree.
+    const tierRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/referral_tier`, {
+      method: 'POST',
+      headers: { apikey: SERVICE_KEY, Authorization: auth, 'Content-Type': 'application/json' },
+      body: '{}',
+    }).catch(() => null)
+    const tier = tierRes?.ok ? String(await tierRes.json().catch(() => 'standard')) : 'standard'
+
+    // A seat is RESERVED here and only claimed when the money lands; an
+    // abandoned checkout releases it when the reservation lapses (0014).
     let seat = 0
-    if (FOUNDING_PRICE_ID) {
+    if (tier === 'founding' && FOUNDING_PRICE_ID) {
       const reserve = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reserve_founding_seat`, {
         method: 'POST',
         headers: { apikey: SERVICE_KEY, Authorization: auth, 'Content-Type': 'application/json' },
@@ -137,6 +148,11 @@ Deno.serve(async (req: Request) => {
       }).catch(() => null)
       if (reserve?.ok) seat = Number(await reserve.json().catch(() => 0)) || 0
     }
+
+    // The recurring price this person gets. `referred` falls back to standard
+    // when unconfigured — a missing discount is recoverable, a wrong charge is not.
+    const recurringPrice = tier === 'referred' && REFERRED_PRICE_ID ? REFERRED_PRICE_ID : PRICE_ID
+    const soldTier = tier === 'referred' && REFERRED_PRICE_ID ? 'referred' : 'standard'
 
     if (seat > 0) {
       const founding = await stripe('checkout/sessions', STRIPE_KEY, {
@@ -159,7 +175,7 @@ Deno.serve(async (req: Request) => {
 
     const checkout = await stripe('checkout/sessions', STRIPE_KEY, {
       mode: 'subscription',
-      'line_items[0][price]': PRICE_ID,
+      'line_items[0][price]': recurringPrice,
       'line_items[0][quantity]': '1',
       success_url: `${RETURN_URL}#/settings?subscribed=1`,
       cancel_url: `${RETURN_URL}#/settings`,
@@ -168,7 +184,11 @@ Deno.serve(async (req: Request) => {
       // it creates carries `metadata` — the webhook reads whichever it gets.
       client_reference_id: user.id,
       'metadata[user_id]': user.id,
+      // The tier travels with the subscription so the webhook can credit the
+      // referrer without re-deriving which price was actually sold.
+      'metadata[tier]': soldTier,
       'subscription_data[metadata][user_id]': user.id,
+      'subscription_data[metadata][tier]': soldTier,
       ...(user.email ? { customer_email: String(user.email) } : {}),
     })
     if (!checkout?.ok) return json({ error: 'could not start checkout' }, 502)
@@ -247,6 +267,19 @@ Deno.serve(async (req: Request) => {
     const heldUntil = Array.isArray(held) && held[0]?.expires_at ? Date.parse(held[0].expires_at) : 0
     const wanted = Date.parse(expiresAt)
     const finalExpiry = new Date(Math.max(heldUntil || 0, active ? wanted : 0) || wanted).toISOString()
+
+    // CREDIT THE REFERRER, once, and only for a RECURRING subscription. A
+    // founding purchase earns nothing — a one-off lifetime fee has no ongoing
+    // revenue behind it to share, and paying a bounty out of it would be paying
+    // from a pot that has to last decades. The SQL enforces the once-ever and
+    // the cap; calling it more than one time is harmless.
+    if (sub.tier === 'referred' || sub.tier === 'standard') {
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_referral_reward`, {
+        method: 'POST',
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_referred: sub.userId, p_tier: sub.tier }),
+      }).catch(() => null)
+    }
 
     const now = new Date().toISOString()
     const write = await fetch(`${SUPABASE_URL}/rest/v1/entitlements?on_conflict=user_id,feature`, {

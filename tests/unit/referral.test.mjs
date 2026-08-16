@@ -217,16 +217,21 @@ test('the offer is the SERVER’s answer, not the settings key', async () => {
   // Read-own RLS on `referrals` means an account referred on another phone
   // still qualifies here, and a hand-edited settings key still buys nothing.
   reset()
-  const sent = fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 7 })
-  assert.deepEqual(await foundingOffer(), { referred: true, seatsLeft: 7 })
+  const sent = fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'founding' }, { body: 7 })
+  assert.deepEqual(await foundingOffer(), { referred: true, seatsLeft: 7, tier: 'founding' })
   assert.match(sent[0].url, /\/rest\/v1\/referrals\?/)
-  assert.match(sent[1].url, /\/rpc\/founding_seats_left$/)
+  // The tier comes from the SAME function /checkout asks, so the price quoted
+  // on screen is the price charged at the till.
+  assert.match(sent[1].url, /\/rpc\/referral_tier$/)
+  assert.match(sent[2].url, /\/rpc\/founding_seats_left$/)
 })
 
 test('an account nobody referred costs one request, not two', async () => {
   reset()
   const sent = fakeFetch({ body: [] })
-  assert.deepEqual(await foundingOffer(), { referred: false, seatsLeft: 0 })
+  assert.deepEqual(await foundingOffer(), { referred: false, seatsLeft: 0, tier: 'standard' })
+  // Nobody referred them, so their tier is 'standard' by definition and the
+  // server would only agree. Most accounts take this branch.
   assert.equal(sent.length, 1, 'the seat count is nobody else’s business')
 })
 
@@ -239,7 +244,7 @@ test('a nonsense seat count is clamped before it reaches a sentence', async () =
     [12.7, 12],
   ]) {
     reset()
-    fakeFetch({ body: [{ user_id: 'u1' }] }, { body: answer })
+    fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'founding' }, { body: answer })
     const offer = await foundingOffer()
     assert.equal(offer.seatsLeft, expected, `${answer} must render as ${expected}`)
   }
@@ -251,7 +256,7 @@ test('offline says nothing rather than withdrawing an offer the account holds', 
   assert.equal(await foundingOffer(), null)
 
   reset()
-  fakeFetch({ body: [{ user_id: 'u1' }] }, { ok: false })
+  fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'founding' }, { ok: false })
   assert.equal(await foundingOffer(), null, 'half an answer is not an answer')
 
   reset()
@@ -259,4 +264,23 @@ test('offline says nothing rather than withdrawing an offer the account holds', 
   const sent = fakeFetch()
   assert.equal(await foundingOffer(), null)
   assert.equal(sent.length, 0)
+})
+
+test('a referred account with the seats gone is offered the middle price', async () => {
+  // The tier the SQL reports is taken as given rather than re-derived from the
+  // seat count: `referral_tier()` already weighs "referred" against "is a seat
+  // free", and computing it a second time here is how the quote on this screen
+  // and the price at the till come to disagree.
+  reset()
+  fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'referred' }, { body: 0 })
+  assert.deepEqual(await foundingOffer(), { referred: true, seatsLeft: 0, tier: 'referred' })
+})
+
+test('an unrecognised tier falls back to standard, never to a discount', async () => {
+  // A tier we do not understand must not be read as the cheapest one. Being
+  // wrong towards full price is recoverable; being wrong towards a discount
+  // means undercharging silently and finding out from the books.
+  reset()
+  fakeFetch({ body: [{ user_id: 'u1' }] }, { body: 'platinum' }, { body: 5 })
+  assert.equal((await foundingOffer()).tier, 'standard')
 })
