@@ -24,6 +24,7 @@ import { CLOUD_AVAILABLE, SUPABASE_URL } from './cloudconfig'
 import { binderSharedCards, isDiscoverable, isPublished, resolveBinderRows } from './binders'
 import { applyTradeReply, db, recordIncomingTrade, replaceFriendBinders, upsertFriendFromProfile } from './db'
 import { refreshUnread, resetUnread } from './messaging'
+import { redeemReferral } from './referral'
 import { settings } from './settings'
 import { buildBinderPayload, buildProfilePayload, myProfile, sanitizePayload, sharedBinderFromPayload, wantKeyFor } from './social'
 import type { BinderPayload, ProfilePayload, ReplyPayload, SharedBinder, SocialPayload, TradePayload } from './types'
@@ -544,6 +545,102 @@ export async function answerRequest(requesterId: string, accept: boolean): Promi
   })
 }
 
+/**
+ * Introduce the account to whoever invited it, once it has a handle.
+ *
+ * This is the second half of an invite link. `redeemReferral()` banks WHO
+ * invited them (0014, a price); this turns that into the friendship the invite
+ * actually promised. Both are safe to call as often as anything likes, and the
+ * order matters in one direction only: `befriend_referrer()` reads the
+ * `referrals` row, so the redeem has to have landed first. It is awaited here
+ * rather than fired and forgotten for exactly that reason — everywhere else,
+ * `redeemReferral()` is deliberately not awaited.
+ *
+ * Returns the referrer's handle when this call is what made them friends, and
+ * '' otherwise. The server answers null for every "nothing to do" case —
+ * no referral, no profile, already friends, blocked — so silence here is
+ * normal and is never an error worth showing.
+ *
+ * The local row is seeded from their profile, with no cards. An accepted
+ * friendship lives on the server, but the Friends screen reads Dexie: without
+ * this the invitee is told they have a new friend and shown an empty list
+ * until the friend happens to publish a binder. `pullFriends()` unions locally
+ * known ids into its fetch, so the moment they do publish, this row fills in
+ * with their real cards rather than being replaced.
+ */
+/**
+ * Give an accepted friend a local row before they have published anything.
+ *
+ * A friendship is a row on the SERVER, but every screen reads Dexie — and
+ * `pullFriends()` only ever wrote a friend it could find a published binder
+ * for. So an accepted friend who has not turned publishing on (the default:
+ * `socialConfigured` and `socialPublishing` are deliberately two switches) was
+ * invisible on both sides, which reads as "adding a friend did nothing".
+ *
+ * Cards stay empty and are filled by the next `pullFriends()` if they ever do
+ * publish. Only ever called for ids with NO local row, so it cannot blank the
+ * cards of a friend already imported from a link.
+ */
+async function seedFriendRows(userIds: string[]): Promise<number> {
+  if (!userIds.length) return 0
+  const rows = await rest<ProfileRow[]>(
+    `/profiles?user_id=in.(${userIds.join(',')})&select=user_id,handle,display_name`,
+  ).catch(() => [])
+  let seeded = 0
+  for (const row of rows ?? []) {
+    try {
+      await upsertFriendFromProfile({
+        kind: 'profile',
+        id: row.user_id,
+        name: row.display_name || row.handle,
+        scope: 'trade',
+        at: Date.now(),
+        cards: [],
+      })
+      seeded++
+    } catch {
+      // One unwritable friend is not a failed sync.
+    }
+  }
+  return seeded
+}
+
+export async function befriendReferrer(): Promise<string> {
+  if (!CLOUD_AVAILABLE || !isSignedIn()) return ''
+  // Banked first and gated only on being signed in, because this also runs at
+  // sign-in — before any handle exists — and that is the moment the referral
+  // itself has to be recorded. Only the introduction needs the handle.
+  await redeemReferral()
+  if (!socialConfigured()) return ''
+  const handle = await rpc<string | null>('befriend_referrer', {}).catch(() => null)
+  if (!handle) return ''
+  try {
+    const profile = await lookupHandle(handle)
+    // Straight away rather than at the next sync: this runs while the person
+    // is reading "you and @rae are now friends", and a Friends screen that is
+    // still empty when they tap through contradicts it.
+    if (profile) await seedFriendRows([profile.userId])
+  } catch {
+    // The friendship is real either way — it is a row on the server. A placeholder
+    // that could not be written is a cosmetic loss the next sync repairs.
+  }
+  return handle
+}
+
+/**
+ * How many accounts have arrived through my link.
+ *
+ * -1 means "could not ask" (signed out, offline, no project), which the UI
+ * shows as nothing at all rather than as a zero. Telling someone running an
+ * invite campaign that nobody has joined, when the truth is that the request
+ * failed, is the one wrong answer here.
+ */
+export async function referralJoins(): Promise<number> {
+  if (!socialConfigured()) return -1
+  const n = await rpc<number>('referral_joins', {}).catch(() => -1)
+  return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : -1
+}
+
 export async function unfriend(otherId: string): Promise<void> {
   const me = currentUserId()
   if (!me) return
@@ -581,7 +678,12 @@ export async function pullFriends(): Promise<number> {
   // Friends imported from a link have a legacy uid, not a Supabase user id;
   // they are not on the server and asking for them would be a wasted request.
   const ids = [...new Set([...serverIds, ...friends.map((f) => f.id)])].filter((id) => IS_USER_ID.test(id))
-  if (!ids.length) return 0
+  // Accepted on the server, unknown here: someone who added you (or was
+  // introduced by an invite link) and has not published a binder. Seeded
+  // first so they are visible now, and so the revision pass below still
+  // treats them as stale and fills in their cards the moment they do publish.
+  const seeded = await seedFriendRows(serverIds.filter((id) => !byId.has(id) && IS_USER_ID.test(id)))
+  if (!ids.length) return seeded
 
   // Custom binders ride the same friend list. They have no cheap revision
   // probe like `remoteRev` below — a binder is small (it is a selection, not a
@@ -593,7 +695,7 @@ export async function pullFriends(): Promise<number> {
   // An unknown id has no stored revision, so it reads as stale and is
   // fetched — which is exactly how a just-accepted friend arrives.
   const stale = (heads ?? []).filter((row) => byId.get(row.user_id)?.remoteRev !== row.revision)
-  if (!stale.length) return 0
+  if (!stale.length) return seeded
 
   const full = await rest<BinderRow[]>(
     `/binders?user_id=in.(${stale.map((r) => r.user_id).join(',')})&select=user_id,revision,payload`,
@@ -609,7 +711,7 @@ export async function pullFriends(): Promise<number> {
       // A malformed binder is one friend's problem, not a failed sync.
     }
   }
-  return updated
+  return updated + seeded
 }
 
 /* --------------------------------------------------------------------- inbox */
@@ -716,7 +818,7 @@ export async function eraseSocial(): Promise<void> {
   // reclaiming the same name rather than finding a stranger wearing it.
   hydrating = null
   settings().set({ socialOn: false, socialHandle: '', socialCursor: 0, socialAt: 0 })
-  // The conversations went with the profile row (0017's erase_social), so a
+  // The conversations went with the profile row (0019's erase_social), so a
   // badge counting them is now counting nothing.
   resetUnread()
 }

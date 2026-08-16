@@ -6,7 +6,7 @@
  * and functions exist. This drives the real REST surface with genuine user
  * JWTs — five signed-in users and one anonymous caller.
  *
- * What it is really guarding is the header of `supabase/migrations/0017`:
+ * What it is really guarding is the header of `supabase/migrations/0019`:
  *
  *   * reachability — friends, or a `scope='trade'` publisher, or somebody who
  *     already spoke to you, and NOBODY ELSE;

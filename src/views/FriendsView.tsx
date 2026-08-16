@@ -4,6 +4,7 @@ import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { ProfileLinkEditor } from '../components/ProfileLinks'
 import { ShareActions, type SharePack } from '../components/ShareActions'
+import { InvitePanel } from '../components/InvitePanel'
 import { SocialPanel } from '../components/SocialPanel'
 import { SellerPanel } from '../components/SellerPanel'
 import { track } from '../lib/analytics'
@@ -453,6 +454,11 @@ export function FriendsView() {
         </section>
       )}
 
+      {/* Below the account on purpose: the link IS the handle, so this reads as
+        * a dead end until there is one, and the thing that fixes it is
+        * directly above. */}
+      <InvitePanel />
+
       <SellerPanel />
 
       <OrdersSection />
@@ -578,7 +584,7 @@ export function FriendsView() {
                       </button>
                       {/* Messaging them needs no friendship: they publish a
                           for-trade binder, which is what makes them reachable
-                          (`can_message` in 0017). Being findable and being
+                          (`can_message` in 0019). Being findable and being
                           contactable are the same act here — that is the whole
                           point of publishing one. */}
                       <button

@@ -211,7 +211,7 @@ the same treatment as a pasted link.
 
 Accounts, mutual friends, a trade inbox and global want-matching, on the same
 project that already holds the cloud vault. Schema in `supabase/migrations/`
-(`0001`–`0004`, plus `0017` for messages); the first four were applied and
+(`0001`–`0004`, plus `0019` for messages); the first four were applied and
 verified against the live project 2026-08-14.
 
 **It is dormant until the user opts in.** Signed out, none of this runs and the
@@ -643,7 +643,7 @@ on free users the tiering explicitly keeps free.
 
 ## Messages (v0.19.0)
 
-Two collectors talking about a card: `supabase/migrations/0017`,
+Two collectors talking about a card: `supabase/migrations/0019`,
 `lib/messaging.ts`, `views/MessagesView.tsx`. Read decision 24 before touching
 any of it.
 
@@ -697,7 +697,7 @@ block flags are all things a client could otherwise forge about the *other*
 person's row. `send_message` / `mark_thread_read` / `set_thread_block` /
 `list_threads` are the only doors.
 
-**`erase_social()` takes conversations with it** — 0017 replaces 0004's version
+**`erase_social()` takes conversations with it** — 0019 replaces 0004's version
 rather than adding a second RPC, because a "delete everything" button that
 needs two calls is one forgotten call away from being a lie. It still leaves
 `vaults` alone, and still leaves `orders` alone.
@@ -712,7 +712,7 @@ smuggle in a card shape a share link could not.
 
 Binders the user builds by hand — "my vintage Charizards", "the box I'm selling
 at the weekend" — each with **its own audience**. `lib/binders.ts` is the pure
-half, `views/BindersView.tsx` the screens, `supabase/migrations/0018` the
+half, `views/BindersView.tsx` the screens, `supabase/migrations/0020` the
 server. Read decision 26 before changing what a visibility means.
 
 **They sit BESIDE the whole-collection binder, not instead of it.** `binders`
@@ -886,3 +886,48 @@ wearing a hat.
 Verification is `tests/unit/referral.test.mjs`, which pins the two easiest things
 to break: a sharer without a handle gets a byte-identical link, and a payload and
 a referral in one URL never eat each other.
+
+### The invite, and the friendship it promises (v0.18.0)
+
+Recording who invited whom decides a price and nothing else — the two of them
+were never connected, so the person doing the inviting still had to be added
+back by hand, by handle. `supabase/migrations/0017` closes that: an invite ends
+in a friendship.
+
+**`InvitePanel` (Friends → Invite a friend) is the whole entry point.** It shows
+`inviteLink(handle)` — `origin + pathname + ?via=<handle>`, never
+`location.href`, because the screen the inviter happened to be on is not part of
+the invitation. It sits below **My account** on purpose: the link *is* the
+handle, so with no handle there is nothing to hand out, and the fix is directly
+above. `referral_joins()` gives the inviter a count of who has arrived, which is
+what tells them the link works long before anyone buys anything.
+
+**`befriend_referrer()` takes no argument, and that is the security property.**
+0002 is emphatic that a requester may never flip their own row to accepted —
+"that is the whole consent gate" — and this does not weaken it. The accepted
+edge is authorised by the `referrals` row alone, which is proof that both sides
+acted: one wrote the invite, one followed it and made an account. There is
+nothing a caller can pass in, so there is nothing to point at a stranger.
+
+**A refusal is never laundered.** A `blocked` row in either direction ends the
+call and is left exactly as it was. Someone who declined a person must not find
+them back in their friends list because that person sent an invite link. A
+`pending` row is completed instead of duplicated — both sides have now said
+yes, which is the case `request_friend()` already auto-accepts.
+
+**A friendship is a row on the server; every screen reads Dexie.** So
+`seedFriendRows()` writes a cards-less local row for an accepted friend who has
+not published a binder, on both sides — `befriendReferrer()` does it
+immediately, so the Friends screen is not empty while the toast still says
+"you and @rae are now friends", and `pullFriends()` does it for everyone else.
+Publishing is a separate switch from having an account (two switches, above), so
+before this an accepted friend who had not turned it on was invisible, which
+reads as "adding a friend did nothing". The rows carry no cards and the next
+pull fills them in; they are only ever written for ids with no local row, so a
+link-imported friend's cards can never be blanked by one.
+
+Verified in `tests/harness/social-rls.mjs` §6b — the accepted edge, the
+idempotent second call, no friendship before a profile exists, the block that
+survives an invite, and `referral_joins()` counting only your own without ever
+becoming a window onto the graph. `npm run test:social` after touching any of
+it; the client half is in `tests/unit/referral.test.mjs`.

@@ -1,11 +1,11 @@
--- 0018_custom_binders.sql
+-- 0020_custom_binders.sql
 --
 -- Binders the user builds by hand, each with its own audience.
 --
 -- WHY A SIBLING TABLE AND NOT A WIDER `binders`. `binders` (0003) is keyed
 -- `primary key (user_id)` — one row, the whole-collection binder — and four
 -- things read that shape today: `pullFriends`, `match_wants`, the
--- `send_to_inbox` reachability check, and `can_message` (0017). Re-keying it
+-- `send_to_inbox` reachability check, and `can_message` (0019). Re-keying it
 -- to (user_id, binder_id) would touch every one of them and re-do the RLS
 -- harness for a feature that only ADDS a case. So the main binder is left
 -- exactly as it is and custom binders are a sibling that expresses the same
@@ -47,7 +47,7 @@
 --   drop table if exists public.custom_binders;
 --   alter table public.trade_offers drop column source, drop column updated_at;
 --   (and re-apply 0003's replace_trade_offers/match_wants, 0004's
---    send_to_inbox, 0017's can_message and erase_social, which this replaces)
+--    send_to_inbox, 0019's can_message and erase_social, which this replaces)
 
 /* --------------------------------------------------------------- the table */
 
@@ -414,7 +414,7 @@ grant  execute on function public.match_wants(text[]) to authenticated;
 /* -------------------------------------------------------------- reachability */
 
 /**
- * 0017's `can_message`, taught the same lesson.
+ * 0019's `can_message`, taught the same lesson.
  *
  * Publishing a public tradeable binder is advertising cards for swap, so being
  * reachable about them is the point — the identical argument `send_to_inbox`
@@ -501,9 +501,9 @@ grant  execute on function public.send_to_inbox(uuid, jsonb) to authenticated;
 /* --------------------------------------------------------------- erasure */
 
 /**
- * 0017's `erase_social()`, extended to take custom binders with it.
+ * 0019's `erase_social()`, extended to take custom binders with it.
  *
- * Replaced in full rather than supplemented for the reason 0017 gave: Settings
+ * Replaced in full rather than supplemented for the reason 0019 gave: Settings
  * → Erase must be ONE call that leaves nothing behind, and a second RPC the
  * client could forget to make is how a "delete everything" button becomes a
  * lie. Still leaves `vaults` and `orders` alone.

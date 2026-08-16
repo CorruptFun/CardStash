@@ -1,4 +1,4 @@
--- 0017_messaging.sql
+-- 0019_messaging.sql
 --
 -- Two collectors talking to each other about a card.
 --

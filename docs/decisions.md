@@ -976,7 +976,7 @@ invites "just send me the money directly" next to a button that would have
 escrowed it. `messages` is the conversation *before* anyone agrees anything. It
 is not attached to an order, and an order still has no free-text field.
 
-So: `message_threads` + `messages` (0017), one row per pair, both participants
+So: `message_threads` + `messages` (0019), one row per pair, both participants
 reading, RPCs as the only writers.
 
 **Who may open one** is the `send_to_inbox()` rule plus "they spoke to me

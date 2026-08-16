@@ -1,7 +1,7 @@
 /**
  * Messages: two collectors talking about a card.
  *
- * The transport half of `supabase/migrations/0017`. Read that file's header
+ * The transport half of `supabase/migrations/0019`. Read that file's header
  * before changing anything here — the rules it states (who may open a
  * conversation, what a block does, why this is not the trade inbox) are
  * enforced in SQL, and this module's job is to present them honestly rather
@@ -266,7 +266,7 @@ export async function markThreadRead(threadId: number): Promise<void> {
 /**
  * Stop hearing from someone, or start again.
  *
- * One-sided and silent by design (0017): the thread leaves my list, their
+ * One-sided and silent by design (0019): the thread leaves my list, their
  * messages are still accepted and stored, and they are never told. Being told
  * you are blocked is an instruction to make a second account.
  */
