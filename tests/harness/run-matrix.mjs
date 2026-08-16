@@ -632,10 +632,26 @@ async function main() {
     // --- report -------------------------------------------------------------
     const byGame = {}
     for (const r of results) {
-      const g = (byGame[r.game] ??= { pass: 0, total: 0, stages: {}, byDegradation: {} })
+      const g = (byGame[r.game] ??= {
+        pass: 0,
+        total: 0,
+        stages: {},
+        byDegradation: {},
+        // Printing counters ride the report so a stored baseline can be gated
+        // on them. Older baselines predate these fields, so every comparison
+        // recomputes from `cells` rather than trusting them to exist.
+        printingOk: 0,
+        printingAsked: 0,
+        printingClaimed: 0,
+      })
       g.total++
       if (r.pass) g.pass++
       else g.stages[r.stage] = (g.stages[r.stage] ?? 0) + 1
+      if (r.printing) {
+        g.printingAsked++
+        if (r.printing === 'ok') g.printingOk++
+        else if (r.outcome?.pinned) g.printingClaimed++
+      }
       const d = (g.byDegradation[r.degradation] ??= { pass: 0, total: 0 })
       d.total++
       if (r.pass) d.pass++
@@ -769,6 +785,58 @@ async function main() {
         const then = shared?.then ?? b.pass / b.total
         if (now + 1e-9 < then) {
           console.error(`REGRESSION: ${game} ${(then * 100).toFixed(0)}% → ${(now * 100).toFixed(0)}%${shared ? ' (shared keys)' : ''}`)
+          bad = true
+        }
+      }
+      // Printing regression, gated SEPARATELY from the pass rate.
+      //
+      // Folding printing into the pass gate would move every stored baseline
+      // at once and destroy the before/after comparison this harness exists
+      // for (lesson 62) — so it stays its own number. But leaving it ungated
+      // meant a change could improve the name rate while halving printing
+      // accuracy and still exit 0, which is exactly the shape of regression
+      // the printing work is meant to prevent.
+      //
+      // Recomputed from `cells` on both sides: baselines written before the
+      // per-game printing counters existed still carry `cells[].printing`.
+      const printingOverSharedKeys = (game) => {
+        if (!baselineCells) return null
+        const keysThen = new Set(baselineCells.filter((c) => c.game === game).map((c) => c.key))
+        const keysNow = new Set(results.filter((r) => r.game === game).map((r) => r.key))
+        const nowAsked = results.filter((r) => r.game === game && r.printing && keysThen.has(r.key))
+        const thenAsked = baselineCells.filter((c) => c.game === game && c.printing && keysNow.has(c.key))
+        if (!nowAsked.length || !thenAsked.length) return null
+        return {
+          now: nowAsked.filter((r) => r.printing === 'ok').length / nowAsked.length,
+          then: thenAsked.filter((c) => c.printing === 'ok').length / thenAsked.length,
+          // A wrong printing the app KNOWS it guessed is honest; one it
+          // believes it read is a lie the user cannot catch. Never let that
+          // class grow, even if the overall printing rate improves.
+          claimedNow: nowAsked.filter((r) => r.printing === 'wrong' && r.outcome?.pinned).length,
+          claimedThen: thenAsked.filter((c) => c.printing === 'wrong' && c.outcome?.pinned).length,
+        }
+      }
+      for (const game of Object.keys(byGame)) {
+        const p = printingOverSharedKeys(game)
+        if (!p) continue
+        if (p.now + 1e-9 < p.then) {
+          console.error(`PRINTING REGRESSION: ${game} ${(p.then * 100).toFixed(0)}% → ${(p.now * 100).toFixed(0)}% (shared keys)`)
+          bad = true
+        }
+        if (p.claimedNow > p.claimedThen) {
+          console.error(`PRINTING CLAIMED WORSE: ${game} ${p.claimedThen} → ${p.claimedNow} wrong while claiming the code was read`)
+          bad = true
+        }
+      }
+    }
+    if (args['min-printing-rate'] != null) {
+      const min = Number(args['min-printing-rate'])
+      for (const [game, g] of Object.entries(byGame)) {
+        if (!g.printingAsked) continue
+        if (g.printingOk / g.printingAsked < min) {
+          console.error(
+            `BELOW MIN PRINTING RATE: ${game} ${((g.printingOk / g.printingAsked) * 100).toFixed(0)}% < ${(min * 100).toFixed(0)}%`,
+          )
           bad = true
         }
       }
