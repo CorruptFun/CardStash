@@ -177,10 +177,21 @@ Spawns vite (port 5197) + headless chromium (`--no-sandbox`), N pages
 round-robin the cells. Cell = fixture × degradation × hint mode (hinted for
 all; auto only for mtg/pokemon/yugioh/lorcana on clean/soft-focus/glare).
 Grading: `outcome.ok` AND right GAME AND name similarity ≥ 0.9 — a confident
-wrong card or wrong game FAILS. Known grading limit: any same-name printing
-passes (edition ground truth is recorded but not gated). Failure-stage
-attribution from the trace (see SKILL.md). `--baseline` compares per-game
-pass rates and exits 1 on any drop; `--min-rate` sets an absolute floor.
+wrong card or wrong game FAILS. The PRINTING is graded too, by `printingOf()`
+against the fixture's own `number`, but reported and gated beside the pass
+rate rather than inside it (a same-name printing still PASSES the name gate —
+folding the two together would invalidate every stored baseline at once).
+Failure-stage attribution from the trace (see SKILL.md). `--baseline` compares
+per-game pass rates and exits 1 on any drop, and does the same for per-game
+printing rates over shared keys (`PRINTING REGRESSION`) and for the count of
+cells wrong while `pinned` (`PRINTING CLAIMED WORSE`); `--min-rate` and
+`--min-printing-rate` set absolute floors. What genuinely remains ungraded:
+treatment/frame, finish and language — nothing records them — and printing is
+graded on SINGLES only, because clip and binder-page manifests carry no
+printing ground truth. Yu-Gi-Oh fixtures are excluded from the printing
+question entirely (`REPLICA_ART_GAMES`): YGOPRODeck's rendered replicas print
+no set code and no passcode anywhere, so both sides would agree without either
+having read anything (lesson 63). Only the real photographs can answer it.
 Budget note: the app's lookup budget is wall-clock, so heavy CI contention
 can flip marginal cells; run with 3 pages on 4 cores.
 

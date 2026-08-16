@@ -195,13 +195,29 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    the same mistake in the other direction.
 
 13. **The right card at the wrong PRINTING is its own failure class, and the
-   matrix is blind to it.** `graded()` in run-matrix.mjs compares game + name
-   similarity only, so a borderless fixture answered with the base printing
-   scores a PASS. There is a `borderless-any` MTG fixture and it cannot fail
-   this way. Do not read the matrix as evidence about printings; it has none.
-   Measured off a real photo instead: Human Torch, Johnny Storm `MSH #0321`
-   (borderless, foil, quarter-turned) came back as `MSH #136` — right name,
-   right set, ordinary frame, wrong art, wrong price.
+   matrix now measures it — beside the pass rate, never inside it.**
+   `graded()` in run-matrix.mjs still compares game + name similarity only, so
+   a borderless fixture answered with the base printing still scores a PASS;
+   `printingOf()` (commit 008c864) asks the second question and the runner
+   prints `printing: N/M` overall and per game, gated by `PRINTING
+   REGRESSION` (per-game rate over keys shared with `--baseline`), `PRINTING
+   CLAIMED WORSE` (cells wrong while `pinned`, which may never grow) and the
+   `--min-printing-rate` floor. It is deliberately not folded into the pass
+   rate — see lesson 62. The `borderless-any` MTG fixture that "could not
+   fail this way" registers `printing: 'wrong'` on all 12 of its cells.
+   Standing baseline on main: **205/282 identified (73%), printing 118/169,
+   4 wrong while claiming the code was read** — per-game printing onepiece
+   18/18, riftbound 42/50, pokemon 35/55, mtg 23/46.
+   What the column still does NOT cover: treatment/frame, finish and
+   language are recorded nowhere and graded not at all, and clips and binder
+   pages carry no printing ground truth in their manifests, so printing is
+   graded only on singles. Yu-Gi-Oh is excluded outright
+   (`REPLICA_ART_GAMES`, lesson 63). Read the matrix as evidence about
+   printings only through that column and only within those limits.
+   Measured off a real photo before any of this existed: Human Torch, Johnny
+   Storm `MSH #0321` (borderless, foil, quarter-turned) came back as
+   `MSH #136` — right name, right set, ordinary frame, wrong art, wrong
+   price.
    The mechanism is structural rather than unlucky. On a full-art card the
    collector line is small type over artwork at the very edge, and the
    full-bleed frame gives `refineCardCrop` no border to lock onto — while the
@@ -211,6 +227,23 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    only when no name was readable. The card that most needs the strong reader
    is exactly the one that never gets it, and with no number pinned `matchMtg`
    answers by fuzzy name — which Scryfall resolves to one default printing.
+   **The read rate is the lever, not the ranking.** Per-cell across the four
+   fixtures that lose printings, the correlation is essentially perfect: when
+   the printed line yields a number the printing is right, and when it does
+   not the printing is wrong. `pokemon/charizard-base` reads `4/102` on 3 of
+   12 cells — those 3 are correct, the other 9 answer Celebrations
+   `SWSH11.5TG TG03` (lesson 67's headline case: a four-figure card at a
+   three-dollar price). `pokemon/rayquaza-vmax` reads `70/203` on 1 of 12 —
+   that one is correct, the other 11 answer `SWSH12.5TG TG29`.
+   `riftbound/short-name-1` reads nothing on all 8 and is wrong on all 8.
+   The consequence to keep in mind before designing anything clever here: **a
+   printing RESOLVER has nothing to rank when `number` and `total` are both
+   null**, and 39 of the 51 wrong-printing cells have no collector evidence at
+   all. Ranking is downstream of reading; spend the effort on the line.
+   `mtg/borderless-any` is the exception that names the second mechanism: it
+   reads `PRM 2` on 5 of 12 cells and is still wrong on all 12, because
+   `matchMtg`'s fuzzy fallback resolves a failed exact lookup to the base
+   printing (`MSC #806`).
    `printingTiebreak` (identify.ts) is invariant 12's principle applied to that
    class: a confident answer that settled the card but not the edition is
    SUSPECT, and the cloud read is asked `treatment` — the one question
@@ -219,6 +252,15 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    comes from an exact-name `rawPrintings` search (so a different card is not a
    reachable answer) and that only a NON-regular treatment may re-pick (so a
    model shrugging "regular" cannot move a correct answer to another set).
+   Its CALL SITE was gated on the wrong question until this round and is now
+   gated on `!pinned`, i.e. on `linePinnedPrinting(refined)`, not on
+   `!refined?.read.number`. "Was a number read?" and "did that number agree
+   with the card returned?" are different questions, and the gap between them
+   is exactly the `PRM 2` case above: the line reads, the exact lookup fails,
+   the fuzzy fallback answers the base printing, and the old gate treated that
+   as pinned — so the scan reported an unconfirmed edition and declined the
+   one mechanism that could confirm it. After a tie-break swap `pinned` stays
+   false, because the model chose that printing and the printed line did not.
    Two collaborators, both still missing: nothing on-device detects a
    borderless frame (`pickByTraits` has taken a `treatment` since v0.7 and had
    no producer until the cloud read became one), and `looksLikeCollectorLine`

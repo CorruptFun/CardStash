@@ -1134,12 +1134,27 @@ async function identifyViaOcr(
         const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
         if (better) card = better
       }
-      // Nothing printed pinned the EDITION — the collector line was never read,
-      // or read without a number — so the card on screen is whatever a fuzzy
-      // name match defaulted to. On a card with more than one frame that is a
-      // coin toss the user pays for, in the wrong art and the wrong price. Ask
-      // the cloud read which printing this is, if the user switched it on.
-      if (!refined?.read.number) {
+      // Nothing printed pinned the EDITION — so the card on screen is whatever
+      // a fuzzy name match defaulted to. On a card with more than one frame
+      // that is a coin toss the user pays for, in the wrong art and the wrong
+      // price. Ask the cloud read which printing this is, if the user
+      // switched it on.
+      //
+      // The condition is `pinned`, NOT "was a number read", and the difference
+      // is the whole point. `linePinnedPrinting` requires the chosen card's own
+      // number to AGREE with the read; a number that read and then resolved to
+      // nothing is precisely the case it was written to catch — `matchMtg`
+      // carries a fuzzy fallback, so a borderless print whose line read "PRM 2"
+      // resolves to no card under that set, falls back to the name, and returns
+      // the base printing while a refinement has technically happened.
+      //
+      // Gating on `read.number` therefore SKIPPED the tie-break on exactly the
+      // frames it exists for: the scan reported an unconfirmed edition and
+      // simultaneously declined the one mechanism that could confirm it.
+      // Measured on the standard matrix, `borderless-any` reads "PRM 2" on 5 of
+      // its 12 cells and answers the base printing on all 12.
+      const pinned = linePinnedPrinting(refined)
+      if (!pinned) {
         const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
         if (settled) {
           traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
@@ -1159,7 +1174,7 @@ async function identifyViaOcr(
           confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
-          pinned: linePinnedPrinting(refined),
+          pinned,
         },
       }
     }
