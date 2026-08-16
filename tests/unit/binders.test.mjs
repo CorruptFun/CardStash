@@ -26,11 +26,16 @@ const STUB = join(HERE, 'stubs', 'messaging-host.mjs')
 const hosts = { './analytics': STUB, './authsession': STUB, './cloudconfig': STUB, './settings': STUB }
 
 const {
+  binderCode,
   binderQty,
   binderSharedCards,
   binderSummary,
+  binderUrl,
+  byPage,
+  cleanBinderPage,
   isDiscoverable,
   isPublished,
+  pageLabel,
   resolveBinderRows,
 } = await bundleImport('src/lib/binders.ts', { alias: hosts })
 
@@ -143,4 +148,49 @@ test('tradeable is a boolean, not whatever the wire said', () => {
     cards: [],
   })
   assert.equal(clean.tradeable, false)
+})
+
+/* --- the physical half: pages, and the label on the cover ----------------- */
+
+test('page numbers are 1-based and bounded', () => {
+  assert.equal(cleanBinderPage('7'), 7)
+  assert.equal(cleanBinderPage(3.8), 3)
+  assert.equal(cleanBinderPage(0), undefined)
+  assert.equal(cleanBinderPage(-2), undefined)
+  assert.equal(cleanBinderPage(100000), undefined)
+  assert.equal(cleanBinderPage('page seven'), undefined)
+  assert.equal(pageLabel(4), 'Page 4')
+  assert.equal(pageLabel(undefined), 'Unpaged')
+})
+
+test('rows group by page, in page order, with the hand-added ones last', () => {
+  const grouped = byPage(
+    [{ id: 'c', page: 3 }, { id: 'a', page: 1 }, { id: 'u' }, { id: 'b', page: 1 }],
+    (row) => row.page,
+  )
+  assert.deepEqual(
+    grouped.map((g) => [g.page, g.rows.map((r) => r.id)]),
+    [
+      [1, ['a', 'b']],
+      [3, ['c']],
+      [undefined, ['u']],
+    ],
+  )
+})
+
+test('the QR link points at this deployment, and only at a binder', () => {
+  assert.equal(binderUrl('abc', 'https://example.com/app/'), 'https://example.com/app/#/binders/abc')
+  // A base carrying its own query or fragment (a `?via=` referral link, a
+  // stale route) must not end up inside something printed on a sticker.
+  assert.equal(binderUrl('abc', 'https://example.com/app/?via=rae#/scan'), 'https://example.com/app/#/binders/abc')
+  assert.equal(binderUrl('a b', 'https://example.com/'), 'https://example.com/#/binders/a%20b')
+})
+
+test('the printed code is a readable fingerprint of the id', () => {
+  // Ids are UUIDs. The sticker gets the first eight hex digits in two groups —
+  // enough to tell two binders of the same name apart when the QR will not
+  // scan, and short enough to read out loud.
+  assert.equal(binderCode('3f55dd13-4d64-42e4-bacd-7307ab79a688'), '3F55-DD13')
+  assert.equal(binderCode('abc'), 'ABC')
+  assert.match(binderCode('3f55dd13-4d64-42e4-bacd-7307ab79a688'), /^[A-Z0-9]{4}-[A-Z0-9]{4}$/)
 })

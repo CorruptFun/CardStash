@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import { sanitizeGrade } from './slab'
+import { cleanBinderPage } from './binders'
 import { customCard, mergePatch, mergePatches, sanitizePatch, unmergePatch } from './cardpatch'
 import { GAMES, FINISH_LABEL } from './games'
 import { ygoPrintingVariants } from './ygo'
@@ -358,7 +359,15 @@ export async function updateItem(
   patch: Partial<
     Pick<
       CollectionItem,
-      'finish' | 'condition' | 'opened' | 'purchasePrice' | 'note' | 'card' | 'forTrade' | 'grade' | 'marketValue'
+      | 'finish'
+      | 'condition'
+      | 'opened'
+      | 'purchasePrice'
+      | 'note'
+      | 'card'
+      | 'forTrade'
+      | 'grade'
+      | 'marketValue'
     >
   >,
 ): Promise<CollectionItem | null> {
@@ -1008,22 +1017,28 @@ export async function deleteBinder(id: string): Promise<void> {
  * physical cards, and one saying you have four of something you own two of is
  * a claim a friend will act on. Re-adding tops up rather than duplicating.
  */
-export async function addToBinder(binderId: string, itemId: string, qty = 1): Promise<void> {
+export async function addToBinder(binderId: string, itemId: string, qty = 1, page?: number): Promise<void> {
+  const cleanPage = cleanBinderPage(page)
   await db.transaction('rw', db.binders, db.binderCards, db.collection, async () => {
     const item = await db.collection.get(itemId)
     if (!item) return
     const existing = await db.binderCards.where('[binderId+itemId]').equals([binderId, itemId]).first()
     const next = Math.max(1, Math.min(item.qty, (existing?.qty ?? 0) + qty))
-    if (existing) await db.binderCards.update(existing.id, { qty: next })
-    else
+    if (existing) {
+      // The first page a copy was seen on wins: re-reading page 7 must not
+      // move a card that page 3 already accounted for.
+      await db.binderCards.update(existing.id, { qty: next, page: existing.page ?? cleanPage })
+    } else {
       await db.binderCards.add({
         id: uid(),
         binderId,
         itemId,
         cardId: item.cardId,
         qty: next,
+        page: cleanPage,
         addedAt: Date.now(),
       })
+    }
     await db.binders.update(binderId, { updatedAt: Date.now() })
   })
 }
@@ -1161,9 +1176,9 @@ export async function exportBackup(options: ExportOptions = {}): Promise<Backup>
     friends: await db.friends.toArray(),
     trades: await db.trades.toArray(),
     wants: await db.wants.toArray(),
-    patches: budgeted,
     binders: await db.binders.toArray(),
     binderCards: await db.binderCards.toArray(),
+    patches: budgeted,
   }
 }
 
@@ -1340,6 +1355,7 @@ export function sanitizeBackup(raw: unknown): Backup {
       itemId,
       cardId,
       qty: Math.max(1, Math.min(9_999, Math.floor(asPositive(entry.qty) ?? 1))),
+      page: cleanBinderPage(entry.page),
       addedAt: asPositive(entry.addedAt) ?? Date.now(),
     })
   }
@@ -1363,9 +1379,9 @@ export function sanitizeBackup(raw: unknown): Backup {
     friends,
     trades,
     wants,
-    patches,
     binders,
     binderCards,
+    patches,
   }
 }
 
@@ -1423,6 +1439,7 @@ export async function clearAllData(): Promise<void> {
       db.friends,
       db.trades,
       db.wants,
+      db.binders,
       db.tombstones,
       db.patches,
       db.binders,
@@ -1442,6 +1459,7 @@ export async function clearAllData(): Promise<void> {
         db.friends.clear(),
         db.trades.clear(),
         db.wants.clear(),
+        db.binders.clear(),
         db.patches.clear(),
         db.binders.clear(),
         db.binderCards.clear(),

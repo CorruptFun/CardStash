@@ -6,7 +6,7 @@
 | ------ | ---- | ------------ |
 | **Scan** | `views/ScanView.tsx` | The camera. Game filter chips, Packs (sealed) toggle, Collect toggle, torch. A reticle with live "sensing/locking" feedback, the result chip (name · set · price · finish cycler), the "what the scanner saw" diagnostics door, and the recent-scan tray. Also owns the start gate and the iOS permission explainer, the **photo upload** control (`UploadButton`) and the **Page** pill for binder/multi-card scanning — both entry points check `entitlement.ts`, and both land on a **review screen** where the user confirms every row before anything is written. A page files ~9 cards on one tap, so nothing is added silently; each row offers a full-budget re-read. The tray's **Review** button (pinned outside the strip's scroller) opens **batch add** (`components/ScanBatch.tsx`) — the same review shell over the scan log, for filing a whole stack in one confirm. |
 | **Search** | `views/SearchView.tsx` | Debounced multi-game search over the enabled games, by name or by the number printed on the card (`CODE_EXAMPLE` supplies the per-game example in the placeholder), accepting a prefill handed over from a failed scan. |
-| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, price refresh, CSV import/export and JSON backup/restore. |
+| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, **filing a selection into a binder**, price refresh, CSV import/export and JSON backup/restore. |
 | **Decks** | `views/DecksView.tsx` | Deck list and deck detail: board grouping by type, mana curve / colour bar / type bars, owned-vs-missing costing, rules warnings, add-cards modal (search or from your collection), rename, cover, decklist copy. |
 | **AI builder** | `views/BuilderView.tsx` | The Gemini deck builder: game/format/style/budget, optional "build around these" seed cards, live-search-grounded meta research, parsed decklists that can be created as real decks. |
 | **Friends** | `views/FriendsView.tsx` | Your shareable binder (for-trade count and value), the friends list with want-match badges, the trades list, import/paste, the live-sync panel, and **Invite a friend** (`components/InvitePanel.tsx`) — a `?via=<handle>` link that credits the referral *and* makes the two of you friends when they claim a handle. |
@@ -34,6 +34,9 @@ identify.ts).
 Hash routing parsed in `App.tsx`; no router library. The shell is a
 `<main>` plus a six-tab bottom nav (Scan · Search · Collection · Friends ·
 Decks · Settings), with `CardSheetHost` and `Toasts` mounted above everything.
+`#/binders` and `#/binders/<id>` sit under the Friends tab; the second is
+**printed on paper** (a binder's QR label), so it is the one route that can
+never be renamed.
 
 The scan screen stays mounted (hidden) so its own state survives tab hops — the
 camera does not, and is released the moment the tab changes (scanning.md §1).

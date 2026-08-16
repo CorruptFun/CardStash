@@ -83,6 +83,30 @@ another row, summing quantities and quantity-weighting the cost basis.
 row re-picks its set variant so a refresh doesn't silently revert it to the
 default printing.
 
+### Binders are also objects: pages and printed labels
+
+`CustomBinder` (above) is a named selection with an audience. Most of them are
+also a physical thing on a shelf, and two additions say so — without a second
+concept, and without a second table:
+
+- **`BinderCard.page`** — 1-based, stamped when the copy arrived from a binder
+  page scan, absent when it was added by hand. It lives on the BINDER row, not
+  the collection row, because the same copy can sit in two binders and "page 3"
+  is true of only one of them. `addToBinder(binderId, itemId, qty, page)` keeps
+  the page a copy was first seen on rather than overwriting it: re-reading a
+  page must not move a card the earlier pass already accounted for.
+- **A printed label** — `binderUrl()` builds `<origin><path>#/binders/<id>`
+  from the app's own location, so a label printed from the deployed site opens
+  the deployed site and one printed from a self-hosted copy opens that. It
+  rides the FRAGMENT (a printed label must work offline, and a fragment is
+  never sent to a server), it carries no cards, and `binderCode()` prints the
+  id underneath in groups of five for a sticker too scuffed to scan.
+
+`lib/qr.ts` is a dependency-free QR encoder that exists for that label alone —
+you print one in the room the binder is in, which is exactly where an image API
+would fail. `components/BinderLabel.tsx` is the sheet; the print stylesheet at
+the end of `styles.css` is what gets it onto paper without the app around it.
+
 ### `GradeInfo` — a grade is a property of the copy
 
 `{ company, grade, label?, cert?, qualifier? }`, on `CollectionItem` and never

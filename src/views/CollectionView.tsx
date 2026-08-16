@@ -4,6 +4,7 @@ import { SPORT_LABEL, SPORTS } from '../lib/sports'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatedNumber, CardImg, Empty, Modal } from '../components/basics'
 import { DeckPicker } from '../components/DeckPicker'
+import { BinderBulkPicker } from '../components/BinderPicker'
 import { Icon } from '../components/Icon'
 import { track } from '../lib/analytics'
 import { refreshCards, resolveImportRows } from '../lib/cardsearch'
@@ -131,6 +132,7 @@ export function CollectionView() {
   const [dataOpen, setDataOpen] = useState(false)
   const [busyText, setBusyText] = useState<string | null>(null)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
+  const [binderPickOpen, setBinderPickOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const refreshingRef = useRef(false)
   const refreshAbortRef = useRef<AbortController | null>(null)
@@ -692,6 +694,11 @@ export function CollectionView() {
           <button className="btn btn--ghost btn--sm" onClick={() => setDeckPickOpen(true)}>
             <Icon name="decks" size={15} /> Deck
           </button>
+          {/* Filing a shelf that predates the app: select the rows, put them in
+            * a binder, print its label. */}
+          <button className="btn btn--ghost btn--sm" onClick={() => setBinderPickOpen(true)}>
+            <Icon name="binder" size={15} /> Binder
+          </button>
           <button
             className="btn btn--ghost btn--sm"
             onClick={() => {
@@ -720,6 +727,14 @@ export function CollectionView() {
         onBuildNew={buildAroundSelection}
         buildLabel={`Build a deck around ${selected.size === 1 ? 'this card' : 'these cards'}`}
         emptyHint="No decks yet — the AI builder can design one around your selection, or create one on the Decks tab first."
+      />
+      <BinderBulkPicker
+        open={binderPickOpen}
+        itemIds={[...selected]}
+        onClose={() => {
+          setBinderPickOpen(false)
+          setSelected(new Set())
+        }}
       />
       <DataMenu
         open={dataOpen}

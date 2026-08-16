@@ -98,3 +98,91 @@ export function BinderPicker({
     </Modal>
   )
 }
+
+/**
+ * The same picker over a SELECTION — the Collection screen's bulk "Binder"
+ * action.
+ *
+ * This is how a shelf that predates the app gets labelled: select the rows,
+ * file them, print the label. It files each row separately (one `BinderCard`
+ * per collection row) rather than inventing a bulk write, so a binder built
+ * this way is indistinguishable from one built a card at a time.
+ */
+export function BinderBulkPicker({
+  open,
+  itemIds,
+  onClose,
+}: {
+  open: boolean
+  itemIds: string[]
+  onClose: () => void
+}) {
+  const binders = useLiveQuery(() => db.binders.orderBy('updatedAt').reverse().toArray(), [])
+  const [name, setName] = useState('')
+  const toast = useUi((s) => s.toast)
+  if (!open) return null
+
+  const fileAll = async (binderId: string, binderName: string) => {
+    const done = await guarded(async () => {
+      for (const itemId of itemIds) await addToBinder(binderId, itemId)
+      return true
+    }, 'Binder')
+    if (!done) return
+    toast(`Filed ${itemIds.length} ${itemIds.length === 1 ? 'row' : 'rows'} in “${binderName}”`, 'success')
+    onClose()
+  }
+
+  const createAndFile = async () => {
+    const clean = name.trim()
+    if (!clean) return
+    const binder = await guarded(() => createBinder(clean), 'New binder')
+    if (!binder) return
+    setName('')
+    await fileAll(binder.id, binder.name)
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Add ${itemIds.length} ${itemIds.length === 1 ? 'row' : 'rows'} to a binder`}
+    >
+      <div className="deckpicker">
+        {binders && binders.length === 0 && (
+          <p className="deckpicker__empty">
+            No binders yet. Name one below — it starts private, and nothing is uploaded until you say so.
+          </p>
+        )}
+        {(binders ?? []).map((binder) => (
+          <button key={binder.id} className="deckpicker__row" onClick={() => void fileAll(binder.id, binder.name)}>
+            <span className="deckpicker__text">
+              <span className="deckpicker__name">{binder.name}</span>
+              <em>
+                {VISIBILITY_LABEL[binder.visibility]}
+                {binder.tradeable && binder.visibility !== 'private' ? ' · for trade' : ''}
+              </em>
+            </span>
+            <span className="deckpicker__add">
+              <Icon name="plus" size={15} />
+            </span>
+          </button>
+        ))}
+        <div className="addfriend">
+          <input
+            className="input"
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && void createAndFile()}
+            placeholder="New binder…"
+            maxLength={60}
+            aria-label="New binder name"
+          />
+          <button className="btn btn--ghost" onClick={() => void createAndFile()} disabled={!name.trim()}>
+            Create
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}

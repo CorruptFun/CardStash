@@ -715,6 +715,12 @@ at the weekend" — each with **its own audience**. `lib/binders.ts` is the pure
 half, `views/BindersView.tsx` the screens, `supabase/migrations/0020` the
 server. Read decision 26 before changing what a visibility means.
 
+A binder is usually also a **physical object**, and two things say so without a
+second concept: `BinderCard.page` (stamped by a binder page scan, grouped on
+the screen) and a printed QR label carrying `…#/binders/<id>` — local, offline,
+carrying no cards, and nothing to do with visibility. That half is decision 27
+and `docs/data-model.md`; nothing in it touches the server.
+
 **They sit BESIDE the whole-collection binder, not instead of it.** `binders`
 (0003) is `primary key (user_id)` — one row — and four things read that shape:
 `pullFriends`, `match_wants`, `send_to_inbox`'s reachability and `can_message`.

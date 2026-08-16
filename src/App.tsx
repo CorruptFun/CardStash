@@ -13,6 +13,7 @@ import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
 import { CardEditorHost } from './components/CardEditor'
 import { CardSheetHost } from './views/CardSheet'
+import { BindersView } from './views/BindersView'
 import { CollectionView } from './views/CollectionView'
 import { DecksView } from './views/DecksView'
 import { FriendBinderView } from './views/FriendBinderView'
@@ -21,7 +22,6 @@ import { IngestView } from './views/IngestView'
 import { ScanView } from './views/ScanView'
 import { SearchView } from './views/SearchView'
 import { SettingsView } from './views/SettingsView'
-import { BindersView } from './views/BindersView'
 import { MessagesView } from './views/MessagesView'
 import { OrderView } from './views/OrderView'
 import { TradeView } from './views/TradeView'
@@ -42,7 +42,11 @@ type Route =
    * see the header of MessagesView.
    */
   | { name: 'messages'; otherId: string | null }
-  /** Binders the user built by hand: the list, or one of them. */
+  /**
+   * Binders the user built by hand: the list, or one of them. The detail route
+   * is **printed on paper** — it is what a binder's QR label carries — so it is
+   * the one route here that can never be renamed.
+   */
   | { name: 'binders'; binderId: string | null }
   /** Share-link landing: `#/x?d=<blob>` (profile, trade, or reply). */
   | { name: 'ingest'; blob: string | null }
@@ -73,7 +77,8 @@ function parseRoute(hash: string): Route {
     case 'messages':
       return { name: 'messages', otherId: parts[1] ?? null }
     case 'binders':
-      return { name: 'binders', binderId: parts[1] ?? null }
+      // decoded because this id can arrive from a scanned QR label.
+      return { name: 'binders', binderId: parts[1] ? decodeURIComponent(parts[1]) : null }
     case 'x':
       return { name: 'ingest', blob: query.get('d') }
     default:
@@ -144,7 +149,7 @@ export function App() {
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
         {route.name === 'orders' && <OrderView key={route.orderId ?? 'none'} orderId={route.orderId} />}
         {route.name === 'messages' && <MessagesView otherId={route.otherId} />}
-        {route.name === 'binders' && <BindersView binderId={route.binderId} />}
+        {route.name === 'binders' && <BindersView key={route.binderId ?? 'all'} binderId={route.binderId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
       {/* One banner slot, three claimants, in descending order of what it costs

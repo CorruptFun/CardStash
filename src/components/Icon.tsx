@@ -301,6 +301,29 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M12 3.8c2.2 2.4 3.3 5.2 3.3 8.2S14.2 17.8 12 20.2c-2.2-2.4-3.3-5.2-3.3-8.2S9.8 6.2 12 3.8Z" />
     </>
   ),
+  /* A ring binder seen edge-on: covers, spine rings, pages. */
+  binder: (
+    <>
+      <path d="M7 4h11a1.6 1.6 0 0 1 1.6 1.6v12.8A1.6 1.6 0 0 1 18 20H7Z" />
+      <path d="M7 4a2.6 2.6 0 0 0-2.6 2.6v10.8A2.6 2.6 0 0 0 7 20" />
+      <path d="M7.6 8.4h1.8M7.6 12h1.8M7.6 15.6h1.8" />
+    </>
+  ),
+  qr: (
+    <>
+      <rect x="3.6" y="3.6" width="6.4" height="6.4" rx="1" />
+      <rect x="14" y="3.6" width="6.4" height="6.4" rx="1" />
+      <rect x="3.6" y="14" width="6.4" height="6.4" rx="1" />
+      <path d="M14 14h2.6v2.6H14zM17.8 17.8h2.6v2.6h-2.6zM14 20.4h1M20.4 14h-1" />
+    </>
+  ),
+  printer: (
+    <>
+      <path d="M7 9V4.6h10V9" />
+      <path d="M7 17.5H5.4A1.4 1.4 0 0 1 4 16.1v-4.7A1.4 1.4 0 0 1 5.4 10h13.2a1.4 1.4 0 0 1 1.4 1.4v4.7a1.4 1.4 0 0 1-1.4 1.4H17" />
+      <rect x="7" y="14.6" width="10" height="4.8" rx="1" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

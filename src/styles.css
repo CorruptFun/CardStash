@@ -7148,3 +7148,211 @@ button {
 button.social-row {
   text-align: left;
 }
+
+/* --- Binders: the physical half -------------------------------------------
+ * A binder is also an object on a shelf, so this is what makes paper and app
+ * agree: pages in the grid, and the label you stick on the cover.
+ * The label sheet is the one part of this stylesheet designed for INK — white
+ * ground, black modules — and the print block at the end is what gets it onto
+ * paper without the rest of the app coming with it. */
+
+/* The binder chosen on the page-review screen, above the rows it files. */
+.binderpick {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--paper-2);
+}
+.binderpick .select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.input--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 11px;
+  font-size: 13px;
+}
+
+/* Parked while the camera takes the next page — kept mounted, so every tick
+ * and the binder name survive the trip back to the viewfinder. */
+.binder--parked {
+  display: none;
+}
+/* `display: block` on the li kills its marker; the inner list needs its own
+   padding zeroed or every row sits 40px in from the page heading above it. */
+.binder__page {
+  display: block;
+}
+.binder__page > ul {
+  margin: 0;
+  padding: 0;
+}
+.binder__pagehead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4) var(--s1);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.binder__pagehead em {
+  font-style: normal;
+  font-family: var(--font-num);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* "You have 27 cards waiting" — the only route back to a parked review. */
+.pageresume {
+  position: absolute;
+  left: var(--s4);
+  right: var(--s4);
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-1);
+  border: 1px solid var(--rule-strong);
+  background: rgba(18, 16, 16, 0.88);
+  backdrop-filter: blur(6px);
+  font-size: 12.5px;
+  color: var(--paper-2);
+}
+.pageresume.safe-top {
+  margin-top: calc(var(--sat) + var(--s3));
+}
+.pageresume strong {
+  font-family: var(--font-num);
+  color: var(--paper);
+}
+
+.binderpage {
+  margin-bottom: var(--s4);
+}
+.binderpage__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s3) 0 var(--s2);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.binderpage__head em {
+  font-style: normal;
+  font-family: var(--font-num);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Where this copy physically is, said on the copy itself. */
+/* --- the printed label ---------------------------------------------------- */
+
+.labelbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.labelsheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 16px 16px;
+  border-radius: var(--r-1);
+  /* Ink colours, on screen as well as on paper: what you see is the sticker,
+     and a dark-themed preview of a thing that prints white is a lie. */
+  background: #ffffff;
+  color: #111111;
+}
+.labelsheet__qr {
+  width: 62%;
+  max-width: 240px;
+  height: auto;
+  image-rendering: pixelated;
+}
+.labelsheet__name {
+  font-size: 16px;
+  font-weight: 650;
+  text-align: center;
+  line-height: 1.2;
+}
+.labelsheet__note {
+  font-size: 12px;
+  color: #555555;
+  text-align: center;
+}
+.labelsheet__code {
+  font-family: var(--font-num);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #333333;
+}
+.labelsheet__meta {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #888888;
+}
+.labelbox__hint {
+  font-size: 12.5px;
+  color: var(--paper-3);
+}
+.labelbox__btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+/* Printing. The app is a fixed full-viewport shell, so hiding it is not
+ * enough — the sheet is lifted out of the flow and placed at the top of the
+ * page, or it prints wherever its scroll position happened to leave it. */
+@media print {
+  body {
+    background: #ffffff;
+  }
+  .app,
+  .modal-root .sheet-backdrop,
+  .modal__head,
+  .labelbox__hint,
+  .labelbox__btns {
+    display: none !important;
+  }
+  .modal-root,
+  .modal {
+    position: static;
+    inset: auto;
+    display: block;
+    max-width: none;
+    padding: 0;
+    border: none;
+    background: #ffffff;
+    box-shadow: none;
+  }
+  .labelsheet {
+    width: 72mm;
+    margin: 0;
+    padding: 6mm 4mm;
+    border-radius: 0;
+    break-inside: avoid;
+  }
+  .labelsheet__qr {
+    width: 46mm;
+    max-width: none;
+  }
+}

@@ -55,8 +55,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   after applying `0013` and after any migration touching the card index; it is
   what proves the anon-read / authenticated-write asymmetry actually holds,
   which no schema read can show.
+- `npm run test:binder` — the binder screens end to end (filing, the label, the
+  link a printed QR carries, and the delete that must keep every card). No
+  camera, no fixtures.
 - `npm run test:unit` — node tests (corner parsing, name candidates, card
-  patches, harness stubs). `npm run test:scan` — the real-image scan regression matrix
+  patches, the QR encoder against a real decoder, harness stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the
   machine-generated `harness-fixtures` branch — never merge it).
   `npm run test:photos` runs the hand-curated real photographs in
@@ -85,7 +88,9 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   by the TCGplayer group layer in `tcgcsv.ts`; sealed collection rows carry
   an `opened` flag and stop counting at the sealed price once opened),
   multi-card / binder scanning (`multiscan.ts` — detect regions, crop, identify
-  each on a reduced per-card budget; the UI reviews before anything is added),
+  each on a reduced per-card budget; the UI reviews before anything is added,
+  and a session spans page after page of one binder), binders and their printed
+  QR labels (`binders.ts` + the dependency-free `qr.ts`),
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
@@ -504,6 +509,38 @@ quota is now shared across all users rather than per-person. Certs cache for
 months and a 429 stands lookups down for hours. The real fix is a proxy holding
 the token server-side — point `VITE_PSA_ENDPOINT` at one and nothing else
 changes.
+
+## Binders are also objects on a shelf
+
+The section above is a binder's *audience*; this is its *body*. Most binders
+are a real thing you can hold, so two additions say so without inventing a
+second concept — read decision 27 before touching either:
+
+- **`BinderCard.page`** — 1-based, stamped by a binder page scan, absent when a
+  card was added by hand. It lives on the BINDER row rather than the collection
+  row because the same copy can sit in two binders and "page 3" is true of only
+  one of them. `addToBinder` keeps the page a copy was **first** seen on: a
+  re-scan of page 7 must not move a card page 3 already accounted for.
+- **A printed QR label** (`components/BinderLabel.tsx` + the dependency-free
+  `lib/qr.ts`) carrying `…#/binders/<id>`, built from the app's own `location`
+  and riding the FRAGMENT so a label works offline and the id never reaches a
+  server. Any phone camera opens it; it carries no cards, so a stranger who
+  scans it gets nothing — not even for a `public` binder. `#/binders/:id` is
+  **printed on paper**: it is the one route that can never be renamed.
+
+The encoder is ours and stays ours — you print a label in the room the binder
+is in. `tests/unit/qr.test.mjs` decodes what it emits with a real decoder,
+because a subtly wrong encoder still renders a plausible square and the sticker
+is glued down by the time anyone notices.
+
+A page scan is a **session**, not a screen: "Next page" parks the review behind
+the viewfinder and the next page's rows append under their own heading. The
+review is parked with `display:none`, never unmounted — remounting would throw
+away every tick already made and the binder already chosen. Filing writes the
+collection row first and the binder row second (`addToCollection` then
+`addToBinder`), so a failure between them leaves a card outside a binder rather
+than a binder pointing at nothing. Run `npm run test:binder` (no camera, no
+fixtures) after touching any of it.
 
 ## Planned paid tier — binder scanning and photo upload
 

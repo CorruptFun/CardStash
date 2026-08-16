@@ -84,6 +84,8 @@ for a canned-network stub) and `external` to keep a heavy lazy dependency out
 | `sealed.test.mjs` | `identifySealedText` end to end over a stubbed two-set catalog — the Japanese-pack scenario where only the brand word and the printed set code survive OCR. |
 | `sealedmatch.test.mjs` | The pure scoring rules: code-prefix stripping, set-code qualification, score ordering against sealed.ts's 0.72 threshold. |
 | `tcgcsv-groups.test.mjs` | The group-index merge (primary + "Pokemon Japan" categories) with the network stubbed. |
+| `qr.test.mjs` | The QR encoder, held to the only bar that matters: a **real decoder** (`jsqr`) reads back exactly what went in, at every version this app emits. A wrong generator polynomial or a mis-numbered format bit still renders a plausible square, and the artefact is a sticker glued to a binder — the failure would surface weeks later. |
+| `binders.test.mjs` | Binder names (whatever gets pasted into the field ends up printable), ids (no glyph a person mistypes off paper), the label URL (a base carrying `?via=` or a stale route must not end up in it), `sanitizeBinder`, page grouping, and the **vault merge** — a rename on a phone must survive a laptop that has not synced. |
 | `stubs.test.mjs` | That the **harness's** stub APIs honour each real service's query semantics. Skips when the fixture snapshot isn't present. A stub that answers wrong would grade the pipeline against fiction. |
 
 Stub modules live in `tests/unit/stubs/`.
@@ -253,7 +255,12 @@ path that files a card without the card sheet.
 
 `test:scanui` is the only check that a picked file reaches the pipeline, that
 the page-review screen shows what was found, and that confirming files exactly
-the ticked rows. It needs the matrix fixtures and a fake camera device. It also
+the ticked rows. It also drives a **second page** into the same review — the
+parked screen, the resume bar, the page headings, the ticks surviving the trip
+back to the camera — and names a binder on the way out, so the session's cards
+land in that binder with the page they were read from. Its second page is the same photograph
+deliberately: it pins the merge, where a card already filed keeps the page it
+was first seen on and becomes a second copy rather than a second row. It needs the matrix fixtures and a fake camera device. It also
 carries two traps worth knowing, because both once made it fail while the app
 was fine: the mode pills are **one** "Modes" button opening a sheet of switches,
 so the Page toggle is reached through that sheet, not a pill of its own; and the
@@ -267,6 +274,24 @@ request. The invariant is that what the screen shows and what gets filed are
 the same set in both directions — an unticked row must not land, and a row
 already filed by Collect mode must not arrive ticked again. Run it after
 touching the scan tray, `ScanBatch`, or `db.scans`.
+
+## Binders and the printed label (`test:binder`)
+
+Drives the real screens with no camera and no fixtures — the cards come from
+the demo seed, every external request is aborted — through the whole life of a
+label: filing a selection from the collection, the binder list, the detail
+screen, **Print label**, the link that label carries, an unknown code, and the
+delete.
+
+Three invariants, all about a label outliving the session that made it:
+filing writes `binderCards` rows pointing at the collection rows; the printed code
+and the QR resolve back to *that* binder through the app's own router; and
+deleting a binder unfiles its cards and deletes none of them. `qr.test.mjs`
+proves the symbol decodes — this proves the screen around it is wired to the
+right binder.
+
+Run it after touching `BindersView`, `BinderLabel`, `lib/qr.ts`, `lib/binders.ts`
+or the binder writes in `db.ts`.
 
 ## Live Supabase harnesses (`test:cloud`, `test:social`, `test:escrow`)
 

@@ -370,6 +370,16 @@ export interface BinderCard {
   /** Denormalized off the item so a binder can be listed without joining. */
   cardId: string
   qty: number
+  /**
+   * Which page of the physical binder this copy sits on, 1-based.
+   *
+   * Set when the copy arrived from a binder page scan, and absent when it was
+   * added by hand — a binder is a selection first and a physical object
+   * second, so a page number is extra knowledge rather than a requirement. It
+   * lives on the binder row rather than on the collection row because the same
+   * copy can be in two binders, and "page 3" is only true of one of them.
+   */
+  page?: number
   addedAt: number
 }
 

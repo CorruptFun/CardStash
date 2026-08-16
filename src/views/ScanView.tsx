@@ -281,8 +281,20 @@ export function ScanView({ active }: { active: boolean }) {
   const [pageMode, setPageMode] = useState(false)
   /** Non-null while a page scan is running: {done, total} for the overlay. */
   const [pageProgress, setPageProgress] = useState<PageScanProgress | null>(null)
-  /** The finished page, waiting on the review screen. Nothing is added until then. */
+  /**
+   * Every page read in this binder session, waiting on the review screen.
+   * Nothing is added until the user confirms there.
+   */
   const [pageCards, setPageCards] = useState<PageCard[] | null>(null)
+  /**
+   * The review screen is parked behind the viewfinder while the next page is
+   * shot. It stays MOUNTED — the ticks and the binder name the user has
+   * already chosen are the session's state, and remounting would throw them
+   * away silently.
+   */
+  const [pageParked, setPageParked] = useState(false)
+  /** Pages read so far this session; the number that rides onto each card. */
+  const pageNoRef = useRef(0)
   /** The batch-add screen: the whole scan tray, with a tick beside every row. */
   const [batchOpen, setBatchOpen] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
@@ -399,16 +411,27 @@ export function ScanView({ active }: { active: boolean }) {
       const ctrl = new AbortController()
       pageAbortRef.current = ctrl
       setPageProgress({ done: 0, total: 0 })
+      // Page numbers count up across the session so the review screen — and
+      // then the collection row — can say which page of the binder a card came
+      // off. A page that read nothing gives its number back rather than
+      // leaving a hole in the numbering of a real binder.
+      const page = ++pageNoRef.current
+      const keep = (cards: PageCard[]) => {
+        setPageCards((prev) => [...(prev ?? []), ...cards])
+        setPageParked(false)
+      }
       try {
         const cards = await scanPage(source, {
           signal: ctrl.signal,
           maxCards: MAX_PAGE_CARDS,
           onProgress: setPageProgress,
+          page,
         })
         if (ctrl.signal.aborted) {
           // scanPage returns what it finished before the abort. Cancelling is
           // "stop, I have enough", not "discard the seven you already read".
-          if (cards.length) setPageCards(cards)
+          if (cards.length) keep(cards)
+          else pageNoRef.current = page - 1
           return
         }
         track('scan_attempt', {
@@ -418,11 +441,13 @@ export function ScanView({ active }: { active: boolean }) {
           manual: true,
         })
         if (!cards.length) {
+          pageNoRef.current = page - 1
           toast('No cards found — fill the frame with the page', 'info')
           return
         }
-        setPageCards(cards)
+        keep(cards)
       } catch (err: any) {
+        pageNoRef.current = page - 1
         if (!ctrl.signal.aborted) toast(err?.message?.slice(0, 90) ?? 'Page scan failed', 'error')
       } finally {
         source.width = 0
@@ -437,6 +462,13 @@ export function ScanView({ active }: { active: boolean }) {
 
   const cancelPageScan = useCallback(() => {
     pageAbortRef.current?.abort(new DOMException('Cancelled', 'AbortError'))
+  }, [])
+
+  /** Done with this binder — filed, or abandoned. The next scan starts at page 1. */
+  const endPageSession = useCallback(() => {
+    setPageCards(null)
+    setPageParked(false)
+    pageNoRef.current = 0
   }, [])
 
   /** One card from a picked photo, through the same pipeline a capture uses. */
@@ -565,7 +597,9 @@ export function ScanView({ active }: { active: boolean }) {
    * the review screen owns the screen for a long confirm-every-row pass, and
    * another tab has no viewfinder to justify a lit camera indicator.
    */
-  const reviewOpen = pageCards != null || batchOpen
+  // Parked review = the user asked for the next page, so the camera is exactly
+  // what they are looking at and must be live.
+  const reviewOpen = (pageCards != null && !pageParked) || batchOpen
   useEffect(() => {
     if (visible && !reviewOpen && started && scanner.status === 'idle') scanner.start()
     if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop({ park: active && !reviewOpen })
@@ -705,7 +739,9 @@ export function ScanView({ active }: { active: boolean }) {
     : scanner.status === 'locking' || scanner.sensing
       ? 'Hold steady…'
       : pageMode
-        ? 'Fit the whole page in frame, then tap'
+        ? pageParked
+          ? 'Turn the page, then tap'
+          : 'Fit the whole page in frame, then tap'
         : scanMode === 'sealed'
           ? 'Fill the frame with the pack or box front'
           : scanMode === 'slab'
@@ -1016,6 +1052,20 @@ export function ScanView({ active }: { active: boolean }) {
           )}
         </>
       )}
+      {/* Parked mid-binder: the camera is live for the next page, and the way
+        * back to the pile of cards already read has to be on screen — it is
+        * the only route to them, and they are not saved anywhere yet. */}
+      {pageCards && pageParked && !pageProgress && (
+        <div className="pageresume safe-top">
+          <span>
+            <strong>{pageCards.length}</strong> {pageCards.length === 1 ? 'card' : 'cards'} from{' '}
+            {pageNoRef.current} {pageNoRef.current === 1 ? 'page' : 'pages'}
+          </span>
+          <button className="chip__searchbtn" onClick={() => setPageParked(false)}>
+            Review them
+          </button>
+        </div>
+      )}
       {pageProgress && (
         <div className="pagescan" role="status" aria-live="polite">
           <span className="chip__spinner" />
@@ -1033,16 +1083,21 @@ export function ScanView({ active }: { active: boolean }) {
       {pageCards && (
         <BinderReview
           cards={pageCards}
-          onClose={() => setPageCards(null)}
+          hidden={pageParked}
+          onClose={endPageSession}
+          onScanMore={() => setPageParked(true)}
           onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
-          onAdded={(added, itemIds) => {
-            setPageCards(null)
+          onAdded={(added, itemIds, binder) => {
+            endPageSession()
             if (!added) return
             haptic(config.haptics ? [14, 60, 14] : 0)
             // Undo, like every other add path here — and most of all here,
             // where one tap files nine rows and a mistake is hardest to spot
-            // afterwards.
-            toast(`Added ${added} ${added === 1 ? 'card' : 'cards'} to your collection`, 'success', {
+            // afterwards. Undo takes the copies back and leaves the binder:
+            // an empty label costs a tap to delete, and deleting it here would
+            // unfile whatever else the user had already put in it.
+            const where = binder ? ` to ${binder.name}` : ' to your collection'
+            toast(`Added ${added} ${added === 1 ? 'card' : 'cards'}${where}`, 'success', {
               label: 'Undo',
               fn: () => {
                 void guarded(async () => {

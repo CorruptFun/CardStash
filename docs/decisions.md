@@ -1160,3 +1160,64 @@ the abstract.
 which is the open-web decision above, and should be taken as one. Or binder
 counts that make the fetch-in-full poll expensive, at which point these want
 the `remoteRev` treatment the main binder already has.
+
+---
+
+### 27. A binder is also an object on a shelf, and its QR is a link to nothing but this app
+
+**Why.** Decision 26 made a binder a named selection with its own audience.
+Most of those selections are also a *physical thing* — a ring binder, a box, a
+shelf — and the question a collector actually asks while holding one is "which
+of these is this, and what page is the Charizard on". Two small additions
+answer it without a second concept: a page number on the binder row, and a
+label you print and stick on the cover.
+
+**One binder, not two.** The alternative was a separate "physical location"
+model with its own table and `CollectionItem.binderId`. That was built and
+thrown away deliberately: it split a collection row per binder (a card in two
+binders became two rows), and it put a second thing called "binder" in a UI
+that already had one. `BinderCard.page` gets the same answer for one optional
+field, and it is *better placed* — the same copy can sit in two binders, and
+"page 3" is only true of one of them.
+
+**The label decides the rest of the design.** A sticker outlives the session
+that made it, the device that made it, and often the memory of making it. So:
+
+- **It carries a plain URL to this deployment**, `…#/binders/<id>`, built from
+  the app's own `location` — never a shortener, never an id that needs a server
+  to resolve. Any phone camera opens it: no account, no install, no network
+  beyond loading the app. A stranger who scans it sees whatever *their* app
+  has, which is nothing — the link carries no cards, not even for a `public`
+  binder, whose contents still travel only through `socialcloud.ts`.
+- **It rides the fragment**, so a printed label works offline and the id is
+  never sent to a server even where one is listening. (`?via=` rides the search
+  string for the mirror-image reason — the two can never be confused.)
+- **The encoder is ours** (`lib/qr.ts`, ~400 lines, no dependency). You print a
+  label in the room the binder is in, often on a laptop that has never signed
+  into anything. `tests/unit/qr.test.mjs` decodes what it produces with a real
+  decoder, because "it looks like a QR code" is not evidence and a subtly wrong
+  encoder is discovered weeks later, already glued down.
+- **The id is printed underneath, grouped in fives**, because a scuffed sticker
+  is a solvable problem.
+
+**Scanning a page fills a binder.** The page-scan review is a session now: one
+review screen accumulates page after page, the binder is chosen once on it, and
+each confirmed row is written twice — `addToCollection` for the copy, then
+`addToBinder(binderId, itemId, 1, page)` for the arrangement. That order is
+deliberate: a failure between them leaves a card filed outside a binder, which
+the user can fix, where the other order leaves a binder pointing at nothing.
+
+**The cost.** `#/binders/:id` is now printed on paper, so it is the one route in
+this app that can never be renamed — and deleting a binder silently retires
+whatever labels are on shelves. Page numbers are also only as true as the last
+scan: re-reading page 7 keeps the page a copy was first seen on rather than
+moving it, which is right for a re-scan and wrong for a card that genuinely
+moved. Moving cards between pages is hand-editing work this does not have yet.
+
+**What would reopen it.** Slots as well as pages — a 3x3 page has nine
+positions and the detector already returns them in reading order, which is
+strictly additive on the same row. Or letting the app *read* a label through
+the camera (`BarcodeDetector`), which is deliberately not in the scan pipeline
+today: any phone camera already opens the link, and a per-frame barcode pass is
+exactly the kind of change the scan harness exists to gate.
+

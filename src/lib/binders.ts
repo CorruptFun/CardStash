@@ -111,3 +111,85 @@ export function binderSummary(binder: CustomBinder, cards: number): string {
   if (binder.tradeable && binder.visibility !== 'private') parts.push('for trade')
   return parts.join(' · ')
 }
+
+/* --- the physical half: pages, and the label you stick on the cover -------- */
+
+/**
+ * A binder is a selection of copies; for most people it is also an *object*,
+ * on a shelf, with pages. These are the two things that follow from that: a
+ * page number a scan can record, and a printed label that leads back here.
+ *
+ * The link is the load-bearing part. A printed QR outlives the session that
+ * made it — it is glued to a binder on a shelf — so it must be a plain URL to
+ * THIS deployment that any phone camera can open, with no account, no server
+ * and no lookup. `#/binders/<id>` is exactly that: the id is local, the route
+ * is local, and a stranger who scans it gets whatever their own app has, which
+ * is nothing. There is no way for it to leak a collection, because it carries
+ * no collection — not even for a `public` binder, whose contents still travel
+ * only through the paths in `socialcloud.ts`.
+ */
+
+/** Name cap, matching what `createBinder` stores. */
+export const BINDER_NAME_MAX = 60
+/** Nobody has a binder with a thousand pages; past this it is bad data. */
+export const BINDER_PAGE_MAX = 999
+
+/** A page number off a scan, a CSV or a backup, or nothing. */
+export function cleanBinderPage(raw: unknown): number | undefined {
+  const page = Math.floor(Number(raw))
+  return Number.isFinite(page) && page >= 1 && page <= BINDER_PAGE_MAX ? page : undefined
+}
+
+/** Pages are 1-based, because that is how a person counts them. */
+export function pageLabel(page: number | undefined): string {
+  return page != null && page > 0 ? `Page ${page}` : 'Unpaged'
+}
+
+/** Group rows by binder page, in page order, with the unpaged ones last. */
+export function byPage<T>(
+  rows: T[],
+  pageOf: (row: T) => number | undefined,
+): { page: number | undefined; rows: T[] }[] {
+  const groups = new Map<number, T[]>()
+  const unpaged: T[] = []
+  for (const row of rows) {
+    const page = cleanBinderPage(pageOf(row))
+    if (page == null) unpaged.push(row)
+    else groups.set(page, [...(groups.get(page) ?? []), row])
+  }
+  const out = [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([page, rows]) => ({ page: page as number | undefined, rows }))
+  if (unpaged.length) out.push({ page: undefined, rows: unpaged })
+  return out
+}
+
+/**
+ * The URL a binder's QR label carries.
+ *
+ * Built from the app's own location so a label printed from the deployed site
+ * points at the deployed site, one printed from a self-hosted copy points
+ * there, and neither hardcodes a domain that can move. The id rides the
+ * FRAGMENT, where the router reads it — a printed label has to work offline,
+ * and a fragment is never sent to a server even where one is listening. Any
+ * query the current URL happens to carry (`?via=` from a referral link, say)
+ * is stripped: it is not part of this binder.
+ */
+export function binderUrl(id: string, base?: string): string {
+  const here = typeof location !== 'undefined' ? location.origin + location.pathname : ''
+  return `${(base ?? here).replace(/[?#].*$/, '')}#/binders/${encodeURIComponent(id)}`
+}
+
+/**
+ * The short code printed under the QR.
+ *
+ * A FINGERPRINT, not a typing target: binder ids are UUIDs, and nobody is
+ * keying 36 characters off a sticker. What this is for is the moment the QR
+ * will not scan and you are holding two binders — the name is printed above
+ * it, and this tells two binders with the same name apart. Eight hex digits in
+ * two groups is enough for that and short enough to read out loud.
+ */
+export function binderCode(id: string): string {
+  const flat = id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()
+  return flat.replace(/(.{4})(?=.)/g, '$1-')
+}

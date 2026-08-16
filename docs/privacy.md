@@ -9,7 +9,7 @@ true when the code changes.
 Everything the user creates lives in browser storage on their device:
 
 - IndexedDB `cardstock` — collection, decks, price history, scans, friends,
-  trades, wants, plus card-data caches.
+  trades, wants, binders, plus card-data caches.
 - IndexedDB `cardstock-analytics` — local diagnostics events.
 - localStorage `cardstock-settings` — preferences **including the user's own API
   keys**, and `cardstock-version`.
@@ -39,6 +39,13 @@ Turning it off (`disconnectDrive()`) revokes the OAuth grant. It deliberately
 does **not** delete what is already in the user's Drive — that is their data, in
 their account, and silently destroying it on a toggle would be the wrong default.
 The copy says so.
+
+**A printed binder label adds no egress.** Its QR code encodes a URL to this same app —
+`…#/binders/<id>` — with the id in the **fragment**, which browsers never send
+to a server. Scanning someone else's label loads the app and looks the id up in
+the scanner's own IndexedDB, where it is not found — the label carries no cards,
+not even for a `public` binder, whose contents still travel only through the
+paths above. No analytics event carries a binder name or a page.
 
 ## Network egress, exhaustively
 

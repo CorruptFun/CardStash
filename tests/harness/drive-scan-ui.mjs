@@ -162,15 +162,78 @@ try {
   const before = await page.evaluate(async () => (await import('/src/lib/db.ts')).db.collection.count())
   check(before === 0, 'nothing was filed before the confirmation', `${before} rows in the collection`)
 
-  const cta = page.locator('.binder__foot .btn')
+  /* --- page after page: one binder, one review ---------------------------- */
+
+  // A binder is not one page. "Next page" parks the review behind the camera
+  // and the next page appends to it — the ticks already made, and the binder
+  // already chosen, have to survive the trip.
+  console.log('\nA second page, into a named binder')
+  await page.locator('.binder__foot .btn--ghost').click()
+  await page.waitForTimeout(600)
+  check(await page.locator('.binder--parked').count() === 1, 'the review parks rather than closing')
+  check(await page.locator('.pageresume').isVisible(), 'a resume bar offers the way back to it')
+  await shot('5-parked')
+
+  await page.setInputFiles('input[type=file]', join(PHOTOS, 'ygo-binder-horus.jpg'))
+  await page.waitForSelector('.pagescan', { timeout: 30_000 }).catch(() => {})
+  await page.waitForSelector('.binder:not(.binder--parked)', { timeout: 240_000 })
+  await page.waitForTimeout(600)
+  const rows2 = await page.locator('.binderrow').count()
+  const ticked2 = await page.locator('.binderrow--on').count()
+  check(rows2 > rows, 'the second page appends to the same review', `${rows} → ${rows2} rows`)
+  check(ticked2 >= ticked, 'the first page’s ticks survived the trip', `${ticked} → ${ticked2} ticked`)
+  check(await page.locator('.binder__pagehead').count() === 2, 'the rows are grouped by page')
+  await shot('6-twopages')
+
+  // Name the binder here, on the review screen — the whole session files into
+  // it, and that is what a printed label points at afterwards.
+  await page.selectOption('.binderpick select', 'new')
+  await page.fill('.binderpick input', 'Shelf A')
+  await page.waitForTimeout(200)
+
+  const cta = page.locator('.binder__foot .btn--primary')
   const ctaText = (await cta.textContent())?.trim()
   check(await cta.isEnabled(), 'the confirm button is enabled', ctaText)
   await cta.click({ timeout: 15_000 })
-  await page.waitForTimeout(2500)
-  await shot('5-added')
-  const after = await page.evaluate(async () => (await import('/src/lib/db.ts')).db.collection.count())
-  check(after === ticked, 'confirming files exactly the ticked cards', `${after} filed, ${ticked} ticked`)
+  await page.waitForTimeout(3000)
+  await shot('7-added')
+  // Copies, not rows: the second page here is the SAME photograph, so each card
+  // is filed twice into one row at qty 2 — the same merge an ordinary re-scan
+  // does. What must hold is that every ticked row became a copy in the
+  // collection and none of them arrived twice over.
+  const copies = await page.evaluate(async () => {
+    const { db } = await import('/src/lib/db.ts')
+    return (await db.collection.toArray()).reduce((sum, row) => sum + row.qty, 0)
+  })
+  check(copies === ticked2, 'confirming files exactly the ticked cards', `${copies} copies, ${ticked2} ticked`)
   check(await page.locator('.binder').count() === 0, 'the review screen closes after adding')
+
+  // The point of the whole session: every card knows which binder — and which
+  // page of it — it came off.
+  const filing = await page.evaluate(async () => {
+    const { db } = await import('/src/lib/db.ts')
+    const binders = await db.binders.toArray()
+    const cards = await db.binderCards.toArray()
+    const items = await db.collection.toArray()
+    const itemIds = new Set(items.map((i) => i.id))
+    return {
+      binders: binders.map((b) => b.name),
+      filed: cards.filter((c) => c.binderId === binders[0]?.id && itemIds.has(c.itemId)).length,
+      pages: [...new Set(cards.map((c) => c.page))].sort(),
+      rows: items.length,
+    }
+  })
+  check(filing.binders.length === 1 && filing.binders[0] === 'Shelf A', 'the binder named on the review screen exists', filing.binders.join(', '))
+  // One binder row per collection row, each pointing at a row that exists.
+  check(filing.filed === filing.rows, 'every filed card is in it', `${filing.filed}/${filing.rows}`)
+  // Every row knows a page, and re-reading a card that is already filed keeps
+  // the page it was first seen on rather than overwriting it — the same
+  // photograph twice must not move a card to page 2 of the binder.
+  check(
+    filing.pages.length === 1 && filing.pages[0] === 1,
+    'and carries the page it was read from',
+    `pages ${filing.pages.join(', ')}`,
+  )
 
   check(pageErrors.length === 0, 'no uncaught page errors', pageErrors.slice(0, 3).join(' | '))
 } catch (err) {

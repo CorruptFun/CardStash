@@ -57,6 +57,8 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `corner.ts` | 283 | Collector-line crop regions and the parsers that dig set code / number / passcode out of noisy OCR. |
 | `vision.ts` | 939 | Frame analysis (motion, sharpness, card region), deskew/crop refinement, foil sheen, perceptual hash, sideways detection, **and `detectCardRegions` — the multi-card detector**. |
 | `multiscan.ts` | 203 | Binder-page / multi-card scanning: detect regions, crop, identify each on a reduced budget, hand the lot to a review screen. Writes nothing itself. |
+| `binders.ts` | 220 | Binders: resolving their rows against the collection, what a visibility means — and the physical half (page grouping, the printed label's URL and code). Pure; the table and CRUD live in `db.ts`. |
+| `qr.ts` | 400 | A dependency-free QR encoder (byte mode, level M, versions 1-10) — for the printed binder label, which is made offline in the room the binder is in. |
 | `entitlement.ts` | 40 | The seam for the planned paid tier. A `GATED` table, every row `false`. Checked at entry points only — never at `detectCardRegions`. |
 | `camera.ts` | 251 | `getUserMedia` lifecycle, torch/exposure controls, iOS stream parking, frame capture (incl. low-light stacking). |
 | `scandebug.ts` | 76 | In-memory ring of per-attempt diagnostic traces. Local only. |
@@ -116,6 +118,7 @@ Hash-based, parsed in `App.tsx` (`parseRoute`). No router library.
 | `#/` or anything unknown | `scan` | `ScanView` |
 | `#/search` | `search` | `SearchView` |
 | `#/collection` | `collection` | `CollectionView` |
+| `#/binders` · `#/binders/:id` | `binders` | `BindersView` (list or detail). **The detail route is printed on QR labels** — it must keep resolving for as long as a sticker exists. |
 | `#/decks` · `#/decks/:id` | `decks` | `DecksView` (list or detail) |
 | `#/builder` | `builder` | `BuilderView` (AI deck builder) |
 | `#/friends` · `#/friends/:id` | `friends` | `FriendsView` / `FriendBinderView` |

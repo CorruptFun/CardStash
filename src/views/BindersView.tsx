@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Empty, Modal, Seg, Stepper } from '../components/basics'
+import { BinderLabel } from '../components/BinderLabel'
 import { Icon } from '../components/Icon'
 import { ShareActions, type SharePack } from '../components/ShareActions'
 import { Sheet } from '../components/Sheet'
@@ -9,6 +10,8 @@ import {
   VISIBILITY_LABEL,
   binderQty,
   binderSharedCards,
+  byPage,
+  pageLabel,
   binderValue,
   isDiscoverable,
   isPublished,
@@ -144,13 +147,22 @@ function BinderList() {
 /* ---------------------------------------------------------------- one binder */
 
 function BinderDetail({ binderId }: { binderId: string }) {
-  const binder = useLiveQuery(() => db.binders.get(binderId), [binderId])
+  /**
+   * `?? null` is load-bearing: Dexie resolves a missing row to `undefined`,
+   * which is the same value `useLiveQuery` reports while it is still running.
+   * Without it the "No such binder" state below is unreachable and the screen
+   * stays blank for ever — which stopped being a hand-typed-URL curiosity the
+   * moment binders started carrying printed labels that outlive the device
+   * that made them.
+   */
+  const binder = useLiveQuery(async () => (await db.binders.get(binderId)) ?? null, [binderId])
   const cardRows = useLiveQuery(() => db.binderCards.where('binderId').equals(binderId).toArray(), [binderId])
   const items = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
   const toast = useUi((s) => s.toast)
   const openSheet = useUi((s) => s.openSheet)
   const [adding, setAdding] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [labelOpen, setLabelOpen] = useState(false)
   const [pack, setPack] = useState<SharePack | null>(null)
 
   const rows = useMemo(() => resolveBinderRows(cardRows ?? [], items), [cardRows, items])
@@ -301,6 +313,12 @@ function BinderDetail({ binderId }: { binderId: string }) {
           <button className="btn btn--ghost" onClick={share} disabled={!rows.length}>
             <Icon name="share" size={15} /> Share
           </button>
+          {/* The physical half of a binder. Nothing about it touches the
+            * network or the binder's audience: the QR is a link to this app's
+            * own route, and it carries no cards. */}
+          <button className="btn btn--ghost" onClick={() => setLabelOpen(true)}>
+            <Icon name="qr" size={15} /> Print label
+          </button>
           <button className="btn btn--ghost" onClick={() => setConfirmDelete(true)}>
             <Icon name="trash" size={15} /> Delete
           </button>
@@ -320,40 +338,57 @@ function BinderDetail({ binderId }: { binderId: string }) {
         />
       )}
 
-      <div className="cardgrid">
-        {rows.map(({ row, item }) => (
-          <div className="bindercell" key={row.id}>
-            <button
-              className="cardcell"
-              onClick={() => openSheet({ card: item.card, item, origin: 'collection' })}
-              aria-label={item.name}
-            >
-              <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
-              <span className="cardcell__price">{money((itemUnitPrice(item) ?? 0) * row.qty)}</span>
-              <span className="cardcell__name">{item.name}</span>
-              <span className="cardcell__set">
-                {item.setCode ?? item.card.setCode}
-                {item.condition !== 'NM' ? ` · ${item.condition}` : ''}
-              </span>
-            </button>
-            <div className="bindercell__qty">
-              <Stepper
-                value={row.qty}
-                min={0}
-                max={item.qty}
-                onChange={(next) => void setBinderCardQty(row.id, next)}
-              />
-              <button
-                className="bindercell__x"
-                aria-label={`Remove ${item.name} from this binder`}
-                onClick={() => void removeFromBinder(row.id)}
-              >
-                <Icon name="x" size={12} />
-              </button>
-            </div>
+      {/* Grouped by the page they were scanned off, so the app and the object
+        * on the shelf read the same way round. Headings appear only once pages
+        * exist to tell apart — a lone "UNPAGED" labels nothing. */}
+      {byPage(rows, ({ row }) => row.page).map((group) => (
+        <section className="binderpage" key={group.page ?? 'unpaged'}>
+          {group.page != null && (
+            <h2 className="binderpage__head">
+              <span>{pageLabel(group.page)}</span>
+              <em>
+                {group.rows.length} {group.rows.length === 1 ? 'card' : 'cards'}
+              </em>
+            </h2>
+          )}
+          <div className="cardgrid">
+            {group.rows.map(({ row, item }) => (
+              <div className="bindercell" key={row.id}>
+                <button
+                  className="cardcell"
+                  onClick={() => openSheet({ card: item.card, item, origin: 'collection' })}
+                  aria-label={item.name}
+                >
+                  <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
+                  <span className="cardcell__price">{money((itemUnitPrice(item) ?? 0) * row.qty)}</span>
+                  <span className="cardcell__name">{item.name}</span>
+                  <span className="cardcell__set">
+                    {item.setCode ?? item.card.setCode}
+                    {item.condition !== 'NM' ? ` · ${item.condition}` : ''}
+                  </span>
+                </button>
+                <div className="bindercell__qty">
+                  <Stepper
+                    value={row.qty}
+                    min={0}
+                    max={item.qty}
+                    onChange={(next) => void setBinderCardQty(row.id, next)}
+                  />
+                  <button
+                    className="bindercell__x"
+                    aria-label={`Remove ${item.name} from this binder`}
+                    onClick={() => void removeFromBinder(row.id)}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </section>
+      ))}
+
+      {labelOpen && <BinderLabel binder={binder} count={qty} onClose={() => setLabelOpen(false)} />}
 
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title={`Delete “${binder.name}”?`}>
         <p className="setsec__note">
