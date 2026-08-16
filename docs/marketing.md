@@ -5,8 +5,13 @@ the three font subsets it sets and writes a single self-contained file to
 `marketing/dist/` (gitignored — it is build output, and the base64 fonts alone are
 ~225 KB that would otherwise land in every diff).
 
-The page is built from this chapter. **If you change a claim on the page, change it
-here first** — the point of this file is that the copy has a source, and that a
+The page leads with what Cardstock does for a collector — scan a card, watch a
+collection become a portfolio, share it to trade — and treats an account as the
+payoff rather than the price of entry. It deliberately carries no architecture:
+no test counts, no upstream catalog list, no cache or bundle detail. That material
+belongs in the chapters, not in front of someone deciding whether to try the app.
+
+**If you change a claim on the page, change it here first** — the point of this file is that the copy has a source, and that a
 claim which can't be traced to a file doesn't ship.
 
 ## The name
@@ -21,44 +26,79 @@ after it, so the number understates the product rather than dating it.
 
 ## The position
 
-Three things are true of Cardstock that are not true of the category, and the copy
-leads with them in this order:
+**The conversion goal is an account.** Everything the app does works signed out and
+must keep working signed out — that is an architectural guarantee in `CLAUDE.md`,
+not a marketing choice — but the page is built to move a reader toward creating
+one, because an account is what makes a collection recoverable and a collector
+findable.
 
-1. **Identification runs on the device.** The Tesseract worker, both wasm cores and
-   the English traineddata are copied out of npm at build time and served from our
-   own origin (`vite.config.ts` `ocrAssets()`); nothing is fetched from a
-   third-party CDN. This is architectural and independently verifiable from the
-   source, which is what makes it the strongest claim in the tree.
-2. **Signed out, the app is whole.** Scanning, collection, decks, binders and
-   link-based sharing need no account and no server. Hosted social, the vault,
-   billing and escrow are dormant without a session, and the Google script is
-   injected on first use rather than at boot (`drive.ts`).
-3. **It refuses rather than guesses.** Confidence floors, closed vocabularies and
-   the "Edition not read — check it's yours" state exist so the scanner is allowed
-   to guess a printing but never to present a guess as a reading.
+Those two facts are not in tension, and the copy must not pretend they are. The
+page leads with the outcome (scan → collection → portfolio → share), and the
+account section is the payoff rather than the entry fee. `docs/privacy.md` states
+the obligation that comes with it: *"Signed in, there is also a copy on our server,
+and it is not optional."* Say that plainly, on the page, next to the pitch.
 
-The handshake being free is a position, not a temporary state (decision 25). Two
-collectors may do a whole deal in messages and pay nothing; escrow is the optional
-service the fee buys. Copy must sell escrow on what it does and never on fear of
-the free path we are simultaneously offering.
+The honest reasons to sign in, in the order the page uses them:
+
+1. **It backs itself up as you go** — no switch, no passphrase, and a second device
+   pulls the collection down on its own (`autobackup.ts`, `cloud.ts` `syncNow()`).
+2. **A handle people can trade with** — friends add you by typing it, their binders
+   refresh themselves, and offers arrive in the app (`socialcloud.ts`).
+3. **Global want matching** — the one capability a shared link genuinely cannot
+   provide, because it needs an index across every publisher (`match_wants`).
+4. **Messaging a collector directly** — and this stays free, for the reason
+   decision 25 gives.
+
+There is no sign-up step: an email address *is* the account, a six-digit code
+signs you in, and `SignIn.tsx` must never grow a "Create account" branch.
+
+### How we are not allowed to sell it
+
+- **Never "your data isn't saved."** It is false — cards are in IndexedDB and
+  survive a reload — and `onboarding.ts` records why the falsehood is expensive: a
+  warning a user can disprove gets dismissed reflexively for the rest of the
+  product's life. Generalise the rule: never make a claim closing and reopening the
+  app would disprove.
+- **No fear-based framing.** Decision 25 is explicit that "don't get scammed" is a
+  threat dressed as a feature, and that the free path must never be made to feel
+  like the one we disapprove of. The same applies to accounts: sell what an account
+  *does*, never what losing your phone would feel like.
+- **The iOS eviction story is iOS-only, and has a "but."** WebKit clears storage for
+  origins unopened for about a week, and installing to the Home Screen starts the
+  app with *empty* separate storage — so an install prompt without a backup step is
+  a data-loss trap. Do not compress this into "browsers delete your cards."
+- **A handle is permanent.** Disclose it where the reader chooses one; it can never
+  be changed or transferred (decision 21).
+- **A handle alone does not make you reachable by strangers.** Inbox and messaging
+  need an accepted friendship, a published for-trade binder, or a prior message.
+  Never write "anyone can send you an offer the moment you have a handle."
+- **Never fabricate a founding-seat count.** It comes from the server, only for
+  accounts the server agrees were referred.
 
 ## What the page claims, and what backs it
 
 | Claim | Backed by |
 |---|---|
 | Nine trading card games, plus sports | `src/lib/games.ts` (`GAMES`) |
-| On-device text recognition, self-hosted engine | `vite.config.ts`, `src/lib/ocr.ts`, `src/sw.js` |
-| Foil detected from the stock's specular signature | `src/lib/vision.ts` (`foilSheen`) |
-| The collector line rescues a name the OCR can't read | `src/lib/corner.ts`, `identify.ts` |
-| Graded slabs read as company, grade, qualifier, cert | `src/lib/slab.ts`, `psa.ts` |
-| Up to twelve cards from one binder-page photo | `src/lib/multiscan.ts` (`MAX_PAGE_CARDS`) |
-| Sports cards synthesized from what is printed | `src/lib/sportsparse.ts`, `sports.ts`, decision 17 |
-| Condition-aware portfolio value, cost basis, movers | `src/lib/prices.ts`, `portfolio.ts` |
-| Per-game deck rules and boards | `src/lib/deckstats.ts` (`GAME_BOARDS`, `DECK_RULES`) |
-| Binders with their own audience, page numbers, QR labels | `src/lib/binders.ts`, `qr.ts`, decisions 26–27 |
-| A share link *is* the data | `src/lib/social.ts`, decision 7 |
-| Wants match any printing | `src/lib/social.ts` (want keys) |
-| Six upstream catalogs | `scryfall.ts`, `pokemon.ts` (×2), `ygo.ts`, `lorcast.ts`, `tcgcsv.ts` |
+| Scan, then one tap to add | `src/views/ScanView.tsx`, `src/lib/db.ts` (`addToCollection`) |
+| Twelve cards from one binder-page photo | `src/lib/multiscan.ts` (`MAX_PAGE_CARDS`) |
+| The page a card was filed on is remembered | `src/lib/db.ts` (`addToBinder`), decision 27 |
+| Graded slabs read off the label; a PSA 10 is its own copy | `src/lib/slab.ts`, decision 18 |
+| Sealed stops counting at the sealed price once opened | `src/lib/prices.ts` (`opened`) |
+| Cards no catalog has can be photographed and described | `src/lib/cardpatch.ts`, decision 22 |
+| Foil and non-foil priced apart, then adjusted for condition | `src/lib/prices.ts` |
+| Cost basis, profit and loss, 30-day line, movers | `src/lib/portfolio.ts` |
+| CSV import needs only a Name column | `src/lib/csv.ts` (throws when absent) |
+| Share a binder as a link or a file; QR label on the spine | `src/lib/social.ts`, `qr.ts` |
+| Want lists travel with a binder and match both ways | `src/lib/social.ts` (want keys) |
+| Booking a trade updates both collections | `src/lib/db.ts`, `views/TradeView.tsx` |
+| An email address is the account; a six-digit code signs you in | `src/lib/authsession.ts`, `components/SignIn.tsx` |
+| Signed in, the collection backs itself up and syncs | `src/lib/autobackup.ts`, `cloud.ts` |
+| Friends by handle, offers in the app, self-refreshing binders | `src/lib/socialcloud.ts` |
+| Global want matching across every publisher | `match_wants`, `src/lib/socialcloud.ts` |
+| Messaging a collector, and it stays free | `src/lib/messaging.ts`, decision 25 |
+| Claiming a handle publishes nothing | `socialConfigured()` vs `socialPublishing()` |
+| Export whenever you like, account or not | `src/lib/importexport.ts` |
 
 ## Claims we do not make
 
@@ -106,3 +146,39 @@ therefore describes *what is measured* and points at the docs for rates.
 There are no honest numbers for users, installs, retention, cards searchable, or
 scan latency. Budgets in `identify.ts` are ceilings, not measured times: "scans in
 7 seconds" would be false.
+
+## Free, account, subscription
+
+The page carries this as a table, and the wording matters in two places.
+
+- **No account:** scanning, collection, decks, portfolio, binders and printed
+  labels, CSV/JSON in and out, and all link or file sharing. Offline throughout.
+- **Free account:** automatic backup and multi-device sync, `@handle` identity that
+  survives the device, friends by handle, offers in the app, self-refreshing friend
+  binders, global want matching, messaging, publishing binders, invite links — plus
+  a monthly allowance of AI deck builds and cloud scan rescues.
+- **Subscription:** raises those two allowances. Nothing else moves.
+
+**Do not print the allowance figures or the prices on the page.** The allowances are
+defaulted environment variables on the deployed functions, and `billing.ts` says of
+its own price constants that Stripe holds the real ones and these are a copy that
+has to move whenever a price does. Both are unverifiable from this repository, so
+the page says "monthly allowance" and "higher allowance" and lets the app state the
+number. Escrowed purchase is not sold at all: it ships off in both switches.
+
+## Copy sources that are stale
+
+Do not source copy from these — each is superseded and each would produce a claim
+we have banned above:
+
+- `docs/social.md`'s cloud-vault table — still says "ciphertext the server cannot
+  read" and "your passphrase, never uploaded". Superseded by decision 15b.
+- `src/lib/cloudconfig.ts`'s header comment — same passphrase claim.
+- `docs/decisions.md` §14 ("no cloud copy, no account") — superseded by 15b.
+- `src/views/SettingsView.tsx` on cloud rescue "needs an account and a
+  subscription" — stale since the free monthly allowance landed.
+- `src/components/Welcome.tsx`'s "Welcome back" step, which tells a returning user
+  to restore from a backup in Settings and understates the automatic pull.
+
+These are app-copy bugs rather than marketing ones, but they are listed here
+because this chapter is where somebody looks for a sentence to reuse.
