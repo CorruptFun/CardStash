@@ -327,6 +327,22 @@ export interface ScanRecord {
   cardId: string
   at: number
   card: Card
+  /**
+   * What the scanner read off the physical copy, kept so the batch-add screen
+   * (and the tray's card sheet) file the copy that was actually in frame
+   * rather than the printing's default. Absent on rows the tray already held
+   * when batch add landed, and on a scan whose finish the detector had no
+   * opinion about.
+   */
+  finish?: Finish
+  grade?: GradeInfo
+  /**
+   * This scan has been filed into the collection — by Collect mode or by the
+   * batch-add screen. The tray is a log, not a collection, so a filed row
+   * stays visible; the flag is only what stops the batch screen offering the
+   * same copy a second time by default.
+   */
+  added?: boolean
 }
 
 /** Cached TCGplayer catalog (via TCGCSV) for games with no search API. */

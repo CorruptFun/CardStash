@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Icon } from '../components/Icon'
 import { BinderReview } from '../components/BinderReview'
+import { ScanBatch, scanRowFinish } from '../components/ScanBatch'
 import { CardImg, Seg } from '../components/basics'
 import { ScanModes } from '../components/ScanModes'
 import { ScanDebugPanel } from '../components/ScanDebug'
@@ -16,7 +17,7 @@ import {
   endParkedCamera,
   IS_STANDALONE,
 } from '../lib/camera'
-import { addToCollection, clearScans, db, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
+import { addToCollection, clearScans, db, markScansAdded, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
 import { gradeShort } from '../lib/slab'
 import { clearSportsRecall } from '../lib/sports'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
@@ -64,23 +65,35 @@ const REPEAT_WINDOW_MS = 2500
 class CollectQueue {
   private recent: { cardId: string; at: number } | null = null
 
-  async hit(card: Card, finish: Finish, grade?: GradeInfo): Promise<void> {
+  /**
+   * `scanId` is the tray row this hit wrote, still in flight when collect mode
+   * starts filing. Marking it keeps the batch screen from offering a copy
+   * collect mode has already added — the one way the two paths could quietly
+   * double-file the same card.
+   */
+  async hit(card: Card, finish: Finish, grade: GradeInfo | undefined, scanId: Promise<string | undefined>): Promise<void> {
     const last = this.recent
     if (last?.cardId === card.id && Date.now() - last.at < REPEAT_WINDOW_MS) {
       uiStore.getState().toast(`Skipped a repeat of ${card.name}`, 'info', {
         label: 'Add anyway',
         fn: () => {
-          this.add(card, finish, grade)
+          this.add(card, finish, grade, scanId)
         },
       })
       return
     }
-    await this.add(card, finish, grade)
+    await this.add(card, finish, grade, scanId)
   }
 
-  private async add(card: Card, finish: Finish, grade?: GradeInfo): Promise<void> {
+  private async add(
+    card: Card,
+    finish: Finish,
+    grade: GradeInfo | undefined,
+    scanId: Promise<string | undefined>,
+  ): Promise<void> {
     const item = await guarded(() => addToCollection(card, { finish, grade }), 'Add')
     if (!item) return
+    void scanId.then((id) => (id ? guarded(() => markScansAdded([id]), 'Save scan') : undefined))
     // Marked only AFTER the write lands — a quota failure must not make the
     // retry read as "repeat" and get skipped.
     this.recent = { cardId: card.id, at: Date.now() }
@@ -94,6 +107,9 @@ class CollectQueue {
       label: 'Undo',
       fn: () => {
         guarded(() => removeCopies(item.id, 1), 'Undo')
+        // The copy is gone, so the tray row is offerable again — a stale
+        // "Already added" would make the batch screen refuse to re-file it.
+        void scanId.then((id) => (id ? guarded(() => markScansAdded([id], false), 'Undo') : undefined))
       },
     })
   }
@@ -255,24 +271,32 @@ export function ScanView({ active }: { active: boolean }) {
   const [pageProgress, setPageProgress] = useState<PageScanProgress | null>(null)
   /** The finished page, waiting on the review screen. Nothing is added until then. */
   const [pageCards, setPageCards] = useState<PageCard[] | null>(null)
+  /** The batch-add screen: the whole scan tray, with a tick beside every row. */
+  const [batchOpen, setBatchOpen] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
   const pageAbortRef = useRef<AbortController | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   const onHit = useCallback(
     (hit: Extract<IdentifyOutcome, { ok: true }>) => {
-      guarded(() => recordScan(hit.card), 'Save scan')
+      const finish = scanFinish(hit)
+      const grade = hit.identification.grade
+      // What the scanner read rides along on the tray row, so a batch add
+      // files the copy that was in frame — foil, slab and all — rather than
+      // the printing's default.
+      const scanId = guarded(() => recordScan(hit.card, { finish, grade }), 'Save scan')
       // Sports "search" is recall over cards this device has seen, and the
       // one just scanned should be findable now rather than when the memo
       // happens to expire.
       if (hit.card.game === 'sports') clearSportsRecall()
       haptic(config.haptics ? [14, 60, 14] : 0)
-      if (config.collectMode) collectRef.current!.hit(hit.card, scanFinish(hit), hit.identification.grade)
+      if (config.collectMode) collectRef.current!.hit(hit.card, finish, grade, scanId)
     },
     [config.collectMode, config.haptics],
   )
   const scanner = useScanner(onHit, scanMode)
   const tray = useLiveQuery(() => db.scans.orderBy('at').reverse().limit(12).toArray(), [])
+  const trayCount = useLiveQuery(() => db.scans.count(), [])
   const visible = active && !sheetOpen
 
   /**
@@ -303,6 +327,7 @@ export function ScanView({ active }: { active: boolean }) {
     const removed = await guarded(() => clearScans(), 'Clear scans')
     if (!removed?.length) return
     for (const scan of removed) scanner.forgetHit(scan.card.id)
+    setBatchOpen(false)
     haptic(settings().haptics ? 10 : 0)
     toast(`Cleared ${removed.length} ${removed.length === 1 ? 'scan' : 'scans'}`, 'success', {
       label: 'Undo',
@@ -494,7 +519,7 @@ export function ScanView({ active }: { active: boolean }) {
    * the review screen owns the screen for a long confirm-every-row pass, and
    * another tab has no viewfinder to justify a lit camera indicator.
    */
-  const reviewOpen = pageCards != null
+  const reviewOpen = pageCards != null || batchOpen
   useEffect(() => {
     if (visible && !reviewOpen && started && scanner.status === 'idle') scanner.start()
     if ((!visible || reviewOpen) && scanner.status !== 'idle') scanner.stop({ park: active && !reviewOpen })
@@ -950,35 +975,74 @@ export function ScanView({ active }: { active: boolean }) {
       />
       {debugOpen && <ScanDebugPanel onClose={() => setDebugOpen(false)} />}
       {(tray?.length ?? 0) > 0 && (
-        <div className="tray">
-          {tray!.map((scan) => (
-            <div key={scan.id} className="tray__item">
-              <button className="tray__open" onClick={() => openSheet({ card: scan.card, origin: 'scan' })}>
-                <span className="tray__thumb">
-                  <CardImg card={scan.card} className="tray__img" />
-                  <span className="tray__price">{money(scan.card.prices.best ?? scan.card.prices.bestFoil)}</span>
-                </span>
-                <span className="tray__set">{scan.card.setCode ?? GAME_SHORT[scan.card.game]}</span>
+        <div className="trayband">
+          <div className="tray">
+            {tray!.map((scan) => (
+              <div key={scan.id} className="tray__item">
+                <button
+                  className="tray__open"
+                  onClick={() => openSheet({ card: scan.card, origin: 'scan', finish: scanRowFinish(scan), grade: scan.grade })}
+                >
+                  <span className="tray__thumb">
+                    <CardImg card={scan.card} className="tray__img" />
+                    <span className="tray__price">{money(scan.card.prices.best ?? scan.card.prices.bestFoil)}</span>
+                  </span>
+                  <span className="tray__set">{scan.card.setCode ?? GAME_SHORT[scan.card.game]}</span>
+                </button>
+                {/* A misread lands here looking exactly as certain as a good
+                  * scan, so getting rid of it has to be one tap away — and
+                  * undoable, since the × sits on a small tile beside a
+                  * scrolling gesture. */}
+                <button
+                  className="tray__remove"
+                  aria-label={`Remove ${scan.card.name} from scans`}
+                  onClick={() => dropScan(scan)}
+                >
+                  <Icon name="x" size={11} />
+                </button>
+              </div>
+            ))}
+            {(tray?.length ?? 0) > 1 && (
+              <button className="tray__clear" onClick={clearTray}>
+                Clear
               </button>
-              {/* A misread lands here looking exactly as certain as a good
-                * scan, so getting rid of it has to be one tap away — and
-                * undoable, since the × sits on a small tile beside a
-                * scrolling gesture. */}
-              <button
-                className="tray__remove"
-                aria-label={`Remove ${scan.card.name} from scans`}
-                onClick={() => dropScan(scan)}
-              >
-                <Icon name="x" size={11} />
+            )}
+          </div>
+          {(tray?.length ?? 0) > 1 && (
+            <div className="tray__actions">
+              {/* The way a stack of cards gets filed: scan them all, then tick
+                * through them once. Pinned outside the scroller, and counting
+                * the WHOLE tray rather than the tiles on screen — the strip
+                * shows the last dozen, the batch screen everything logged. */}
+              <button className="tray__clear tray__clear--go" onClick={() => setBatchOpen(true)}>
+                <Icon name="check" size={12} /> Review {trayCount ?? tray!.length}
               </button>
             </div>
-          ))}
-          {(tray?.length ?? 0) > 1 && (
-            <button className="tray__clear" onClick={clearTray}>
-              Clear
-            </button>
           )}
         </div>
+      )}
+      {batchOpen && (
+        <ScanBatch
+          onClose={() => setBatchOpen(false)}
+          onForget={scanner.forgetHit}
+          onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
+          onAdded={(added, itemIds, scanIds) => {
+            setBatchOpen(false)
+            if (!added) return
+            haptic(config.haptics ? [14, 60, 14] : 0)
+            toast(`Added ${added} ${added === 1 ? 'card' : 'cards'} to your collection`, 'success', {
+              label: 'Undo',
+              fn: () => {
+                void guarded(async () => {
+                  for (const id of itemIds) await removeCopies(id, 1)
+                  // …and hand the tray rows back, so an undone batch can be
+                  // re-picked instead of reading as already filed.
+                  await markScansAdded(scanIds, false)
+                }, 'Undo')
+              },
+            })
+          }}
+        />
       )}
     </div>
   )
