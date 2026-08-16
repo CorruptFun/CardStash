@@ -1088,3 +1088,75 @@ the free handshake away is not on that list. Or a legal obligation — a
 jurisdiction that makes us liable for deals arranged here regardless of where
 the money went — which would be a genuine reason to revisit, and a reason to
 say so out loud rather than quietly start nudging.
+
+### 26. A binder carries its own audience, and "public" stops at signed-in
+
+Collectors organise by binder, not by collection: the vintage run, the box for
+the weekend, the cards being kept. Until now the app had exactly one binder —
+your whole collection, filtered by a single **For trade / Everything** switch —
+and one audience for it. `CustomBinder` gives a named selection its own
+audience, and the whole-collection binder is untouched beside it.
+
+**Three visibilities, and `private` is a real one.** `private` is never
+uploaded at all — not "published to nobody", genuinely not sent — and it is
+what every binder starts as, whatever the caller passes to `createBinder`. A
+binder that arrived public because a picker defaulted that way is the accident
+this feature must not have.
+
+**`public` means any signed-in collector. It does not mean the open web**, and
+that line is the load-bearing part. A binder readable by `anon` is a binder
+anyone holding the publishable key can enumerate: an inventory of valuable
+cards attached to a handle, which is precisely what `trade_offers` refuses to
+be (0003: "readable means dumpable, and a dump of this is a shopping list for
+anyone deciding who to rob"). The open-web version is a different feature — a
+public profile page, with crawlers, an abuse surface and a scraping story — and
+it deserves its own decision rather than a loosened policy.
+
+**`tradeable` is a second switch, not a synonym for public.** Both halves are
+required to enter the global want index. Friends-only is never globally
+matchable — 0003's invariant, applied one level down — and a public binder that
+is merely on display is a display case, not an offer. The same split as
+`socialConfigured()` vs `socialPublishing()` (16) and `cardSourceLookup` vs
+`cardSourceShare` (22): being visible and being available are different
+sentences, and collapsing them decides for the user.
+
+**A sibling table, not a wider `binders`.** `binders` is `primary key
+(user_id)` and `pullFriends`, `match_wants`, `send_to_inbox` and `can_message`
+all read that shape. Re-keying it to (user_id, binder_id) would have touched
+every one of them, and re-done the RLS harness, for a feature that only adds a
+case. The cost of the sibling is real and worth naming: `trade_offers` needed a
+`source` column so two publishers stop evicting each other, `match_wants` grew
+a second liveness check, and reachability now has two clauses instead of one.
+That is three careful edits against rewriting the table everything social
+depends on.
+
+**Rows point at collection rows, not at cards.** A binder holds copies you own,
+and finish, condition, grade and price all live on `CollectionItem`. Copying
+them into the binder would have made a **fourth** denormalized `Card` for
+`savePatch` to chase — the failure mode CLAUDE.md already warns about, where
+fixing a picture updates the sheet and leaves a grid showing the old one.
+Pointing at the row means a binder always shows the copy actually owned, and
+the price refreshes underneath. Quantities clamp to the collection twice, in
+`addToBinder` and again in `resolveBinderRows`, because the collection can
+shrink long after the binder row was written and the claim is one a friend
+drives across town for.
+
+**A binder is its own payload kind**, the fourth. It could have been a
+`ProfilePayload` with a name on it, and that is the version that eventually
+overwrites somebody's collection snapshot with a four-card subset. A separate
+kind makes "file this under its sender, never merge it into their cards" a
+property of the type rather than a rule in a merge function.
+
+**What it costs.** A fourth wire kind, which an older client rejects as "not a
+Cardstock share" — acceptable, and the honest alternative was a shape that
+could be misread. Forty binders per account, and a poll that fetches friends'
+binders in full rather than by revision (they are selections, not collections;
+a cheap revision probe would be a second round trip to save less than it
+spends). And a third publishing surface for a user to keep track of, which is
+why every screen names the audience in words rather than describing privacy in
+the abstract.
+
+**What would reopen it.** Wanting a binder anyone can open without an account —
+which is the open-web decision above, and should be taken as one. Or binder
+counts that make the fetch-in-full poll expensive, at which point these want
+the `remoteRev` treatment the main binder already has.

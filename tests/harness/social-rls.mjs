@@ -333,6 +333,92 @@ try {
   const cleared = await rest(alice.token, `/inbox?recipient=eq.${alice.id}`, { method: 'DELETE' })
   check('the recipient can clear their inbox', cleared.status < 300, `${cleared.status}`)
 
+  console.log('\n\x1b[1m5b. Custom binders carry their own audience\x1b[0m')
+  // dave publishes nothing at all through the main binder, which is what makes
+  // him the right subject: everything below has to come from the custom one.
+  const daveBinder = {
+    app: 'cardstock-social',
+    v: 1,
+    kind: 'binder',
+    id: `vintage${stamp}`,
+    at: stamp,
+    from: { id: dave.id, name: 'Dave' },
+    name: 'Vintage',
+    tradeable: true,
+    cards: [
+      { cardId: 'mtg:def', game: 'mtg', name: 'Shivan Dragon', finish: 'nonfoil', condition: 'NM', qty: 1, forTrade: 1 },
+    ],
+  }
+  const pubBinder = await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `vintage${stamp}`,
+    p_name: 'Vintage',
+    p_note: null,
+    p_visibility: 'public',
+    p_tradeable: true,
+    p_payload: daveBinder,
+    p_card_count: 1,
+    p_offers: [{ want_key: SHIVAN, game: 'mtg', name: 'Shivan Dragon', qty: 1 }],
+  })
+  check('publish a public custom binder', pubBinder.status === 200, `${pubBinder.status} ${JSON.stringify(pubBinder.body)}`)
+
+  const strangerReads = await rest(carol.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id,name`)
+  check('a STRANGER CAN read a public custom binder', (strangerReads.body ?? []).length === 1, JSON.stringify(strangerReads.body))
+  const anonBinder = await rest(PUBLISHABLE, '/custom_binders?select=binder_id')
+  check('ANONYMOUS reads none — public means signed in, not the open web', anonBinder.status !== 200 || (anonBinder.body ?? []).length === 0, `${anonBinder.status}`)
+  const forgeBinder = await rest(carol.token, '/custom_binders', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: dave.id, binder_id: 'x', name: 'x', visibility: 'public', payload: {} }),
+  })
+  check('direct INSERT is refused (no policy, no grant)', forgeBinder.status >= 400, `${forgeBinder.status}`)
+  const privateUpload = await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `p${stamp}`,
+    p_name: 'Private',
+    p_note: null,
+    p_visibility: 'private',
+    p_tradeable: false,
+    p_payload: daveBinder,
+    p_card_count: 1,
+  })
+  check("'private' is not a value this table holds", JSON.stringify(privateUpload.body).includes('bad_visibility'), JSON.stringify(privateUpload.body))
+
+  // A public tradeable binder is an advertisement, so it must make its owner
+  // reachable — otherwise the offer exists and nobody may ask about it.
+  const askDave = await rpc(carol.token, 'send_to_inbox', { p_recipient: dave.id, p_payload: tradePayload })
+  check('publishing one makes you REACHABLE, though your main binder is down', askDave.status === 200, `${askDave.status} ${JSON.stringify(askDave.body)}`)
+
+  const binderMatch = await rpc(carol.token, 'match_wants', { p_keys: [SHIVAN] })
+  check('a public tradeable binder IS globally matchable', (binderMatch.body ?? []).some((r) => r.user_id === dave.id), JSON.stringify(binderMatch.body))
+
+  // Publishing the main binder must not evict the custom binder's offers, and
+  // vice versa — that is what `trade_offers.source` exists for.
+  const stillMain = await rpc(carol.token, 'match_wants', { p_keys: [LOTUS, SHIVAN] })
+  const keys = (stillMain.body ?? []).map((r) => `${r.want_key}|${r.user_id}`)
+  check('THE TWO PUBLISHERS DO NOT EVICT EACH OTHER', keys.includes(`${LOTUS}|${alice.id}`) && keys.includes(`${SHIVAN}|${dave.id}`), JSON.stringify(keys))
+
+  // Flipping to friends-only must drop it out of the global index, exactly as
+  // an 'all' flip does for the main binder.
+  await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `vintage${stamp}`,
+    p_name: 'Vintage',
+    p_note: null,
+    p_visibility: 'friends',
+    p_tradeable: true,
+    p_payload: daveBinder,
+    p_card_count: 1,
+    p_offers: [{ want_key: SHIVAN, game: 'mtg', name: 'Shivan Dragon', qty: 1 }],
+  })
+  const afterFriendsOnly = await rpc(carol.token, 'match_wants', { p_keys: [SHIVAN] })
+  check("'public' -> 'friends' EVICTS from the global index", !(afterFriendsOnly.body ?? []).some((r) => r.user_id === dave.id), JSON.stringify(afterFriendsOnly.body))
+  const strangerBlocked = await rest(carol.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id`)
+  check('...and a stranger can no longer read it', (strangerBlocked.body ?? []).length === 0, JSON.stringify(strangerBlocked.body))
+
+  const takenDown = await rpc(dave.token, 'unpublish_custom_binder', { p_binder_id: `vintage${stamp}` })
+  check('unpublish_custom_binder succeeds', takenDown.status < 300, `${takenDown.status}`)
+  const goneForOwner = await rest(dave.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id`)
+  check('...and the row is gone', (goneForOwner.body ?? []).length === 0, JSON.stringify(goneForOwner.body))
+  const mainSurvives = await rpc(carol.token, 'match_wants', { p_keys: [LOTUS] })
+  check('TAKING A BINDER DOWN LEAVES THE MAIN BINDER INDEXED', (mainSurvives.body ?? []).some((r) => r.user_id === alice.id), JSON.stringify(mainSurvives.body))
+
   console.log('\n\x1b[1m6. Erasure leaves the vault alone\x1b[0m')
   await rest(alice.token, '/rpc/put_vault', {
     method: 'POST',

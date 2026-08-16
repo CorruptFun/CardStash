@@ -211,6 +211,7 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | the shared card index (`lookup_card_data` on our own project) | Only for cards with **no image at all**, driven by what is on screen, batched and debounced, misses cached three days. Sends card ids with the publishable key as `anon` — **never the session token**. Off with `cardSourceLookup` | read |
 | the shared card index (`submit_card_data` / `flag_card_data`) | Only when the user turns on contributing **and** ticks the box on that card. Attributed, so it needs an account | write |
 | messages (`list_threads` / `send_message` on our own project) | Only with a handle claimed. Polled with friends and the inbox; the body is plaintext to us | read/write |
+| custom binders (`publish_custom_binder` / `custom_binders` on our own project) | Only for binders the user set to friends or public — a private binder is never uploaded. Pushed with the poller, read with the friend refresh | read/write |
 
 The scan pipeline never sends an image anywhere. Card identification is
 Tesseract + canvas math on-device; the APIs are only asked by name, set and

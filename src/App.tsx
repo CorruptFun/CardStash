@@ -21,6 +21,7 @@ import { IngestView } from './views/IngestView'
 import { ScanView } from './views/ScanView'
 import { SearchView } from './views/SearchView'
 import { SettingsView } from './views/SettingsView'
+import { BindersView } from './views/BindersView'
 import { MessagesView } from './views/MessagesView'
 import { OrderView } from './views/OrderView'
 import { TradeView } from './views/TradeView'
@@ -32,7 +33,7 @@ type Route =
   | { name: 'decks'; deckId: string | null }
   | { name: 'builder' }
   | { name: 'settings' }
-  | { name: 'friends'; friendId: string | null }
+  | { name: 'friends'; friendId: string | null; binderId: string | null }
   | { name: 'trades'; tradeId: string | null }
   | { name: 'orders'; orderId: string | null }
   /**
@@ -41,6 +42,8 @@ type Route =
    * see the header of MessagesView.
    */
   | { name: 'messages'; otherId: string | null }
+  /** Binders the user built by hand: the list, or one of them. */
+  | { name: 'binders'; binderId: string | null }
   /** Share-link landing: `#/x?d=<blob>` (profile, trade, or reply). */
   | { name: 'ingest'; blob: string | null }
 
@@ -62,13 +65,15 @@ function parseRoute(hash: string): Route {
     case 'settings':
       return { name: 'settings' }
     case 'friends':
-      return { name: 'friends', friendId: parts[1] ?? null }
+      return { name: 'friends', friendId: parts[1] ?? null, binderId: parts[2] ?? null }
     case 'trades':
       return { name: 'trades', tradeId: parts[1] ?? null }
     case 'orders':
       return { name: 'orders', orderId: parts[1] ?? null }
     case 'messages':
       return { name: 'messages', otherId: parts[1] ?? null }
+    case 'binders':
+      return { name: 'binders', binderId: parts[1] ?? null }
     case 'x':
       return { name: 'ingest', blob: query.get('d') }
     default:
@@ -80,7 +85,7 @@ const TABS: { route: string; icon: IconName; label: string; match: string[] }[] 
   { route: '#/scan', icon: 'scan', label: 'Scan', match: ['scan'] },
   { route: '#/search', icon: 'search', label: 'Search', match: ['search'] },
   { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection'] },
-  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'messages', 'ingest'] },
+  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'messages', 'binders', 'ingest'] },
   { route: '#/decks', icon: 'decks', label: 'Decks', match: ['decks', 'builder'] },
   { route: '#/settings', icon: 'settings', label: 'Settings', match: ['settings'] },
 ]
@@ -127,10 +132,19 @@ export function App() {
         {route.name === 'builder' && <BuilderView navigate={navigate} />}
         {route.name === 'settings' && <SettingsView />}
         {route.name === 'friends' &&
-          (route.friendId ? <FriendBinderView key={route.friendId} friendId={route.friendId} /> : <FriendsView />)}
+          (route.friendId ? (
+            <FriendBinderView
+              key={route.friendId}
+              friendId={route.friendId}
+              binderId={route.binderId}
+            />
+          ) : (
+            <FriendsView />
+          ))}
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
         {route.name === 'orders' && <OrderView key={route.orderId ?? 'none'} orderId={route.orderId} />}
         {route.name === 'messages' && <MessagesView otherId={route.otherId} />}
+        {route.name === 'binders' && <BindersView binderId={route.binderId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
       {/* One banner slot, three claimants, in descending order of what it costs

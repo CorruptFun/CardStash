@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, ManaCost, Seg, Stepper, Toggle } from '../components/basics'
+import { BinderPicker } from '../components/BinderPicker'
 import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
@@ -137,6 +138,7 @@ function CardSheet() {
   const [refreshing, setRefreshing] = useState(false)
   const [didAdd, setDidAdd] = useState(false)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
+  const [binderPickOpen, setBinderPickOpen] = useState(false)
   const [allPrintings, setAllPrintings] = useState(false)
   const printingsRef = useRef<HTMLElement | null>(null)
   const [variants, setVariants] = useState<Card[] | null>(null)
@@ -725,6 +727,15 @@ function CardSheet() {
               <Icon name="decks" size={16} /> Deck
             </button>
           )}
+          {/* Only for a copy the user actually owns: a binder is an arrangement
+              of physical cards, and the row is what carries the finish, the
+              condition and the grade. From a search result the honest answer
+              is the Add button beside this one. */}
+          {!sheet.deckId && sheet.item && (
+            <button className="btn btn--ghost" onClick={() => setBinderPickOpen(true)}>
+              <Icon name="cards" size={16} /> Binder
+            </button>
+          )}
           {canBuy && seller && (
             <button className="btn btn--ghost addbar__buy" onClick={buy} disabled={buying}>
               <Icon name="cart" size={16} />{' '}
@@ -755,6 +766,14 @@ function CardSheet() {
           )}
         </div>
       </section>
+      {sheet.item && (
+        <BinderPicker
+          open={binderPickOpen}
+          onClose={() => setBinderPickOpen(false)}
+          itemId={sheet.item.id}
+          cardName={card.name}
+        />
+      )}
       <DeckPicker
         open={deckPickOpen}
         onClose={() => setDeckPickOpen(false)}

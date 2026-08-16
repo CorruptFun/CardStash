@@ -196,6 +196,13 @@ factor themselves (`sharedRowValue`).
 `direction` says who proposed it. Statuses: `proposed · accepted · declined ·
 completed · canceled`.
 
+`CustomBinder` / `BinderCard` are binders the user builds by hand: a named
+selection with its own `visibility` (`private | friends | public`) and its own
+`tradeable` flag. **`BinderCard.itemId` points at a `CollectionItem`, not at a
+card** — finish, condition, grade and price come off the copy owned, which is
+why a card patch does not need a fourth denormalized `Card` chased through this
+table. `SharedBinder` is the stored/wire form on a friend's record.
+
 `SocialLink` is one place a collector can be reached — `{ platform, value }`
 over a **closed** platform vocabulary, with the handle stored and the URL built
 from a table in `lib/profilelinks.ts`, so an icon can never point somewhere it
@@ -206,8 +213,10 @@ see [social.md](social.md) and decision 23.
 `ChatThread` / `ChatMessage` (`lib/messaging.ts`) are **server-only**: there is
 no Dexie table and no backup entry for them, deliberately (decision 24).
 
-Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload`, all
-carrying `app: 'cardstock-social'`. In a trade payload the sender's side is
+Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload |
+BinderPayload`, all carrying `app: 'cardstock-social'`. A `BinderPayload` is a
+separate kind on purpose — importing one files it under its sender and never
+touches their card list. In a trade payload the sender's side is
 `offer` and what they want back is `want`; `tradeFromPayload` flips that into
 the receiver's `give`/`get`. See [social.md](social.md).
 
@@ -226,6 +235,7 @@ function.
 | 6 | `wants: 'key, game, addedAt'` |
 | 7 | `collection` gains `updatedAt`, `tombstones: 'id, at'`; **upgrade** backfills `updatedAt` from `addedAt` |
 | 8 | `patches: 'cardId, game, updatedAt'` — user-authored card images and fields. `custom` is deliberately **not** indexed: it is a boolean, IndexedDB has no boolean key type, and an index on one silently stores nothing |
+| 9 | `binders: 'id, updatedAt'`, `binderCards: 'id, binderId, itemId, cardId, [binderId+itemId]'` — binders the user builds by hand. Keyed on the **collection row**, not the card, so a binder holds the copy actually owned; the compound index makes "already in this binder?" one lookup. `visibility` is not indexed — three strings on a table of tens of rows |
 
 Adding a version: append a `this.version(n).stores({...})` block, never edit an
 existing one, and supply `.upgrade()` if stored rows need reshaping. See
@@ -308,7 +318,7 @@ directly.
   "app": "cardstock", "version": 1, "exportedAt": "<ISO>",
   "collection": [...], "decks": [...], "deckCards": [...],
   "history": [...], "friends": [...], "trades": [...], "wants": [...],
-  "patches": [...]
+  "patches": [...], "binders": [...], "binderCards": [...]
 }
 ```
 
@@ -316,6 +326,12 @@ directly.
 it) and always written on the way **out** — a photo the user took of their own
 card exists nowhere else in the world, so omitting it would make "restore"
 quietly lossy.
+
+`binders`/`binderCards` are optional on the way in for the same reason (nothing
+written before v9 has them) and always written out: the cards are already in
+`collection`, but the **grouping** exists nowhere else. `sanitizeBackup` forces
+any visibility it does not clearly recognise back to `private` — a restore must
+never be the thing that publishes a binder.
 
 `exportBackup({ imageBudget })` caps the imagery a backup carries, and **only
 the vault passes one** (`VAULT_IMAGE_BUDGET`, ~6 MB): it is a single text

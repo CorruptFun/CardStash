@@ -12,6 +12,7 @@ import {
   applyTradeReply,
   db,
   recordIncomingTrade,
+  upsertFriendBinder,
   upsertFriendFromProfile,
 } from '../lib/db'
 import { listOrders, marketReady, orderStatusLabel, type Order } from '../lib/marketplace'
@@ -72,6 +73,7 @@ export function FriendsView() {
   const trades = useLiveQuery(() => db.trades.toArray(), [])
   const items = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
   const myWants = useLiveQuery(() => db.wants.orderBy('addedAt').reverse().toArray(), [])
+  const myBinders = useLiveQuery(() => db.binders.count(), [])
   const myWantKeys = useMemo(() => wantKeySet(myWants ?? []), [myWants])
   const config = useSettings()
   const toast = useUi((s) => s.toast)
@@ -219,6 +221,16 @@ export function FriendsView() {
       track('friend_added', { method: sourceUrl ? 'url' : 'paste', cards: payload.cards.length, update: !result.created })
       toast(result.created ? `Added ${result.friend.name}` : `Updated ${result.friend.name}`, 'success')
       location.hash = `#/friends/${result.friend.id}`
+      return
+    }
+    if (payload.kind === 'binder') {
+      // Filed under whoever sent it, never merged into their card list —
+      // see `upsertFriendBinder`.
+      const result = await guarded(() => upsertFriendBinder(payload), 'Save binder')
+      if (!result) return
+      track('friend_added', { method: sourceUrl ? 'url' : 'paste', cards: payload.cards.length, update: !result.created })
+      toast(`Saved “${payload.name}” from ${payload.from.name}`, 'success')
+      location.hash = `#/friends/${result.friend.id}/${result.binder.id}`
       return
     }
     if (payload.kind === 'trade') {
@@ -396,6 +408,27 @@ export function FriendsView() {
       <section className="setsec">
         <h3>My account</h3>
         <SocialPanel />
+      </section>
+
+      {/* Binders the user built by hand. Beside the whole-collection binder
+          above, never instead of it — each carries its own audience, so one
+          can be public while the collection behind it is not. */}
+      <section className="setsec">
+        <a className="social-row" href="#/binders">
+          <span className="social-row__avatar social-row__avatar--trade" aria-hidden="true">
+            <Icon name="cards" size={16} />
+          </span>
+          <span className="social-row__body">
+            <span className="social-row__name">
+              My binders
+              {myBinders != null && myBinders > 0 && <em className="sheetsec__count">{myBinders}</em>}
+            </span>
+            <span className="social-row__meta">
+              Build a set of cards and choose who sees it — private, friends, or any collector
+            </span>
+          </span>
+          <Icon name="chevronRight" size={16} className="social-row__go" />
+        </a>
       </section>
 
       {/* One row rather than a list: conversations have their own screen, and

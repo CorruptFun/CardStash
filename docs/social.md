@@ -46,13 +46,14 @@ on one id rather than forking.
 
 ## Payloads
 
-Three kinds, all carrying `app: 'cardstock-social', v: 1`:
+Four kinds, all carrying `app: 'cardstock-social', v: 1`:
 
 | Kind | Built by | Contents |
 | ---- | -------- | -------- |
 | `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]`, `links?: SocialLink[]` |
 | `trade` | `buildTradePayload(trade, me)` | `id`, `at`, `from`, `to?`, `note?`, `offer` (what the sender hands over), `want` (what they want back) |
 | `reply` | `buildReplyPayload(trade, me, status, note)` | `id`, `at`, `from`, `status: accepted \| declined`, `note?` |
+| `binder` | `buildBinderPayload(binder, cards, me)` | `id` (the binder's), `at`, `from`, `name`, `note?`, `tradeable`, `cards: SharedCard[]` — one custom binder, filed under its sender and never merged into their card list |
 
 **Perspective flips at the wire.** A `TradeRecord` stores `give`/`get` from the
 local user's point of view. `buildTradePayload` sends `give` as `offer`;
@@ -187,7 +188,7 @@ Flow with **no server**:
 `sanitizePayload(raw)` is the only door. Rules:
 
 - an `app` field, if present, must equal `cardstock-social`;
-- `kind` must be one of the three; anything else throws `NOT_SOCIAL`;
+- `kind` must be one of the four; anything else throws `NOT_SOCIAL`;
 - a trade with neither an offer nor a want is rejected;
 - strings are trimmed and length-capped (name 60, note 400, cardId 160, card
   name 200, setName 120, number 32, rarity 40, image URL 500);
@@ -706,6 +707,73 @@ in settings) so it is right on the first frame after a cold launch, corrected by
 every poll and cleared on sign-out; and the `about` block goes through
 `sanitizeSharedCard` — the same door a `#/x?d=…` link uses — so a message cannot
 smuggle in a card shape a share link could not.
+
+## Custom binders (v0.19.0)
+
+Binders the user builds by hand — "my vintage Charizards", "the box I'm selling
+at the weekend" — each with **its own audience**. `lib/binders.ts` is the pure
+half, `views/BindersView.tsx` the screens, `supabase/migrations/0018` the
+server. Read decision 26 before changing what a visibility means.
+
+**They sit BESIDE the whole-collection binder, not instead of it.** `binders`
+(0003) is `primary key (user_id)` — one row — and four things read that shape:
+`pullFriends`, `match_wants`, `send_to_inbox`'s reachability and `can_message`.
+Re-keying it would have touched every one of them for a feature that only adds
+a case, so `custom_binders` is a sibling expressing the same rule the same way.
+
+| `visibility` | Who can read it | Uploaded? |
+| ------------ | --------------- | --------- |
+| `private` | only you | **no** — never leaves the device |
+| `friends` | accepted friends | yes |
+| `public` | **any signed-in collector** | yes |
+
+`public` stops at signed-in, deliberately. A binder readable by `anon` is one
+anybody holding the publishable key can enumerate — a list of valuable cards
+attached to a handle, which is exactly what `trade_offers` refuses to be. That
+is a decision to revisit deliberately, not by loosening a policy.
+
+**`tradeable` is a second switch, not a synonym.** Only a binder that is *both*
+public and tradeable enters the global want index (`isDiscoverable`). A
+friends-only binder is never globally matchable — 0003's invariant, one level
+down — and a public binder that is merely on display is a display case, not an
+offer. Publishing a public tradeable binder also makes you **reachable**
+(`send_to_inbox`, `can_message`), because otherwise the offer exists and nobody
+is permitted to ask about it.
+
+**Rows point at collection rows, not at cards.** `BinderCard.itemId` is a
+`CollectionItem.id`, so finish, condition, grade and price come off the copy the
+user actually owns — and a card patch that fixes a picture fixes it here too,
+with no fourth denormalized `Card` to chase (see `savePatch`). Quantities clamp
+to what the collection still holds, in `addToBinder` *and* again in
+`resolveBinderRows`, because the collection can shrink long after the binder row
+was written and a friend acts on the claim.
+
+**A binder is its own payload kind** (`kind: 'binder'`), not a `ProfilePayload`
+with a name on it. Importing one must never touch the sender's main snapshot: a
+binder is a subset, and merging "Rae's four Charizards" over "everything Rae
+owns" would look like a friend who had thrown their collection away.
+`upsertFriendBinder` files it under the sender — creating a stub record if they
+are not followed yet — and leaves `Friend.cards` alone. `friendFromProfile`
+returns the favour: a profile refresh keeps the binders it knows nothing about.
+
+**`trade_offers` gained `source`.** Two publishers per user now feed it and
+`replace_trade_offers` deletes wholesale, so without a per-source slice
+publishing a binder would evict the main binder's offers and vice versa. `''`
+is the main binder; anything else is a binder id. `unpublish_binder` was
+narrowed to `source = ''` for the same reason — taking your collection binder
+down must not silently empty the binders you deliberately published.
+
+**Nothing writes `custom_binders` directly**: no write policy, no write grant,
+`publish_custom_binder` / `unpublish_custom_binder` are the only doors — the
+row and its index slice have to move together. `publish_custom_binder` computes
+`public AND tradeable` **itself** rather than trusting the caller, so a client
+cannot push a friends-only binder into the global index by sending offers with
+it. Capped at 40 per account.
+
+Local storage is Dexie v9 (`binders`, `binderCards`), they ride the backup and
+the vault (`cloudmerge` merges them like decks), and `sanitizeBackup` forces
+anything it does not clearly recognise back to `private` — a restore must never
+be the thing that publishes a binder.
 
 ### The handshake is free (decision 25)
 

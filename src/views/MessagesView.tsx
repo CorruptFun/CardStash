@@ -275,18 +275,18 @@ function ThreadScreen({ otherId }: { otherId: string }) {
       </div>
 
       {messagingReady() && (
-        <div className="composer">
+        <div className="msgbox">
           {about && (
-            <div className="composer__about">
+            <div className="msgbox__about">
               <AboutCard row={about} />
-              <button className="composer__drop" aria-label="Don’t attach this card" onClick={() => setAbout(undefined)}>
+              <button className="msgbox__drop" aria-label="Don’t attach this card" onClick={() => setAbout(undefined)}>
                 <Icon name="x" size={13} />
               </button>
             </div>
           )}
-          <div className="composer__row">
+          <div className="msgbox__row">
             <textarea
-              className="input composer__input"
+              className="input msgbox__input"
               value={text}
               onChange={(event) => setText(event.target.value.slice(0, MESSAGE_MAX_CHARS))}
               onKeyDown={(event) => {
@@ -302,12 +302,12 @@ function ThreadScreen({ otherId }: { otherId: string }) {
               maxLength={MESSAGE_MAX_CHARS}
               aria-label="Your message"
             />
-            <button className="btn btn--primary composer__send" onClick={send} disabled={sending || !text.trim()}>
+            <button className="btn btn--primary msgbox__send" onClick={send} disabled={sending || !text.trim()}>
               <Icon name="send" size={16} />
-              <span className="composer__sendlabel">{sending ? 'Sending…' : 'Send'}</span>
+              <span className="msgbox__sendlabel">{sending ? 'Sending…' : 'Send'}</span>
             </button>
           </div>
-          <p className="composer__note">
+          <p className="msgbox__note">
             Messages are stored on our server so both of you can read them — they are not encrypted end to end. Never
             send card numbers or account details here.
           </p>

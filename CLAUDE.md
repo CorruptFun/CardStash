@@ -185,7 +185,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0017 — social is 0000–0004, messaging is 0017), not
+`supabase/migrations/` (0000–0018 — social is 0000–0004, messaging is 0017,
+custom binders are 0018), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
@@ -309,6 +310,36 @@ in `CardSheet.tsx`, on purpose); we never scan message bodies, interstitial the
 way out, or nudge a quiet thread; escrow is sold on what it does, never on fear
 of the free path we are simultaneously offering. Read decision 25 before
 writing copy near this or adding anything that measures where a deal ended up.
+
+## Custom binders
+
+Binders the user builds by hand, each with **its own audience** — `lib/binders.ts`
+(pure), `views/BindersView.tsx`, Dexie v9 (`binders`, `binderCards`),
+`supabase/migrations/0018`. They sit BESIDE the whole-collection binder, never
+instead of it. Read decision 26 and `docs/social.md` first. Five load-bearing
+things:
+
+- **`public` means any signed-in collector, NOT the open web.** A binder
+  readable by `anon` is one anybody with the publishable key can enumerate,
+  which is what `trade_offers` refuses to be. Changing that is a decision, not
+  a policy edit.
+- **`tradeable` is a second switch.** Only `public AND tradeable` enters the
+  global want index (`isDiscoverable`), and `publish_custom_binder` computes
+  that itself rather than trusting the caller. Friends-only is never globally
+  matchable. Publishing one also makes you reachable (`can_message`,
+  `send_to_inbox`) — otherwise the offer exists and nobody may ask about it.
+- **`BinderCard.itemId` points at a COLLECTION ROW, not a card.** Finish,
+  condition, grade and price come off the copy owned; copying them would be a
+  fourth denormalized `Card` for `savePatch` to chase. Quantities clamp to the
+  collection in `addToBinder` *and* `resolveBinderRows`.
+- **A binder is its own payload kind** (`kind: 'binder'`). `upsertFriendBinder`
+  files it under its sender and never touches `Friend.cards`; `friendFromProfile`
+  returns the favour by keeping binders a profile refresh knows nothing about.
+- **`trade_offers.source`** is what stops the two publishers evicting each
+  other (`''` = main binder). `unpublish_binder` is narrowed to `source = ''`
+  for the same reason. A binder starts `private` whatever the caller passes,
+  and `sanitizeBackup` forces an unrecognised visibility back to private — a
+  restore must never be the thing that publishes a binder.
 
 ## Paid trades — buying a card from a friend (in progress)
 

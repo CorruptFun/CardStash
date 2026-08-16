@@ -6952,7 +6952,10 @@ button {
   color: var(--signal);
 }
 
-.composer {
+/* NOT `.composer` — that block belongs to the trade composer (`.composer__head`,
+   `.composer__review`), and a second definition of the same name gave it a
+   sticky bottom edge and a border it never asked for. */
+.msgbox {
   position: sticky;
   bottom: 0;
   display: flex;
@@ -6962,10 +6965,10 @@ button {
   background: var(--ink-000);
   border-top: 1px solid var(--rule);
 }
-.composer__about {
+.msgbox__about {
   position: relative;
 }
-.composer__drop {
+.msgbox__drop {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -6978,29 +6981,29 @@ button {
   border: 1px solid var(--rule-strong);
   color: var(--paper-2);
 }
-.composer__row {
+.msgbox__row {
   display: flex;
   align-items: flex-end;
   gap: var(--s2);
 }
-.composer__input {
+.msgbox__input {
   flex: 1;
   min-width: 0;
   resize: none;
   font-size: 14px;
   line-height: 1.4;
 }
-.composer__send {
+.msgbox__send {
   flex: none;
 }
-.composer__note {
+.msgbox__note {
   font-size: 11px;
   line-height: 1.4;
   color: var(--paper-3);
 }
 @media (max-width: 380px) {
   /* The icon carries it on a narrow phone; the word is what gets cut. */
-  .composer__sendlabel {
+  .msgbox__sendlabel {
     display: none;
   }
 }
@@ -7024,4 +7027,99 @@ button {
 }
 .matchchip__msg:active {
   color: var(--signal);
+}
+
+/* --- Custom binders ------------------------------------------------------ */
+
+/* The audience, as a pill on the binder list. Three states rather than two,
+   because `private` is a real answer here and not merely "not published". */
+.vispill {
+  flex: none;
+  padding: 2.5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  background: var(--ink-150);
+  color: var(--paper-3);
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.vispill--friends {
+  color: var(--signal);
+  border-color: var(--signal-rule);
+  background: var(--signal-fill);
+}
+.vispill--public {
+  color: var(--warn);
+  border-color: rgba(224, 165, 66, 0.45);
+  background: var(--warn-fill);
+}
+
+/* A binder cell is a card cell plus the count control, because the number of
+   copies IN the binder is the thing being edited here — not the number owned,
+   which is the collection's business and is the ceiling on this one. */
+.bindercell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.bindercell__qty {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.bindercell__qty .stepper {
+  flex: 1;
+  min-width: 0;
+}
+.bindercell__x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--rule);
+  background: var(--ink-100);
+  color: var(--paper-3);
+}
+.bindercell__x:active {
+  color: var(--down);
+  border-color: var(--down);
+}
+
+/* The bulk "add cards" sheet: a scrolling list of copies you own. */
+.sheetbody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding-bottom: var(--s4);
+}
+.sheettitle {
+  font-size: 17px;
+  font-weight: 600;
+}
+.pickcell {
+  flex: none;
+  width: 34px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+/* Same reasoning as the message about-card: the fallback name is unreadable at
+   this size and the real name is the line beside it. */
+.pickcell .cardimg__fbname,
+.pickcell .cardimg__fbset {
+  display: none;
+}
+/* `.searchbox` carries `flex: 1` for the row it normally lives in
+   (`.colltools`); inside a column it grows VERTICALLY into a tall empty box. */
+.sheetbody .searchbox {
+  flex: none;
+}
+/* A social row rendered as a <button> inherits the button's centred text. */
+button.social-row {
+  text-align: left;
 }
