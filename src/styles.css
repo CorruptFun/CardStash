@@ -6762,3 +6762,389 @@ button {
   background: var(--signal-fill);
   border-color: var(--signal-rule);
 }
+
+/* --- Social profile links ------------------------------------------------ */
+
+/* Someone else's accounts, under their name on their binder. Icons rather than
+   a list of URLs: at this size the row is a signal that a person is reachable,
+   and the accessible name on each one says where. */
+.profilelinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.profilelinks__item {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--ink-150);
+  border: 1px solid var(--rule-strong);
+  color: var(--paper-2);
+  transition:
+    color var(--t-1) var(--ease-out),
+    border-color var(--t-1) var(--ease-out);
+}
+.profilelinks__item:hover,
+.profilelinks__item:active {
+  color: var(--signal);
+  border-color: var(--signal-rule);
+}
+
+.linkedit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.linkedit__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.linkedit__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-1);
+  background: var(--ink-150);
+  border: 1px solid var(--rule-strong);
+  color: var(--paper-2);
+}
+.linkedit__input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13.5px;
+}
+/* A value that would not survive the trip. Deliberately a border rather than an
+   error message: the field is optional, nothing is lost by leaving it, and a
+   half-typed handle must not put a red sentence on the screen. */
+.input--bad {
+  border-color: var(--down);
+}
+.linkedit__x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-1);
+  color: var(--paper-3);
+}
+.linkedit__x:active {
+  color: var(--down);
+}
+
+/* --- Messages ------------------------------------------------------------ */
+
+/* The unread count on the Friends tab. Absolutely positioned inside its own
+   wrapper because `.nav__tab span` clips its overflow to keep long labels off
+   their neighbours, and the badge sits outside the glyph's box. */
+.nav__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
+.nav__badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--ink-000);
+  font-family: var(--font-num);
+  font-size: 9px;
+  font-weight: 620;
+  font-style: normal;
+  line-height: 15px;
+  text-align: center;
+}
+
+.threadrow__preview {
+  font-size: 12px;
+  color: var(--paper-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The conversation screen is the one place in this app where the content grows
+   from the bottom, so the log scrolls and the composer is pinned under it. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.thread__log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2) 0 var(--s3);
+}
+.bubble {
+  align-self: flex-start;
+  max-width: 84%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border-radius: var(--r-2);
+  border-bottom-left-radius: var(--r-1);
+  background: var(--ink-100);
+  border: 1px solid var(--rule);
+}
+.bubble--mine {
+  align-self: flex-end;
+  border-bottom-left-radius: var(--r-2);
+  border-bottom-right-radius: var(--r-1);
+  background: var(--signal-fill);
+  border-color: var(--signal-rule);
+}
+.bubble__body {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--paper);
+  /* A pasted message keeps its line breaks, and a 300-character word does not
+     push the screen sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bubble__at {
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+
+/* The card a message is about — the same figure both people already saw on the
+   binder, so nobody is negotiating against a different number. */
+.aboutcard {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 6px;
+  border-radius: var(--r-1);
+  background: var(--ink-150);
+  border: 1px solid var(--rule-strong);
+}
+.aboutcard__img {
+  flex: none;
+  width: 44px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+/* A card with no art falls back to its name over the game colour, which is the
+   right answer in a grid cell and unreadable at 44px — and redundant here,
+   because the name is already the line beside it. Keep the coloured tile. */
+.aboutcard__img .cardimg__fbname,
+.aboutcard__img .cardimg__fbset {
+  display: none;
+}
+.aboutcard__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.aboutcard__name {
+  font-size: 12.5px;
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aboutcard__meta {
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--paper-3);
+}
+.aboutcard__price {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--signal);
+}
+
+/* NOT `.composer` — that block belongs to the trade composer (`.composer__head`,
+   `.composer__review`), and a second definition of the same name gave it a
+   sticky bottom edge and a border it never asked for. */
+.msgbox {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--s2) 0 var(--s3);
+  background: var(--ink-000);
+  border-top: 1px solid var(--rule);
+}
+.msgbox__about {
+  position: relative;
+}
+.msgbox__drop {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--ink-100);
+  border: 1px solid var(--rule-strong);
+  color: var(--paper-2);
+}
+.msgbox__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s2);
+}
+.msgbox__input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.msgbox__send {
+  flex: none;
+}
+.msgbox__note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--paper-3);
+}
+@media (max-width: 380px) {
+  /* The icon carries it on a narrow phone; the word is what gets cut. */
+  .msgbox__sendlabel {
+    display: none;
+  }
+}
+
+/* A want-match chip is now two controls — add them as a friend, or just ask. */
+.matchchip__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: inherit;
+  font: inherit;
+}
+.matchchip__msg {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  border-radius: 999px;
+  color: var(--paper-2);
+}
+.matchchip__msg:active {
+  color: var(--signal);
+}
+
+/* --- Custom binders ------------------------------------------------------ */
+
+/* The audience, as a pill on the binder list. Three states rather than two,
+   because `private` is a real answer here and not merely "not published". */
+.vispill {
+  flex: none;
+  padding: 2.5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  background: var(--ink-150);
+  color: var(--paper-3);
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.vispill--friends {
+  color: var(--signal);
+  border-color: var(--signal-rule);
+  background: var(--signal-fill);
+}
+.vispill--public {
+  color: var(--warn);
+  border-color: rgba(224, 165, 66, 0.45);
+  background: var(--warn-fill);
+}
+
+/* A binder cell is a card cell plus the count control, because the number of
+   copies IN the binder is the thing being edited here — not the number owned,
+   which is the collection's business and is the ceiling on this one. */
+.bindercell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.bindercell__qty {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.bindercell__qty .stepper {
+  flex: 1;
+  min-width: 0;
+}
+.bindercell__x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--rule);
+  background: var(--ink-100);
+  color: var(--paper-3);
+}
+.bindercell__x:active {
+  color: var(--down);
+  border-color: var(--down);
+}
+
+/* The bulk "add cards" sheet: a scrolling list of copies you own. */
+.sheetbody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding-bottom: var(--s4);
+}
+.sheettitle {
+  font-size: 17px;
+  font-weight: 600;
+}
+.pickcell {
+  flex: none;
+  width: 34px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+/* Same reasoning as the message about-card: the fallback name is unreadable at
+   this size and the real name is the line beside it. */
+.pickcell .cardimg__fbname,
+.pickcell .cardimg__fbset {
+  display: none;
+}
+/* `.searchbox` carries `flex: 1` for the row it normally lives in
+   (`.colltools`); inside a column it grows VERTICALLY into a tall empty box. */
+.sheetbody .searchbox {
+  flex: none;
+}
+/* A social row rendered as a <button> inherits the button's centred text. */
+button.social-row {
+  text-align: left;
+}

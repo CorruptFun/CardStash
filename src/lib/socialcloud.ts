@@ -21,11 +21,16 @@
 import { track } from './analytics'
 import { authHeaders, CloudError, currentUserId, freshToken, isSignedIn, readError } from './authsession'
 import { CLOUD_AVAILABLE, SUPABASE_URL } from './cloudconfig'
-import { applyTradeReply, db, recordIncomingTrade, upsertFriendFromProfile } from './db'
+import { binderSharedCards, isDiscoverable, isPublished, resolveBinderRows } from './binders'
+import { applyTradeReply, db, recordIncomingTrade, replaceFriendBinders, upsertFriendFromProfile } from './db'
+import { refreshUnread, resetUnread } from './messaging'
 import { redeemReferral } from './referral'
 import { settings } from './settings'
-import { buildProfilePayload, myProfile, sanitizePayload, wantKeyFor } from './social'
-import type { ProfilePayload, ReplyPayload, SocialPayload, TradePayload } from './types'
+import { buildBinderPayload, buildProfilePayload, myProfile, sanitizePayload, sharedBinderFromPayload, wantKeyFor } from './social'
+import type { BinderPayload, ProfilePayload, ReplyPayload, SharedBinder, SocialPayload, TradePayload } from './types'
+
+/** The shape `offersFromCards` needs — a shared row, or anything like one. */
+type SharedCardish = { game: ProfilePayload['cards'][number]['game']; name: string; forTrade: number }
 
 const POLL_INTERVAL_MS = 25_000
 /** One page of inbox drain. More than this in one poll is not a real inbox. */
@@ -36,6 +41,9 @@ export interface SocialProfile {
   handle: string
   displayName: string
 }
+
+/** A Supabase account id, as opposed to a legacy link-imported `uid()`. */
+const IS_USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export interface FriendRequest extends SocialProfile {
   at: number
@@ -54,6 +62,8 @@ export interface SocialSummary {
   friendsUpdated: number
   tradesReceived: number
   repliesApplied: number
+  /** Unread messages across every conversation, after this sync. */
+  messagesWaiting: number
 }
 
 /** A project is configured at all — a fork without one never sees this UI. */
@@ -112,6 +122,10 @@ const RPC_MESSAGES: Record<string, string> = {
   no_such_handle: 'No collector with that handle',
   cannot_friend_self: 'That is your own handle',
   bad_scope: 'Pick what to share first',
+  bad_binder: 'That binder has no id',
+  bad_binder_name: 'Give the binder a name first',
+  bad_visibility: 'Pick who can see it first',
+  too_many_binders: 'You already publish 40 binders — take one down first',
   bad_recipient: 'That is not someone you can send to',
   not_reachable: 'They are not accepting proposals — add each other as friends first',
   inbox_full: 'They have too many unanswered proposals from you already',
@@ -234,6 +248,19 @@ export function hydrateIdentity(): Promise<unknown> {
   return hydrating
 }
 
+/**
+ * The collector behind an account id.
+ *
+ * The mirror of `lookupHandle`, and it exists because a conversation is
+ * addressed to an account: the messages screen is handed a user id by whatever
+ * sent the user there and still has to put a name at the top of it.
+ */
+export async function lookupProfileById(userId: string): Promise<SocialProfile | null> {
+  if (!userId || !IS_USER_ID.test(userId)) return null
+  const rows = await rest<ProfileRow[]>(`/profiles?user_id=eq.${userId}&select=user_id,handle,display_name`)
+  return rows?.length ? toProfile(rows[0]) : null
+}
+
 export async function lookupHandle(handle: string): Promise<SocialProfile | null> {
   const clean = handle.trim().toLowerCase().replace(/^@/, '')
   if (!clean) return null
@@ -263,8 +290,12 @@ function hashPayload(payload: ProfilePayload): string {
  * copies are going.
  */
 function offersFrom(payload: ProfilePayload): { want_key: string; game: string; name: string; qty: number }[] {
+  return offersFromCards(payload.cards)
+}
+
+function offersFromCards(cards: SharedCardish[]): { want_key: string; game: string; name: string; qty: number }[] {
   const byKey = new Map<string, { want_key: string; game: string; name: string; qty: number }>()
-  for (const card of payload.cards) {
+  for (const card of cards) {
     if (card.forTrade <= 0) continue
     const key = wantKeyFor(card.game, card.name)
     const existing = byKey.get(key)
@@ -308,6 +339,137 @@ export async function publishBinder(force = false): Promise<boolean> {
 export async function unpublish(): Promise<void> {
   await call('unpublish_binder', {})
   lastPublishedHash = null
+}
+
+/* ------------------------------------------------------- custom binders */
+
+/**
+ * Per-binder publish hashes, so an unchanged binder is not rewritten on every
+ * poll. Module-level and therefore per-session, exactly like
+ * `lastPublishedHash` above: the cost of a cold start is one redundant write
+ * per published binder, and the cost of persisting it is a cache that can
+ * disagree with the server and skip a write that was needed.
+ */
+const binderHashes = new Map<string, string>()
+
+function hashBinder(payload: BinderPayload, visibility: string, tradeable: boolean): string {
+  const { at, ...rest } = payload
+  void at
+  return JSON.stringify({ ...rest, visibility, tradeable })
+}
+
+/**
+ * Push every custom binder the user has chosen to share, and take down the
+ * ones they have not.
+ *
+ * The **server's list drives the takedowns**, not the local one — the same
+ * lesson `pullFriends` learned. A binder deleted on this device leaves no
+ * local row to notice, so keying off `db.binders` alone would leave it
+ * published for ever; asking what is up there and removing whatever is no
+ * longer meant to be is the only version that converges.
+ *
+ * Returns how many rows were written or removed.
+ */
+export async function publishCustomBinders(force = false): Promise<number> {
+  if (!currentUserId()) throw new CloudError('Sign in first')
+  const [binders, rows, items] = await Promise.all([
+    db.binders.toArray(),
+    db.binderCards.toArray(),
+    db.collection.toArray(),
+  ])
+  const live = await rest<{ binder_id: string }[]>(
+    `/custom_binders?user_id=eq.${currentUserId()}&select=binder_id`,
+  )
+  const published = new Set((live ?? []).map((row) => row.binder_id))
+  const me = { ...myProfile(), id: currentUserId() as string }
+  let changed = 0
+
+  for (const binder of binders) {
+    if (!isPublished(binder)) continue
+    const mine = rows.filter((row) => row.binderId === binder.id)
+    const resolved = resolveBinderRows(mine, items)
+    const cards = binderSharedCards(resolved, binder.tradeable)
+    const payload = buildBinderPayload(binder, cards, me)
+    const hash = hashBinder(payload, binder.visibility, binder.tradeable)
+    published.delete(binder.id)
+    if (!force && binderHashes.get(binder.id) === hash) continue
+    await call('publish_custom_binder', {
+      p_binder_id: binder.id,
+      p_name: binder.name,
+      p_note: binder.note ?? null,
+      p_visibility: binder.visibility,
+      p_tradeable: binder.tradeable,
+      p_payload: { app: 'cardstock-social', v: 1, ...payload },
+      p_card_count: cards.length,
+      // The offers are computed the same way the main binder's are, and the
+      // server recomputes whether they count at all — a friends-only binder
+      // sending offers is refused there, not trusted here.
+      p_offers: isDiscoverable(binder) ? offersFromCards(cards) : [],
+    })
+    binderHashes.set(binder.id, hash)
+    changed++
+  }
+
+  // Whatever is still in `published` is on the server and should not be:
+  // deleted locally, or switched back to private.
+  for (const staleId of published) {
+    await call('unpublish_custom_binder', { p_binder_id: staleId })
+    binderHashes.delete(staleId)
+    changed++
+  }
+  return changed
+}
+
+/** Take one binder down immediately, without waiting for the next sync. */
+export async function unpublishCustomBinder(binderId: string): Promise<void> {
+  await call('unpublish_custom_binder', { p_binder_id: binderId })
+  binderHashes.delete(binderId)
+}
+
+interface CustomBinderRow {
+  user_id: string
+  binder_id: string
+  payload?: unknown
+}
+
+/**
+ * Read every custom binder these collectors let me see.
+ *
+ * One request for all of them, and RLS decides what comes back — a
+ * friends-only binder simply is not in the response, which is the same shape
+ * `pullFriends` relies on for `scope='all'`. Each payload is re-sanitized
+ * through the door a pasted link uses (decision 7); a malformed one is that
+ * binder's problem, not a failed sync.
+ */
+export async function pullFriendBinders(ids: string[]): Promise<number> {
+  const wanted = ids.filter((id) => IS_USER_ID.test(id))
+  if (!wanted.length) return 0
+  const rows = await rest<CustomBinderRow[]>(
+    `/custom_binders?user_id=in.(${wanted.join(',')})&select=user_id,binder_id,payload`,
+  )
+  const byUser = new Map<string, SharedBinder[]>()
+  for (const row of rows ?? []) {
+    try {
+      const payload = sanitizePayload(row.payload)
+      if (payload.kind !== 'binder') continue
+      const list = byUser.get(row.user_id)
+      const binder = sharedBinderFromPayload(payload)
+      if (list) list.push(binder)
+      else byUser.set(row.user_id, [binder])
+    } catch {
+      /* one binder's problem */
+    }
+  }
+  let updated = 0
+  // Every id asked about is written back, including the ones with nothing:
+  // a binder taken down server-side has to disappear here too, and an empty
+  // answer is exactly how that arrives.
+  for (const id of wanted) {
+    const list = (byUser.get(id) ?? []).sort((a, b) => b.at - a.at)
+    await replaceFriendBinders(id, list)
+    if (list.length) updated++
+  }
+  return updated
 }
 
 /* ------------------------------------------------------------------- friends */
@@ -495,8 +657,6 @@ interface BinderRow {
   payload?: unknown
 }
 
-const IS_USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 /**
  * Re-read every binder I am entitled to and that actually moved.
  *
@@ -524,6 +684,12 @@ export async function pullFriends(): Promise<number> {
   // treats them as stale and fills in their cards the moment they do publish.
   const seeded = await seedFriendRows(serverIds.filter((id) => !byId.has(id) && IS_USER_ID.test(id)))
   if (!ids.length) return seeded
+
+  // Custom binders ride the same friend list. They have no cheap revision
+  // probe like `remoteRev` below — a binder is small (it is a selection, not a
+  // collection) and there are at most forty per person, so one request for all
+  // of them beats a second round trip to discover which moved.
+  await pullFriendBinders(ids).catch(() => 0)
 
   const heads = await rest<BinderRow[]>(`/binders?user_id=in.(${ids.join(',')})&select=user_id,revision`)
   // An unknown id has no stored revision, so it reads as stale and is
@@ -652,6 +818,9 @@ export async function eraseSocial(): Promise<void> {
   // reclaiming the same name rather than finding a stranger wearing it.
   hydrating = null
   settings().set({ socialOn: false, socialHandle: '', socialCursor: 0, socialAt: 0 })
+  // The conversations went with the profile row (0019's erase_social), so a
+  // badge counting them is now counting nothing.
+  resetUnread()
 }
 
 /* ---------------------------------------------------------------- the loop */
@@ -660,15 +829,38 @@ let running = false
 
 export async function syncSocialNow(force = false): Promise<SocialSummary> {
   if (!socialConfigured()) throw new CloudError('Claim a handle first')
-  if (running) return { published: false, friendsUpdated: 0, tradesReceived: 0, repliesApplied: 0 }
+  if (running) {
+    return {
+      published: false,
+      friendsUpdated: 0,
+      tradesReceived: 0,
+      repliesApplied: 0,
+      messagesWaiting: settings().messageUnread,
+    }
+  }
   running = true
   try {
     // Friends and the inbox are pulled whether or not I publish: someone who
     // never puts a binder up still has friends to refresh and trades to
     // receive. Only the outbound half is gated.
     const published = settings().socialOn ? await publishBinder(force) : false
+    // Custom binders are NOT gated on `socialOn`. That switch is about the
+    // whole-collection binder — "am I publishing my collection" — and a binder
+    // the user explicitly marked public or friends-only is its own answer to
+    // its own question. Gating them behind it would mean a user who turned the
+    // collection binder off silently un-published binders they never touched.
+    await publishCustomBinders(force).catch(() => {
+      /* offline, or one binder refused — the next tick tries again */
+    })
     const friendsUpdated = await pullFriends()
     const inbox = await drainInbox()
+    // Messages are pulled on the same terms as the inbox — having a handle is
+    // enough, publishing is not required. Someone who put no cards up can
+    // still be asked about the ones they have, and a failure here must not
+    // cost the friend refresh that already succeeded.
+    const messagesWaiting = await refreshUnread()
+      .then((threads) => threads.reduce((sum, thread) => sum + thread.unread, 0))
+      .catch(() => settings().messageUnread)
     settings().set({ socialAt: Date.now() })
     if (published || friendsUpdated || inbox.trades || inbox.replies) {
       track('sync_run', {
@@ -678,7 +870,13 @@ export async function syncSocialNow(force = false): Promise<SocialSummary> {
         replies: inbox.replies,
       })
     }
-    return { published, friendsUpdated, tradesReceived: inbox.trades, repliesApplied: inbox.replies }
+    return {
+      published,
+      friendsUpdated,
+      tradesReceived: inbox.trades,
+      repliesApplied: inbox.replies,
+      messagesWaiting,
+    }
   } finally {
     running = false
   }

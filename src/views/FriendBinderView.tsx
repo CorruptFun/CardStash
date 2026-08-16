@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Empty, Modal, Seg, Stepper } from '../components/basics'
 import { Icon } from '../components/Icon'
+import { ProfileLinkIcons } from '../components/ProfileLinks'
 import { ShareActions, type SharePack } from '../components/ShareActions'
 import { Sheet } from '../components/Sheet'
 import { TradeSides } from '../components/TradeSides'
@@ -23,6 +24,7 @@ import {
   wantKeyFor,
   wantKeySet,
 } from '../lib/social'
+import { messagingReady } from '../lib/messaging'
 import { sendToInbox, socialConfigured } from '../lib/socialcloud'
 import type { CollectionItem, Friend, Game, SharedCard, TradeRecord } from '../lib/types'
 import { money, relativeAge, uid, ymd } from '../lib/util'
@@ -42,12 +44,21 @@ function matchesFilter(row: SharedCard, needle: string): boolean {
 /** A Supabase account id, as opposed to a legacy link-imported `uid()`. */
 const IS_ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export function FriendBinderView({ friendId }: { friendId: string }) {
+/**
+ * A friend's collection, or one of the custom binders they published.
+ *
+ * `binderId` switches between the two. A custom binder is a SELECTION they
+ * chose to show — it is never merged into their main card list (see
+ * `upsertFriendBinder`), so the two views read different arrays and the header
+ * says which one you are looking at.
+ */
+export function FriendBinderView({ friendId, binderId }: { friendId: string; binderId?: string | null }) {
   const friend = useLiveQuery(() => db.friends.get(friendId), [friendId])
   const myItems = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
   const myWants = useLiveQuery(() => db.wants.toArray(), [])
   const openSheet = useUi((s) => s.openSheet)
   const toast = useUi((s) => s.toast)
+  const setMessageDraft = useUi((s) => s.setMessageDraft)
   const [tab, setTab] = useState<'trade' | 'all' | null>(null)
   const [filterText, setFilterText] = useState('')
   const [gameFilter, setGameFilter] = useState<Game | 'all'>('all')
@@ -55,7 +66,15 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
   const [refreshing, setRefreshing] = useState(false)
   const [composing, setComposing] = useState(false)
 
-  const cards = friend?.cards ?? []
+  /**
+   * Which card list this screen is showing: the friend's own snapshot, or one
+   * of the binders they published. Everything below — the filter, the game
+   * picker, the trade composer's view of "their rows" — reads `cards`, so
+   * switching the source here is the whole change rather than a second grid.
+   */
+  const friendBinders = friend?.binders ?? []
+  const openBinder = binderId ? friendBinders.find((row) => row.id === binderId) : undefined
+  const cards = openBinder ? openBinder.cards : (friend?.cards ?? [])
   const tradeRows = useMemo(() => cards.filter((row) => row.forTrade > 0), [cards])
   const hasBoth = friend?.scope === 'all' && tradeRows.length > 0 && tradeRows.length < cards.length
   const activeTab = tab ?? (tradeRows.length > 0 ? 'trade' : 'all')
@@ -91,6 +110,23 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
   )
 
   if (friend === undefined) return <div className="screen safe-top" />
+  if (friend && binderId && !openBinder) {
+    return (
+      <div className="screen safe-top">
+        <header className="screenhead">
+          <a className="iconbtn" href={`#/friends/${friendId}`} aria-label="Back to their collection">
+            <Icon name="chevronLeft" size={20} />
+          </a>
+          <h1>Binder</h1>
+        </header>
+        <Empty
+          icon="cards"
+          title="That binder is gone"
+          body={`${friend.name} has taken it down, or it was never saved on this device.`}
+        />
+      </div>
+    )
+  }
   if (!friend) {
     return (
       <div className="screen safe-top">
@@ -134,16 +170,21 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
   return (
     <div className="screen safe-top">
       <header className="screenhead friendhead">
-        <a className="iconbtn" href="#/friends" aria-label="Back to friends">
+        <a
+          className="iconbtn"
+          href={openBinder ? `#/friends/${friend.id}` : '#/friends'}
+          aria-label={openBinder ? 'Back to their collection' : 'Back to friends'}
+        >
           <Icon name="chevronLeft" size={20} />
         </a>
         <div className="friendhead__id">
-          <h1>{friend.name}</h1>
+          <h1>{openBinder ? openBinder.name : friend.name}</h1>
           <span className="friendhead__meta">
+            {openBinder ? `${friend.name} · ` : ''}
             {stats.count} cards · {stats.trade} for trade · {money(stats.value)}
           </span>
           <span className="friendhead__meta friendhead__meta--dim">
-            snapshot from {relativeAge(friend.exportedAt)} ago
+            snapshot from {relativeAge(openBinder ? openBinder.at : friend.exportedAt)} ago
             {friend.sourceUrl ? ' · linked' : ''}
             {friend.lastDelta && (friend.lastDelta.added > 0 || friend.lastDelta.removed > 0)
               ? ` · last refresh +${friend.lastDelta.added}/−${friend.lastDelta.removed}`
@@ -158,12 +199,27 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
             </span>
           )}
           {friend.note && <span className="friendhead__note">“{friend.note}”</span>}
+          <ProfileLinkIcons links={friend.links} />
         </div>
       </header>
       <div className="friendacts">
         <button className="btn btn--primary" onClick={() => setComposing(true)} disabled={cards.length === 0}>
           <Icon name="swap" size={16} /> Propose a trade
         </button>
+        {/* Only an ACCOUNT can be talked to. A friend imported from a link is
+            a snapshot with a localStorage id behind it and nobody at the other
+            end — the same gate the Buy button uses, for the same reason. */}
+        {IS_ACCOUNT_ID.test(friend.id) && messagingReady() && (
+          <button
+            className="btn btn--ghost"
+            onClick={() => {
+              setMessageDraft({ userId: friend.id, name: friend.name })
+              location.hash = `#/messages/${friend.id}`
+            }}
+          >
+            <Icon name="message" size={15} /> Message
+          </button>
+        )}
         {friend.sourceUrl && (
           <button className="btn btn--ghost" onClick={refresh} disabled={refreshing}>
             <Icon name="refresh" size={15} className={refreshing ? 'spin' : ''} /> Refresh
@@ -173,6 +229,36 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
           <Icon name="trash" size={15} /> Remove
         </button>
       </div>
+      {friendBinders.length > 0 && !binderId && (
+        <section className="setsec">
+          <h3>
+            Their binders <em className="sheetsec__count">{friendBinders.length}</em>
+          </h3>
+          <div className="social-list">
+            {friendBinders.map((row) => (
+              <a className="social-row" key={row.id} href={`#/friends/${friend.id}/${row.id}`}>
+                <span className="social-row__avatar social-row__avatar--trade" aria-hidden="true">
+                  <Icon name="cards" size={16} />
+                </span>
+                <span className="social-row__body">
+                  <span className="social-row__name">
+                    {row.name}
+                    {row.tradeable && (
+                      <em className="social-row__match">
+                        <Icon name="swap" size={11} /> for trade
+                      </em>
+                    )}
+                  </span>
+                  <span className="social-row__meta">
+                    {sideQty(row.cards)} cards · {money(sideValue(row.cards))} · {relativeAge(row.at)} ago
+                  </span>
+                </span>
+                <Icon name="chevronRight" size={16} className="social-row__go" />
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
       {hasBoth && (
         <div className="friendtabs">
           <Seg

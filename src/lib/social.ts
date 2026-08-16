@@ -1,9 +1,11 @@
 import { CONDITIONS, FINISH_LABEL, GAMES } from './games'
 import { conditionFactor, itemUnitPrice, mergePrices } from './prices'
+import { sanitizeSocialLinks } from './profilelinks'
 import { referralQuery } from './referral'
 import { sanitizeGrade } from './slab'
 import { settings } from './settings'
 import type {
+  BinderPayload,
   Card,
   CollectionItem,
   Condition,
@@ -13,8 +15,10 @@ import type {
   ProfilePayload,
   ReplyPayload,
   ShareScope,
+  SharedBinder,
   SharedCard,
   SharedWant,
+  SocialLink,
   SocialPayload,
   TradePayload,
   TradeRecord,
@@ -40,6 +44,9 @@ export const LONG_LINK_CHARS = 20_000
 
 const PROFILE_CARD_CAP = 8_000
 const TRADE_CARD_CAP = 400
+/** Rows one custom binder may carry, and how many binders a friend may have. */
+const BINDER_CARD_CAP = 2_000
+const BINDERS_PER_FRIEND = 40
 const FINISHES = Object.keys(FINISH_LABEL) as Finish[]
 const TRADE_STATUSES: TradeStatus[] = ['proposed', 'accepted', 'declined', 'completed', 'canceled']
 
@@ -50,6 +57,12 @@ export interface MyProfile {
   name: string
   note?: string
   scope: ShareScope
+  /**
+   * Where else to find this collector. Travels with the binder rather than
+   * with the account, so it inherits the share's audience — see
+   * `lib/profilelinks.ts` for why that is the whole point.
+   */
+  links?: SocialLink[]
 }
 
 /** The stable id this device shares under — minted on first use, then kept. */
@@ -66,6 +79,10 @@ export function myProfile(): MyProfile {
     name: config.profileName.trim(),
     note: config.profileNote.trim() || undefined,
     scope: config.shareScope,
+    // Re-sanitized on the way OUT as well as the way in: the stored list is
+    // localStorage, which is editable by anyone with devtools, and a link
+    // built from it is a document other people's apps will render.
+    links: sanitizeSocialLinks(config.profileLinks),
   }
 }
 
@@ -123,6 +140,7 @@ export function buildProfilePayload(items: CollectionItem[], me: MyProfile, want
     at: Date.now(),
     cards,
     wants: wants.length ? wants.map(wantToShared) : undefined,
+    links: me.links?.length ? me.links : undefined,
   }
 }
 
@@ -189,7 +207,49 @@ export function friendFromProfile(
     remoteRev: remoteRev ?? existing?.remoteRev,
     cards: payload.cards,
     wants: payload.wants,
+    links: payload.links,
+    // A profile share says nothing about custom binders, so a refresh must
+    // KEEP the ones already imported. Dropping them here would mean every
+    // 25-second friend poll erased binders they had shared by link.
+    binders: existing?.binders,
     lastDelta,
+  }
+}
+
+/**
+ * One custom binder, ready to hand over as a link, a file, or a hosted row.
+ *
+ * `cards` are already-built `SharedCard`s rather than collection rows, because
+ * the caller is the one that knows how many copies of each item the binder
+ * holds (`lib/binders.ts` resolves that); this module stays the pure wire
+ * layer it has always been.
+ */
+export function buildBinderPayload(
+  binder: { id: string; name: string; note?: string; tradeable: boolean },
+  cards: SharedCard[],
+  me: MyProfile,
+): BinderPayload {
+  return {
+    kind: 'binder',
+    id: binder.id,
+    at: Date.now(),
+    from: { id: me.id, name: me.name || 'A Cardstock collector' },
+    name: binder.name,
+    note: binder.note,
+    tradeable: binder.tradeable,
+    cards,
+  }
+}
+
+/** A received binder payload as the row a friend's record stores. */
+export function sharedBinderFromPayload(payload: BinderPayload): SharedBinder {
+  return {
+    id: payload.id,
+    name: payload.name,
+    note: payload.note,
+    tradeable: payload.tradeable,
+    at: payload.at,
+    cards: payload.cards,
   }
 }
 
@@ -439,6 +499,7 @@ export function sanitizePayload(raw: unknown): SocialPayload {
       at: asTime(raw.at),
       cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
       wants: sanitizeSharedWants(raw.wants),
+      links: sanitizeSocialLinks(raw.links),
     }
   }
   if (kind === 'trade') {
@@ -450,6 +511,25 @@ export function sanitizePayload(raw: unknown): SocialPayload {
     if (!offer.length && !want.length) throw new Error(NOT_SOCIAL)
     const to = isRecord(raw.to) ? { id: asStr(raw.to.id, 64), name: asStr(raw.to.name, 60) } : undefined
     return { kind, id, at: asTime(raw.at), from, to, note: asStr(raw.note, 400), offer, want }
+  }
+  if (kind === 'binder') {
+    const id = asStr(raw.id, 64)
+    const from = sanitizeParty(raw.from)
+    if (!id || !from) throw new Error(NOT_SOCIAL)
+    return {
+      kind,
+      id,
+      at: asTime(raw.at),
+      from,
+      name: asStr(raw.name, 60) ?? 'Untitled binder',
+      note: asStr(raw.note, 400),
+      tradeable: raw.tradeable === true,
+      // A binder is a selection, not a collection: the same per-share cap the
+      // trade sides use, rather than the 8,000-row profile cap. Someone
+      // publishing their whole collection under a binder name is doing what
+      // the whole-collection binder is already for.
+      cards: sanitizeSharedCards(raw.cards, BINDER_CARD_CAP),
+    }
   }
   if (kind === 'reply') {
     const id = asStr(raw.id, 64)
@@ -465,6 +545,36 @@ export function sanitizePayload(raw: unknown): SocialPayload {
     }
   }
   throw new Error(NOT_SOCIAL)
+}
+
+/** One stored/received custom binder, or null if it is not one. */
+export function sanitizeSharedBinder(raw: unknown): SharedBinder | null {
+  if (!isRecord(raw)) return null
+  const id = asStr(raw.id, 64)
+  if (!id) return null
+  return {
+    id,
+    name: asStr(raw.name, 60) ?? 'Untitled binder',
+    note: asStr(raw.note, 400),
+    tradeable: raw.tradeable === true,
+    at: asTime(raw.at),
+    cards: sanitizeSharedCards(raw.cards, BINDER_CARD_CAP),
+  }
+}
+
+export function sanitizeSharedBinders(raw: unknown): SharedBinder[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const rows: SharedBinder[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (rows.length >= BINDERS_PER_FRIEND) break
+    const binder = sanitizeSharedBinder(entry)
+    // One row per binder id: a re-share replaces, it never accumulates.
+    if (!binder || seen.has(binder.id)) continue
+    seen.add(binder.id)
+    rows.push(binder)
+  }
+  return rows.length ? rows : undefined
 }
 
 /** Backup round-trip: validate a stored friend row. */
@@ -490,6 +600,8 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
     remoteRev,
     cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
     wants: sanitizeSharedWants(raw.wants),
+    links: sanitizeSocialLinks(raw.links),
+    binders: sanitizeSharedBinders(raw.binders),
     lastDelta: delta && (added || removed) ? { added: added ?? 0, removed: removed ?? 0, at: asTime(delta.at) } : undefined,
   }
 }

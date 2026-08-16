@@ -196,8 +196,27 @@ factor themselves (`sharedRowValue`).
 `direction` says who proposed it. Statuses: `proposed · accepted · declined ·
 completed · canceled`.
 
-Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload`, all
-carrying `app: 'cardstock-social'`. In a trade payload the sender's side is
+`CustomBinder` / `BinderCard` are binders the user builds by hand: a named
+selection with its own `visibility` (`private | friends | public`) and its own
+`tradeable` flag. **`BinderCard.itemId` points at a `CollectionItem`, not at a
+card** — finish, condition, grade and price come off the copy owned, which is
+why a card patch does not need a fourth denormalized `Card` chased through this
+table. `SharedBinder` is the stored/wire form on a friend's record.
+
+`SocialLink` is one place a collector can be reached — `{ platform, value }`
+over a **closed** platform vocabulary, with the handle stored and the URL built
+from a table in `lib/profilelinks.ts`, so an icon can never point somewhere it
+does not claim to. It hangs off `ProfilePayload`/`Friend` rather than off the
+hosted `profiles` row, which is what makes it inherit the binder's audience —
+see [social.md](social.md) and decision 23.
+
+`ChatThread` / `ChatMessage` (`lib/messaging.ts`) are **server-only**: there is
+no Dexie table and no backup entry for them, deliberately (decision 24).
+
+Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload |
+BinderPayload`, all carrying `app: 'cardstock-social'`. A `BinderPayload` is a
+separate kind on purpose — importing one files it under its sender and never
+touches their card list. In a trade payload the sender's side is
 `offer` and what they want back is `want`; `tradeFromPayload` flips that into
 the receiver's `give`/`get`. See [social.md](social.md).
 
@@ -216,6 +235,7 @@ function.
 | 6 | `wants: 'key, game, addedAt'` |
 | 7 | `collection` gains `updatedAt`, `tombstones: 'id, at'`; **upgrade** backfills `updatedAt` from `addedAt` |
 | 8 | `patches: 'cardId, game, updatedAt'` — user-authored card images and fields. `custom` is deliberately **not** indexed: it is a boolean, IndexedDB has no boolean key type, and an index on one silently stores nothing |
+| 9 | `binders: 'id, updatedAt'`, `binderCards: 'id, binderId, itemId, cardId, [binderId+itemId]'` — binders the user builds by hand. Keyed on the **collection row**, not the card, so a binder holds the copy actually owned; the compound index makes "already in this binder?" one lookup. `visibility` is not indexed — three strings on a table of tens of rows |
 
 Adding a version: append a `this.version(n).stores({...})` block, never edit an
 existing one, and supply `.upgrade()` if stored rows need reshaping. See
@@ -268,6 +288,8 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `pokemonKey` | pokemontcg.io key, from `VITE_POKEMON_KEY` at build time — **not user-editable**, and `merge()` always takes the build's value over a persisted one. `geminiKey`/`geminiModel` are gone: the deck builder runs on our key through `build-deck`. |
 | `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
+| `profileLinks` (`[]`) | Social accounts shown beside the binder. Re-sanitized on rehydrate as well as on the wire, because localStorage is editable and these become `<a href>`s in other people's apps. |
+| `messageUnread` (`0`) | Unread messages, cached so the nav badge is right on the first frame. A cache of a server fact, never the authority; cleared on sign-out. |
 | `referralFrom` (`''`) / `referralAt` (`0`) | The `@handle` whose link brought this install here, and when the server last gave a **final** answer about it. Written at boot from `?via=` and never overwritten — one referrer per account, for ever (`lib/referral.ts`). It is stored rather than read at the point of use because sign-in destroys the URL: the Google route returns to `origin + pathname` with query string and fragment both gone. `referralAt` is cleared on sign-out. |
 | `cardSourceLookup` (`true`) | May the app ask the shared card index about cards that have **no picture at all** (`lib/cardsource.ts`)? On by default: it sends a card id and gets a picture back, the same class of request already made to Scryfall on every search, aimed at our project instead of theirs — never the session token, never a background sweep, never for a card that already has art. |
 | `cardSourceShare` (`false`) | May the pictures and details this user fills in be contributed back? Off by default, and the switch that matters: a photo of a card is a photo the user took, and publishing it is a decision. The editor asks again per card on top of this. |
@@ -296,7 +318,7 @@ directly.
   "app": "cardstock", "version": 1, "exportedAt": "<ISO>",
   "collection": [...], "decks": [...], "deckCards": [...],
   "history": [...], "friends": [...], "trades": [...], "wants": [...],
-  "patches": [...]
+  "patches": [...], "binders": [...], "binderCards": [...]
 }
 ```
 
@@ -304,6 +326,12 @@ directly.
 it) and always written on the way **out** — a photo the user took of their own
 card exists nowhere else in the world, so omitting it would make "restore"
 quietly lossy.
+
+`binders`/`binderCards` are optional on the way in for the same reason (nothing
+written before v9 has them) and always written out: the cards are already in
+`collection`, but the **grouping** exists nowhere else. `sanitizeBackup` forces
+any visibility it does not clearly recognise back to `private` — a restore must
+never be the thing that publishes a binder.
 
 `exportBackup({ imageBudget })` caps the imagery a backup carries, and **only
 the vault passes one** (`VAULT_IMAGE_BUDGET`, ~6 MB): it is a single text

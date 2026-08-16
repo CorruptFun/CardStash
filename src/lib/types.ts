@@ -313,6 +313,66 @@ export interface DeckCard {
   card: Card
 }
 
+/**
+ * Who may read a custom binder.
+ *
+ * The same two audiences the whole-collection binder already has (decision 16),
+ * plus the one it does not: `private`, which is never uploaded at all.
+ *
+ * `public` means **any signed-in collector**, never an anonymous caller — the
+ * same line `binders` draws. An inventory of valuable cards that a stranger
+ * with the publishable key could enumerate is the thing `trade_offers` exists
+ * to refuse; see decision 26.
+ */
+export type BinderVisibility = 'private' | 'friends' | 'public'
+
+/**
+ * A binder the user built by hand: a named selection of copies they own.
+ *
+ * Where the whole-collection binder answers "everything I have" or "everything
+ * I'll swap", these answer "my vintage Charizards" or "the box I'm selling at
+ * the weekend" — and each carries its OWN audience, so one can be public while
+ * the collection behind it stays private.
+ */
+export interface CustomBinder {
+  id: string
+  name: string
+  note?: string
+  /** Card id whose art fronts the binder in lists. */
+  coverCardId?: string
+  visibility: BinderVisibility
+  /**
+   * The copies in here are offered for trade: a `public` binder that is also
+   * tradeable enters the global want index, so collectors hunting these cards
+   * find them. Separate from visibility because "look at my collection" and
+   * "these are available" are different sentences.
+   */
+  tradeable: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * One copy in a custom binder.
+ *
+ * It points at a **collection row**, not at a card, and that is the load-bearing
+ * choice: finish, condition, grade and price all live on the row, and a binder
+ * that copied them would be a fourth denormalized `Card` to keep in step with a
+ * card patch (see `savePatch` in db.ts). Pointing at the row means a binder
+ * shows the copy the user actually owns, and a fixed picture fixes it here too.
+ * A row whose item has been deleted is dropped rather than shown hollow.
+ */
+export interface BinderCard {
+  id: string
+  binderId: string
+  /** The `CollectionItem.id` this is a copy of. */
+  itemId: string
+  /** Denormalized off the item so a binder can be listed without joining. */
+  cardId: string
+  qty: number
+  addedAt: number
+}
+
 export interface PricePoint {
   cardId: string
   /** YYYY-MM-DD */
@@ -369,6 +429,34 @@ export interface KvCacheRow {
 /* --- Social: friends & trades (no server — snapshots travel as links/files) --- */
 
 /** What a profile share includes: just the trade binder, or the whole collection. */
+/**
+ * A place a collector can be reached, shown as an icon beside their binder.
+ *
+ * A closed vocabulary rather than free text: the rendered link's destination is
+ * built from the platform, so the icon and the href can never disagree. The
+ * table, the sanitizer and the URL builder all live in `lib/profilelinks.ts`.
+ */
+export type SocialPlatform =
+  | 'instagram'
+  | 'x'
+  | 'bluesky'
+  | 'youtube'
+  | 'tiktok'
+  | 'twitch'
+  | 'discord'
+  | 'reddit'
+  | 'facebook'
+  | 'telegram'
+  | 'whatnot'
+  | 'ebay'
+  | 'website'
+
+export interface SocialLink {
+  platform: SocialPlatform
+  /** The handle without its `@` — or, for `website`, the whole https URL. */
+  value: string
+}
+
 export type ShareScope = 'trade' | 'all'
 
 /** One shared binder row — a friend's copy, or one side of a trade. */
@@ -448,6 +536,14 @@ export interface Friend {
   wants?: SharedWant[]
   /** Row-level diff produced by the latest refresh. */
   lastDelta?: FriendDelta
+  /** The social accounts they chose to show beside their binder. */
+  links?: SocialLink[]
+  /**
+   * Their published custom binders. Kept on this row rather than in a table of
+   * their own so a friend is still ONE record — one sanitizer, one backup
+   * entry, one thing to delete when they are removed.
+   */
+  binders?: SharedBinder[]
 }
 
 export type TradeStatus = 'proposed' | 'accepted' | 'declined' | 'completed' | 'canceled'
@@ -475,6 +571,24 @@ export interface TradeRecord {
  * `app: 'cardstock-social'` marker and travel deflate+base64url-encoded in
  * links, or as plain JSON in exported files. */
 
+/**
+ * A custom binder on the wire, and as a friend's app stores it.
+ *
+ * Deliberately NOT a `ProfilePayload` with a name on it: importing one must
+ * never touch the sender's main binder snapshot, and a shape that could be
+ * mistaken for a whole profile is a shape that eventually is.
+ */
+export interface SharedBinder {
+  /** The binder's own id, stable across devices and re-shares. */
+  id: string
+  name: string
+  note?: string
+  tradeable: boolean
+  /** The sender's own export stamp — the freshness test, as on a profile. */
+  at: number
+  cards: SharedCard[]
+}
+
 export interface ProfilePayload {
   kind: 'profile'
   id: string
@@ -484,6 +598,15 @@ export interface ProfilePayload {
   at: number
   cards: SharedCard[]
   wants?: SharedWant[]
+  /**
+   * Where else this collector can be reached — Instagram, Discord, a store
+   * page. It rides the binder rather than the directory profile ON PURPOSE
+   * (see `lib/profilelinks.ts`): contact details inherit the binder's
+   * scope-driven audience, where `profiles` is readable by every signed-in
+   * user. Nothing here is ever required, and a serverless share carries it
+   * exactly the same way a hosted one does.
+   */
+  links?: SocialLink[]
 }
 
 export interface TradePayload {
@@ -508,4 +631,24 @@ export interface ReplyPayload {
   note?: string
 }
 
-export type SocialPayload = ProfilePayload | TradePayload | ReplyPayload
+/**
+ * One custom binder, handed over on its own.
+ *
+ * The fourth payload kind. It carries `from` like a trade does, because a
+ * binder share has to say whose it is without claiming to be their profile —
+ * `upsertFriendBinder` files it under that collector, creating a stub for
+ * them if they are not followed yet, and never overwrites their card list.
+ */
+export interface BinderPayload {
+  kind: 'binder'
+  /** The binder id. */
+  id: string
+  at: number
+  from: { id: string; name: string }
+  name: string
+  note?: string
+  tradeable: boolean
+  cards: SharedCard[]
+}
+
+export type SocialPayload = ProfilePayload | TradePayload | ReplyPayload | BinderPayload

@@ -155,6 +155,12 @@ export function mergeBackups(local: Backup, remote: Backup): MergeResult {
     // `updatedAt` — so the device that most recently corrected a card wins,
     // regardless of which vault is newer overall.
     patches: mergeTable(local.patches ?? [], remote.patches ?? [], byField('cardId'), 'updatedAt', remoteWins, report),
+    // A binder is arrangement work — the cards are already in `collection`,
+    // the grouping is not — so it syncs like a deck: the binder row carries
+    // `updatedAt` and wins on its own recency, while its card rows have no
+    // timestamp and follow the newer vault, exactly as `deckCards` do.
+    binders: mergeTable(local.binders ?? [], remote.binders ?? [], byField('id'), 'updatedAt', remoteWins, report),
+    binderCards: mergeTable(local.binderCards ?? [], remote.binderCards ?? [], byField('id'), null, remoteWins, report),
   }
   return { merged, report }
 }

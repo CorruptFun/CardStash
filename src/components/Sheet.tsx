@@ -37,6 +37,22 @@ export function Sheet({
     }, 190)
   }, [onClose])
 
+  /**
+   * The close callback, reached through a ref so the effects below can depend
+   * on `open` ALONE.
+   *
+   * This is not a tidiness point, it is the whole correctness of the history
+   * entry. Callers pass `onClose={() => setThing(false)}` — a new function
+   * every render — so an effect depending on `close` tore down and re-ran
+   * whenever the parent re-rendered for any reason. Its cleanup calls
+   * `history.back()`, and the listener the re-run had just registered saw that
+   * as a back-button press and closed the sheet. Any sheet over a live query
+   * therefore shut itself the moment the data under it changed: adding a card
+   * to a binder closed the picker after exactly one card.
+   */
+  const closeRef = useRef(close)
+  closeRef.current = close
+
   useEffect(() => {
     if (!open) return
     const id = ++sheetSeq
@@ -44,9 +60,9 @@ export function Sheet({
     let popped = false
     const onPop = () => {
       popped = true
-      close()
+      closeRef.current()
     }
-    const onHash = () => close()
+    const onHash = () => closeRef.current()
     window.addEventListener('popstate', onPop)
     window.addEventListener('hashchange', onHash)
     return () => {
@@ -54,16 +70,16 @@ export function Sheet({
       window.removeEventListener('hashchange', onHash)
       if (shouldPopHistory(history.state, id, popped)) history.back()
     }
-  }, [open, close])
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close()
+      if (event.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, close])
+  }, [open])
 
   if (!open) return null
 
