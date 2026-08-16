@@ -29,7 +29,8 @@
     "test:messages": "node tests/harness/messages-rls.mjs",
     "test:cardsource": "node tests/harness/cardsource-rls.mjs",
     "test:mirror": "node tests/harness/catalog-rls.mjs",
-    "test:escrow": "node tests/harness/escrow-rls.mjs"
+    "test:escrow": "node tests/harness/escrow-rls.mjs",
+    "build:marketing": "node scripts/build-marketing.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -44,6 +45,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
     "@types/node": "^22.18.0",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",

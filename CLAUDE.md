@@ -19,6 +19,8 @@ chapter before a non-trivial change, and update it when behaviour changes:
 - `docs/card-data.md` — games, sources, catalog caching, pricing, portfolio/deck math
 - `docs/social.md` — serverless friends/trades/wants + hosted social + the vault
 - `docs/ui.md` · `docs/pwa-build-deploy.md` · `docs/testing.md` · `docs/privacy.md`
+- `docs/marketing.md` — the landing page (`marketing/`), what backs each claim,
+  and the claims that are false as written (encryption, escrow, the AI key)
 - `docs/extending.md` — checklists (add a game, a table, a setting, a release)
 - `docs/decisions.md` — why the load-bearing choices are what they are
 
