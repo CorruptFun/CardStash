@@ -811,13 +811,19 @@ result seems absurd, check this list before writing code.
     Design consequences if built: rank among exact-name candidates only (the
     tie-break's own candidate rule), never an absolute threshold — the
     borderless margin (22v36) is too thin for one; and the harness can develop
-    all of it taint-free (vite serves fixture images same-origin). What is NOT
-    answered: whether catalog CDNs let the LIVE app read pixels back —
-    cross-origin canvas taint — because this container's egress policy 403s
-    every card host (verified against the proxy's own status; policy denials,
-    not outages). `fetch-fixtures.mjs` now records each image host's
-    `access-control-allow-origin` into `manifest.corsProbe` with the app's
-    gh-pages origin on the request, so the next CI fixture run answers it from
-    where the egress is open. If a host answers no header, the approach dies
-    for that game's catalog and no client-side cleverness revives it — taint
-    is the server's decision, by design.
+    all of it taint-free (vite serves fixture images same-origin). The live-app
+    half — whether catalog CDNs let a canvas read pixels back, or taint it —
+    could not be asked from the sandbox (its egress policy 403s every card
+    host; verified against the proxy's own status, policy denials rather than
+    outages), so `fetch-fixtures.mjs` records each image host's
+    `access-control-allow-origin` into `manifest.corsProbe`, asked with the
+    app's gh-pages origin, and the CI fixture run ANSWERED it:
+    `cards.scryfall.io` `*`, `assets.tcgdex.net` `*`,
+    `tcgplayer-cdn.tcgplayer.com` `*`, `images.ygoprodeck.com` **no header**.
+    So the approach is live for MTG (the motivating basic-lands case),
+    Pokémon and every TCGplayer-served game, and dead for Yu-Gi-Oh's catalog
+    images — an acceptable loss, since Yu-Gi-Oh identifies by passcode and
+    its printing column is excluded (lesson 63) — unless YGOPRODeck changes
+    headers; no client-side cleverness revives a tainting host, by design.
+    Remember `crossOrigin='anonymous'` on the img/fetch: without it the
+    browser never sends Origin and the canvas taints even on a `*` host.
