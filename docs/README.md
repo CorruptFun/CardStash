@@ -14,6 +14,10 @@ self-hosted sync box the user opts into — the app must work fully without it.
 
 Live: <https://corruptfun.github.io/CardStash/> · Source of truth: `main`.
 
+> **Open jobs:** [pending-migrations.md](pending-migrations.md) — `0017`, `0019`
+> and `0020` are written and deployed against but have not been applied to the
+> live project. Delete that file once they have.
+
 ## Read in this order
 
 | # | Document | What it answers |

@@ -8,6 +8,13 @@ social, and paid trades — all dormant until switched on, and paid trades is
 switched **off** in the deployed build. Signed out, the app must always work
 fully: scanning, collection, decks and link sharing never touch a server.
 
+> **⚠ UNAPPLIED MIGRATIONS — `0019_messaging`, `0020_custom_binders`.** Both
+> shipped to `main` and `gh-pages` ahead of their schema. Messaging and hosted
+> binder publishing fail (caught, so nothing else degrades) until someone runs
+> `supabase db push` plus `npm run test:messages` and `npm run test:social`
+> from a machine with project access. Read `docs/pending-migrations.md` first
+> and delete it when done. (`0017_referral_friendship` is in the same state.)
+
 ## Where the full documentation is
 
 This file is the short brief. `docs/` is the long form — read the relevant
@@ -21,6 +28,8 @@ chapter before a non-trivial change, and update it when behaviour changes:
 - `docs/ui.md` · `docs/pwa-build-deploy.md` · `docs/testing.md` · `docs/privacy.md`
 - `docs/extending.md` — checklists (add a game, a table, a setting, a release)
 - `docs/decisions.md` — why the load-bearing choices are what they are
+- `docs/pending-migrations.md` — **temporary**: schema written and deployed
+  against but not yet applied. Delete the file once it is
 
 ## History you should know
 
