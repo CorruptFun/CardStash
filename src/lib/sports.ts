@@ -21,6 +21,12 @@
  *    by the eBay sold-comps link this module builds. Anything else would be
  *    inventing numbers about someone's money.
  *
+ *    `ebaycomps.ts` now puts a NUMBER beside that link — the spread of active
+ *    eBay listings, fetched only when the collector taps for it and applied
+ *    only when they accept it (decision 17a). Note what did not change: a
+ *    `Card` built here still carries no prices, because an asking price is
+ *    not a market price and must never enter portfolio maths on its own.
+ *
  * "Search" is local recall rather than a lookup: the cards this user has
  * already identified, which live on their collection rows and scan history.
  * That is genuinely all the catalog that exists for them, and it needs no
@@ -138,6 +144,20 @@ function describeCard(info: SportsInfo): string | undefined {
  * there is one, because a PSA 10 and a raw copy are different markets.
  */
 export function sportsCompLink(card: Card, grade?: { company: string; grade: number }): string {
+  const query = sportsCompTerms(card, grade)
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=13`
+}
+
+/**
+ * The search terms themselves, shared by the link above and the live comp
+ * lookup in `ebaycomps.ts`.
+ *
+ * One function on purpose: the number the app shows and the eBay page it sends
+ * the user to check it against must be answers to the same question. Two term
+ * lists would drift, and the failure would look like the app lying — a median
+ * on screen that the linked search does not contain.
+ */
+export function sportsCompTerms(card: Card, grade?: { company: string; grade: number }): string {
   const info = card.sports
   const terms = [
     info?.year != null ? String(info.year) : '',
@@ -149,8 +169,7 @@ export function sportsCompLink(card: Card, grade?: { company: string; grade: num
     info?.serial ? `/${info.serial.of}` : '',
     grade ? `${grade.company} ${grade.grade}` : '',
   ]
-  const query = terms.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=13`
+  return terms.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
 }
 
 /* --- local recall --------------------------------------------------------

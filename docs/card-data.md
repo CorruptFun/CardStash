@@ -95,6 +95,8 @@ construction. Value comes from two places:
 - **eBay sold comps** — `sportsCompLink` builds the query a collector would
   type (year, brand, product, player, `#number`, parallel, `/run`, and the
   grade when there is one). This is what the hobby actually prices on.
+- **A live comp spread** — the same query, run against eBay's *active*
+  listings, described below.
 
 A bulk price refresh **skips** sports rather than counting every row as a
 failure; `refreshCards` filters them and they surface as "skipped".
@@ -102,6 +104,44 @@ failure; `refreshCards` filters them and they surface as "skipped".
 Do not add a paid price API on the free path. If one is ever wired up it
 belongs behind a user-supplied key (like `pokemonKey`) or the entitlement seam
 in `entitlement.ts`, and scanning must keep working without it.
+
+### The comp lookup (`ebaycomps.ts` + `ebay-comps`)
+
+The link above was the whole answer until a number could be put beside it
+honestly. It can now, with a narrow definition of "honestly" — decision 17a.
+
+**What it is.** `supabase/functions/ebay-comps` searches eBay's Browse API for
+the card and returns `{ count, scanned, low, median, high, kind: 'asking' }`.
+`lib/ebaycomps.ts` asks for it, caches it and hands it to `PriceCheck.tsx`.
+
+**What it is not.** eBay's sold-comp feed (Buy → Marketplace Insights) is a
+limited release that is not open to new applications, so these are **asking
+prices on active listings** — what sellers want, not what anyone paid. Every
+layer says so: the field is called `kind: 'asking'`, the UI prints "asking
+prices, not sales" under the spread, and the sold-comps link sits beside it.
+
+Five properties are load-bearing:
+
+| Property | Why |
+| -------- | --- |
+| It never writes `card.prices` | An asking price in `prices.entries` would enter portfolio totals, price history and every shared binder, for cards nobody looked at. It becomes `CollectionItem.marketValue` **only** when the collector taps "Use $X". |
+| Nothing is fetched until tapped | No prefetch, no bulk sweep, no background refresh. Which cards someone is pricing is not a stream this app should emit by default — and a tap is consent, which is why there is no settings switch (`cardSourceLookup` needed one because it fires automatically). |
+| The proxy is not optional | eBay sends no CORS headers, and the client-credentials grant needs a client **secret** — unlike the PSA token, that cannot ship in a bundle at all. |
+| It is called anonymously | Publishable key, `verify_jwt = false`, no session token. The free path is signed out, and what card someone is pricing should not be tied to a user id (decision 20's rule). |
+| A thin sample is refused | `MIN_COMPARABLES` is 3, after lots/repacks/reprints are dropped by title and outliers by a five-fold band around the median. Below that the answer is "too few listings", not a number. |
+
+**Turning it on.** Set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` on the
+function (an eBay developer account, production keyset — the Browse API needs
+no special approval). With either missing, the function answers 503 and the app
+shows the link alone, exactly as before. Optional: `EBAY_MARKETPLACE`
+(`EBAY_US`), `EBAY_CATEGORY` (`261328`, "Sports Trading Card Singles" — the
+scoping that keeps a player name from returning jerseys and posters).
+
+**The quota.** eBay's default Browse allowance is a few thousand calls a day
+for the *application*, shared across all users — the same arithmetic as the PSA
+token. Two caches answer it: an hour in the function's isolate, a day on the
+device (three days for "too few"), so a popular card costs eBay one call an
+hour for everybody. A 429 stands the device down for six hours.
 
 ### Local recall is the catalog
 

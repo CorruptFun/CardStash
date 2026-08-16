@@ -434,3 +434,12 @@ verify_jwt = false
 # could force every pending payout in the system to release early.
 [functions.stripe-escrow-sweep]
 verify_jwt = false
+
+# Sports price comps. The free path is SIGNED OUT, so a price check that
+# required a JWT would make the app's most basic question -- "what is this
+# worth?" -- an account feature; and what card someone is pricing is not a fact
+# worth tying to a user id (decision 20's rule). The function is called with the
+# publishable key alone, exactly as `lookup_card_data` is, and is written to be
+# safe under that: no money, no user data, a capped query and a cached answer.
+[functions.ebay-comps]
+verify_jwt = false

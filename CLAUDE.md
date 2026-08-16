@@ -498,6 +498,17 @@ closed vocabularies rather than open guessing, and **sports never joining the
 auto-mode sweep** (`sweepable` in `identify.ts`). Sports cards carry no prices
 at all; value is the collector's `CollectionItem.marketValue`. See decision 17.
 
+Sports cards do now carry a **comp**, and the distinction is the whole of
+decision 17a: `ebaycomps.ts` + `supabase/functions/ebay-comps` return the
+spread of ACTIVE eBay listings (asking prices — the sold-comp API is a limited
+release we do not have). Four rules keep that from becoming a price feed: it
+never writes `card.prices`, only `CollectionItem.marketValue` and only when the
+user taps "Use $X"; nothing is fetched until tapped, which is why it needs no
+settings switch; it is low/median/high with the sample size, never one figure;
+and under three surviving listings the answer is "too few", not a number. The
+call is anonymous (publishable key, `verify_jwt = false`) because the free path
+is signed out. Dormant without `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`.
+
 Grades live on `CollectionItem`, never on `Card`, for every game — see decision
 18. `slab.ts` owns `sanitizeGrade`, reused by the backup and social paths.
 

@@ -72,6 +72,7 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `sports.ts` / `sportsparse.ts` | 280 / 470 | Sports cards. **No catalog exists**, so `sportsparse` (pure, node-testable) reads the identity off the card and `sports.ts` synthesizes the `Card`. Search is local recall over the collection and scan tables. |
 | `slab.ts` | 200 | Graded-slab labels: company, grade, cert, qualifier — pure, and the home of `sanitizeGrade`, which the backup and social paths both reuse. |
 | `psa.ts` | 230 | PSA cert lookup with our compiled-in token. Non-fatal on every failure, dormant when the build ships no token, and quota-aware (a 429 stands lookups down for hours). |
+| `ebaycomps.ts` | 190 | Sports comps: the spread of active eBay listings for one card, through our `ebay-comps` function. User-initiated only, never written to `card.prices`, dormant with no project configured. |
 | `prices.ts` | 213 | Price entry selection, condition factors, per-item unit price, comps pivot, money parsing. |
 | `portfolio.ts` | 270 | Value time series, cost basis / P&L, movers, per-card trend. |
 | `deckstats.ts` | 253 | Boards, per-game deck rules and warnings, curve/colour/type stats, owned-vs-missing, decklist text. |
@@ -205,6 +206,7 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | `api.lorcast.com` | Lorcana | read |
 | `tcgcsv.com` | Catalog games + sealed products for every game | read |
 | `api.psacard.com` | Slab scan with a cert; our compiled-in token, dormant if the build has none | read |
+| `ebay-comps` on our own project → `api.ebay.com` | Only when the user taps "Check eBay prices" on a sports card. Anonymous (publishable key, no session token); the eBay secret never leaves the function | read |
 | card image CDNs | `<img>` loads only | read |
 | `generativelanguage.googleapis.com` | AI deck builder, only with a user-supplied key | write prompt |
 | `accounts.google.com` / `www.googleapis.com` | Only with Drive backup on, and only after the user connects | read/write, to the user's own Drive |
