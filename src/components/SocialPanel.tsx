@@ -117,6 +117,8 @@ export function SocialPanel() {
       if (summary.friendsUpdated) parts.push(`${summary.friendsUpdated} updated`)
       if (summary.tradesReceived) parts.push(`${summary.tradesReceived} new trade${summary.tradesReceived === 1 ? '' : 's'}`)
       if (summary.repliesApplied) parts.push(`${summary.repliesApplied} repl${summary.repliesApplied === 1 ? 'y' : 'ies'}`)
+      if (summary.messagesWaiting)
+        parts.push(`${summary.messagesWaiting} unread message${summary.messagesWaiting === 1 ? '' : 's'}`)
       toast(parts.length ? `Synced — ${parts.join(' · ')}` : 'Synced — nothing new', 'success')
     })
 

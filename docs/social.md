@@ -50,7 +50,7 @@ Three kinds, all carrying `app: 'cardstock-social', v: 1`:
 
 | Kind | Built by | Contents |
 | ---- | -------- | -------- |
-| `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]` |
+| `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]`, `links?: SocialLink[]` |
 | `trade` | `buildTradePayload(trade, me)` | `id`, `at`, `from`, `to?`, `note?`, `offer` (what the sender hands over), `want` (what they want back) |
 | `reply` | `buildReplyPayload(trade, me, status, note)` | `id`, `at`, `from`, `status: accepted \| declined`, `note?` |
 
@@ -73,6 +73,38 @@ never an **opened** sealed product.
 `SharedCard.price` is the finish's market unit **without** the condition factor
 applied; `sharedRowValue()` multiplies it in on the viewer's side. Both sides
 therefore agree on the maths even if their app versions differ.
+
+## Social profile links
+
+A collector can show where else to find them — Instagram, Discord, a Whatnot
+store — as tappable icons under their name on their binder. `lib/profilelinks.ts`
+is the whole pure half; `settings.profileLinks` is where mine live;
+`components/ProfileLinks.tsx` is the editor and the icon row.
+
+**They ride the binder, not the directory profile,** and that is the decision
+rather than an implementation detail. `profiles` (migration 0001) is readable by
+every signed-in user and its own header says it carries identity ONLY — the
+contact blurb lives on the binder row precisely so it inherits scope-driven
+visibility. Links are the same class of fact, so they go the same way. Three
+things follow:
+
+- their audience is the **binder's** audience: anyone you send a link to, plus
+  every signed-in collector under `scope: 'trade'`, or accepted friends only
+  under `scope: 'all'`;
+- they work with **no account at all** — they travel in a `#/x?d=…` link and a
+  `.json` file like the note beside them;
+- moving them to `profiles` later would silently widen them to every stranger
+  in the directory. Don't.
+
+**The vocabulary is closed and the URL is built, never stored.** A handle-kind
+link stores the *handle*; `socialLinkUrl()` builds the href from a table. That
+makes "the icon matches the destination" a property of the code rather than a
+promise about data that arrived over the wire — an `<a href>` rendered from a
+stranger's payload is otherwise a stored redirect wearing an Instagram glyph.
+`website` is the one kind that holds a URL, is `https:`-only, and renders as a
+neutral globe. Discord has no profile page, so it is copy-to-clipboard rather
+than a link to a 404. Capped at 8 per profile, one per platform, sanitized on
+the way in *and* on the way out of localStorage.
 
 ## Wire format
 
@@ -178,7 +210,8 @@ the same treatment as a pasted link.
 
 Accounts, mutual friends, a trade inbox and global want-matching, on the same
 project that already holds the cloud vault. Schema in `supabase/migrations/`
-(`0001`–`0004`); applied and verified against the live project 2026-08-14.
+(`0001`–`0004`, plus `0017` for messages); the first four were applied and
+verified against the live project 2026-08-14.
 
 **It is dormant until the user opts in.** Signed out, none of this runs and the
 link path behaves exactly as it always has.
@@ -607,6 +640,81 @@ on free users the tiering explicitly keeps free.
 
 ---
 
+## Messages (v0.19.0)
+
+Two collectors talking about a card: `supabase/migrations/0017`,
+`lib/messaging.ts`, `views/MessagesView.tsx`. Read decision 24 before touching
+any of it.
+
+**It is not the trade inbox, and it must not become it.** `inbox` (0004) is
+recipient-read-only, sender-stamped, drained-and-deleted, 30-day TTL, capped at
+20 undrained per pair. Every one of those is right for handing someone a trade
+payload and wrong for a conversation — a sender who cannot read the thread back
+cannot see what they said. This document said the inbox was not the channel for
+this. It still is not.
+
+| | `inbox` | `messages` |
+| --- | --- | --- |
+| Read by | recipient only | both participants |
+| Lifetime | deleted on drain, 30-day TTL | kept, 365-day prune |
+| Carries | a whole `TradePayload` | text, plus one optional `SharedCard` |
+| Cap | 20 undrained per pair | 15 unanswered per pair, 120/hour globally |
+
+**Who may open one** is the `send_to_inbox()` rule plus one clause: accepted
+friends, anyone publishing a `scope='trade'` binder, **or anyone who has already
+spoken to you**. That last one is not politeness — without it, answering someone
+who unpublished between their message and your reply fails, and the person who
+started the conversation is the one who gets ignored. Publish nothing and accept
+nobody and you are unreachable, which stays the correct default.
+
+**Routed by the person, not the thread.** `#/messages/<their account id>` opens
+the conversation whether or not one exists yet, so "message this collector" is
+the same link from a binder, a card sheet and a want match, and there is no
+separate new-thread state to fall out of step. The thread id is a server detail.
+
+**Nothing is stored locally.** No Dexie table, for `marketplace.ts`'s reason and
+one more: Dexie rows ride `exportBackup`, the CSV export and the daily Drive
+backup, and a private conversation with somebody else does not belong in a file
+the user hands around. Threads are fetched; the screens say so when they cannot.
+
+**Plaintext, and the copy says so.** `binders` is plaintext because a friend's
+app has to read it; this is plaintext for exactly the same reason, and the
+vault's encryption (15b — a key we hold) does not extend here. What it is
+instead is *bounded*: text and one card reference. No attachments, no images,
+no addresses — there is nowhere to put one.
+
+**Blocking is one-sided and silent.** `set_thread_block` sets my side only. The
+thread leaves my list; their messages are still accepted and stored; they are
+never told. That mirrors `request_friend()` returning `pending` to someone who
+has been blocked, and for the same reason: being told is an instruction to make
+a second account. Messaging them again lifts my own block and never touches
+theirs.
+
+**Nothing may write these tables directly.** No INSERT/UPDATE/DELETE policy and
+no grant beyond `select` — the denormalized preview, the read watermarks and the
+block flags are all things a client could otherwise forge about the *other*
+person's row. `send_message` / `mark_thread_read` / `set_thread_block` /
+`list_threads` are the only doors.
+
+**`erase_social()` takes conversations with it** — 0017 replaces 0004's version
+rather than adding a second RPC, because a "delete everything" button that
+needs two calls is one forgotten call away from being a lie. It still leaves
+`vaults` alone, and still leaves `orders` alone.
+
+Two client rules worth keeping: the unread badge is a **cache** (`messageUnread`
+in settings) so it is right on the first frame after a cold launch, corrected by
+every poll and cleared on sign-out; and the `about` block goes through
+`sanitizeSharedCard` — the same door a `#/x?d=…` link uses — so a message cannot
+smuggle in a card shape a share link could not.
+
+Verification is `npm run test:messages` (`tests/harness/messages-rls.mjs`), the
+sibling of `test:social`: five signed-in users and one anonymous caller over
+reachability, third-party reads, forged writes, the caps, the block, erasure and
+the same control tests, so a refusal is provably a refusal. Run it after any
+migration touching `messages` or `message_threads`.
+
+---
+
 ## Paid trades (v0.18.0, in progress)
 
 Everything above is barter: cards for cards, no money anywhere in the model.
@@ -641,6 +749,9 @@ sender-stamped, 30-day TTL, capped at 20 undrained per pair — built for handin
 someone a trade payload, not for a shipping conversation. An order deliberately
 carries no free-text field either: the moment one exists it is an unmoderated
 message channel between two people who are, by construction, in a dispute.
+`messages` (above) does not change that: it is a channel between two people
+*before* anyone has agreed anything, it is not attached to an order, and an
+order still has no free-text field.
 
 **Verification** is `npm run test:escrow` (`tests/harness/escrow-rls.mjs`), the
 sibling of `test:social` — 45 assertions over buyer, seller, stranger and anon,

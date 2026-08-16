@@ -904,3 +904,116 @@ index. Or contributions arriving faster than one person can moderate, at which
 point the flag threshold stops being enough and this needs a review queue —
 that is a scale problem to solve when it exists, not a reason to build a
 moderation console for a table with nothing in it.
+
+### 23. Where a collector can be found rides the binder, not the directory
+
+Collectors asked to show their Instagram, Discord and Whatnot beside their
+binder. The obvious place is the `profiles` row — it is the identity table, it
+already has a display name, and one more column is cheap.
+
+**It is the wrong place, and migration 0001 says why in its own header.**
+`profiles` is readable by *every signed-in user*, because resolving `@rae` to a
+user id is what a directory is for, and a directory nobody can read is not one.
+So it carries identity **only**. The contact blurb ("DM @rae on Discord") was
+deliberately put on the binder row instead, where it inherits the visibility
+rule: `scope='trade'` means any signed-in collector, `scope='all'` means
+accepted friends. Social links are the same class of fact — how to reach a
+person — so they go the same way, as `ProfilePayload.links` and
+`Friend.links`.
+
+Three things fall out of that, and all three are the point rather than a cost:
+
+- **The audience is the binder's audience**, which the user already chose with
+  a control they already understand. No second privacy toggle was added, for
+  the same reason 0003 reused the scope control rather than adding one.
+- **It works with no account at all.** Links travel in a `#/x?d=…` link and in
+  a `.json` file exactly like the note beside them. Putting them on `profiles`
+  would have made a serverless share strictly worse than a hosted one, which
+  decision 6 forbids.
+- **Moving them later widens them silently.** A column on `profiles` is visible
+  to every stranger in the directory the moment it exists, with no migration
+  and no notice to the people whose links they are.
+
+**The vocabulary is closed and the URL is built, never stored.** A handle-kind
+link stores the handle; `socialLinkUrl()` builds the href from a table in
+`lib/profilelinks.ts`. This is the security half. Every one of these ends up as
+an `<a href>` in someone else's app, rendered from a document that arrived over
+the wire from a person the reader has never met — and a stored URL is a stored
+redirect: the icon says Instagram and the destination says whatever the sender
+typed. Building it makes "the icon matches the destination" a property of the
+code. `website` is the single exception, is `https:`-only, and renders as a
+neutral globe rather than borrowing anyone's mark.
+
+**What it costs.** A closed list needs editing when a platform people actually
+use is missing, and `website` is the escape hatch until then. Handle formats
+are the platforms' business and they change them; the table is one edit and the
+stored data does not migrate, which is the other reason not to store URLs.
+
+**What would reopen it.** Wanting a link visible to people who have *not* been
+given the binder — a public profile page. That is a different feature with a
+different audience, and it would need its own decision rather than a column
+quietly added to `profiles`.
+
+### 24. Messaging is its own subsystem, and it is not the trade inbox
+
+People buying and selling cards need to talk: is it still available, will you
+take $12, can you ship Tuesday. Today that conversation happens on Discord and
+Instagram — outside the app that knows which card is being discussed.
+
+Two existing things looked like they could carry it, and neither can.
+
+**Not `inbox` (0004).** It is recipient-read-only, sender-stamped,
+drained-and-deleted, 30-day TTL, capped at 20 undrained per pair. Every one of
+those properties is correct for handing someone a trade payload and wrong for a
+conversation: a sender who cannot read the thread back cannot see what they
+said, and a row deleted on read is not a history. Widening it would have taken
+each of those guarantees away from the thing they were built for.
+
+**Not `orders` (0006).** Decision 19 refused a free-text field on an order and
+that refusal stands: a message box attached to a payment is an unmoderated
+channel between two people who are, by construction, in a dispute, and it
+invites "just send me the money directly" next to a button that would have
+escrowed it. `messages` is the conversation *before* anyone agrees anything. It
+is not attached to an order, and an order still has no free-text field.
+
+So: `message_threads` + `messages` (0017), one row per pair, both participants
+reading, RPCs as the only writers.
+
+**Who may open one** is the `send_to_inbox()` rule plus "they spoke to me
+first" — friends, `scope='trade'` publishers, or anyone already in the
+conversation. Publishing nothing and accepting nobody leaves you unreachable,
+which is the correct default and the same one the inbox already had.
+
+**It is plaintext to us, and the copy in the composer says so.** `binders` is
+plaintext because a friend's app has to read it; this is plaintext for exactly
+the same reason. Decision 15b's honesty rule applies — never describe it as
+unreadable by us. What it is instead is **bounded**: text and one optional card
+reference. No attachments, no images, no addresses; there is nowhere to put
+one, which removes the worst payload class by construction rather than by
+policy.
+
+**Blocking is one-sided and silent**, mirroring `request_friend()` returning
+`pending` to someone who has been blocked. The thread leaves the blocker's
+list, the sender's own history is untouched, and they are never told — being
+told is an instruction to make a second account.
+
+**Nothing is stored locally.** No Dexie table, for `marketplace.ts`'s reason
+(a shared fact whose every button needs the network) plus one more: Dexie rows
+ride `exportBackup`, the CSV export and the daily Drive backup, and a private
+conversation with somebody else does not belong in a file the user hands
+around.
+
+**What it costs, stated rather than discovered later.** This is the first
+unmoderated person-to-person channel in the product. The caps (15 unanswered
+per pair, 120 an hour) and the reachability rule bound the spam; blocking
+bounds the individual case. There is no reporting queue and no moderation
+console, because there is nothing in the table yet — and building one for an
+empty table is how the wrong one gets built. It is also a standing cost we did
+not have: conversations are plaintext rows we hold about people, which is why
+`erase_social()` was extended rather than left alone, and why the prune exists.
+
+**What would reopen it.** Volume that makes blocking insufficient — at which
+point this needs a report path and someone to read it, and the honest options
+are a review queue or turning it off, not a stricter cap. Or attachments, which
+would be a new decision about storage, moderation and cost, not an extension of
+this one.

@@ -369,6 +369,34 @@ export interface KvCacheRow {
 /* --- Social: friends & trades (no server — snapshots travel as links/files) --- */
 
 /** What a profile share includes: just the trade binder, or the whole collection. */
+/**
+ * A place a collector can be reached, shown as an icon beside their binder.
+ *
+ * A closed vocabulary rather than free text: the rendered link's destination is
+ * built from the platform, so the icon and the href can never disagree. The
+ * table, the sanitizer and the URL builder all live in `lib/profilelinks.ts`.
+ */
+export type SocialPlatform =
+  | 'instagram'
+  | 'x'
+  | 'bluesky'
+  | 'youtube'
+  | 'tiktok'
+  | 'twitch'
+  | 'discord'
+  | 'reddit'
+  | 'facebook'
+  | 'telegram'
+  | 'whatnot'
+  | 'ebay'
+  | 'website'
+
+export interface SocialLink {
+  platform: SocialPlatform
+  /** The handle without its `@` — or, for `website`, the whole https URL. */
+  value: string
+}
+
 export type ShareScope = 'trade' | 'all'
 
 /** One shared binder row — a friend's copy, or one side of a trade. */
@@ -448,6 +476,8 @@ export interface Friend {
   wants?: SharedWant[]
   /** Row-level diff produced by the latest refresh. */
   lastDelta?: FriendDelta
+  /** The social accounts they chose to show beside their binder. */
+  links?: SocialLink[]
 }
 
 export type TradeStatus = 'proposed' | 'accepted' | 'declined' | 'completed' | 'canceled'
@@ -484,6 +514,15 @@ export interface ProfilePayload {
   at: number
   cards: SharedCard[]
   wants?: SharedWant[]
+  /**
+   * Where else this collector can be reached — Instagram, Discord, a store
+   * page. It rides the binder rather than the directory profile ON PURPOSE
+   * (see `lib/profilelinks.ts`): contact details inherit the binder's
+   * scope-driven audience, where `profiles` is readable by every signed-in
+   * user. Nothing here is ever required, and a serverless share carries it
+   * exactly the same way a hosted one does.
+   */
+  links?: SocialLink[]
 }
 
 export interface TradePayload {

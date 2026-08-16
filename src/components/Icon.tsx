@@ -189,6 +189,118 @@ const PATHS: Record<string, JSX.Element> = {
   heart: (
     <path d="M12 20.2C6.8 16.7 3.6 13.5 3.6 10c0-2.6 2-4.8 4.6-4.8 1.5 0 2.9.7 3.8 1.9.9-1.2 2.3-1.9 3.8-1.9 2.6 0 4.6 2.2 4.6 4.8 0 3.5-3.2 6.7-8.4 10.2Z" />
   ),
+  message: (
+    <>
+      <path d="M20.2 12.6c0 3.9-3.7 7-8.2 7-1 0-2-.15-2.9-.44L4.2 20.4l1.3-3.6c-1-1.2-1.6-2.6-1.6-4.2 0-3.9 3.6-7 8.1-7s8.2 3.1 8.2 7Z" />
+    </>
+  ),
+  send: (
+    <>
+      <path d="M20.4 3.6 3.9 10.2l6.3 2.4 2.4 6.3 7.8-15.3Z" />
+      <path d="m10.2 12.6 4.4-4.4" />
+    </>
+  ),
+  block: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="m6.2 6.2 11.6 11.6" />
+    </>
+  ),
+  /* --- brand marks -------------------------------------------------------
+     Drawn in the same stroke family as everything above rather than dropped
+     in as the platforms' own filled logos: an icon row that mixes twelve
+     official brand colours reads as an advertising strip, and each of those
+     logos comes with its own trademark rules about spacing and recolouring.
+     These are recognisable silhouettes at 16px, which is the whole job — the
+     accessible name beside each one says which platform it actually is. */
+  brandInstagram: (
+    <>
+      <rect x="3.8" y="3.8" width="16.4" height="16.4" rx="4.6" />
+      <circle cx="12" cy="12" r="3.9" />
+      <circle cx="16.7" cy="7.3" r="0.9" fill="currentColor" stroke="none" />
+    </>
+  ),
+  brandX: <path d="m4.4 4.2 15.2 15.6M19.6 4.2 4.4 19.8" />,
+  brandBluesky: (
+    <>
+      <path d="M12 16.4C10.2 12.9 7.2 10.3 4.6 8.6 3.4 7.8 2.9 8.9 3.2 10.6c.2 1.4.8 4 1.2 4.8.5 1 1.7 1.4 3.1 1.2 1.3-.2 3-.3 4.5-.2Z" />
+      <path d="M12 16.4c1.8-3.5 4.8-6.1 7.4-7.8 1.2-.8 1.7.3 1.4 2-.2 1.4-.8 4-1.2 4.8-.5 1-1.7 1.4-3.1 1.2-1.3-.2-3-.3-4.5-.2Z" />
+    </>
+  ),
+  brandYoutube: (
+    <>
+      <rect x="2.8" y="5.4" width="18.4" height="13.2" rx="3.8" />
+      <path d="m10.3 9.2 5.2 2.8-5.2 2.8V9.2Z" />
+    </>
+  ),
+  brandTiktok: (
+    <>
+      <path d="M14.2 3.4v10.9a4 4 0 1 1-3.4-4" />
+      <path d="M14.2 3.4c.4 2.6 2 4.1 4.6 4.3" />
+    </>
+  ),
+  brandTwitch: (
+    <>
+      <path d="M4.4 3.8h15.2v10L15.4 18h-3l-2.9 2.6V18H4.4V3.8Z" />
+      <path d="M11.4 8v4.4M15.6 8v4.4" />
+    </>
+  ),
+  brandDiscord: (
+    <>
+      <path d="M8.6 5.6C6.1 6.2 4.4 7.3 4.4 7.3 3.3 9.9 2.9 12.6 3.1 15.4c1.7 1.3 3.4 2.1 5 2.6l1.1-1.7" />
+      <path d="M15.4 5.6c2.5.6 4.2 1.7 4.2 1.7 1.1 2.6 1.5 5.3 1.3 8.1-1.7 1.3-3.4 2.1-5 2.6l-1.1-1.7" />
+      <path d="M8.5 16.3c2.3.8 4.7.8 7 0" />
+      <path d="M9.3 5.2c1.8-.3 3.6-.3 5.4 0" />
+      <circle cx="9.4" cy="12.2" r="1.3" />
+      <circle cx="14.6" cy="12.2" r="1.3" />
+    </>
+  ),
+  brandReddit: (
+    <>
+      <circle cx="12" cy="13.4" r="7.2" />
+      <path d="M14.4 6.6 15.2 3l3.2.8" />
+      <circle cx="18.4" cy="3.8" r="1.5" />
+      <circle cx="9.5" cy="12.9" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="12.9" r="1.1" fill="currentColor" stroke="none" />
+      <path d="M9.4 16.4c1.6 1.1 3.6 1.1 5.2 0" />
+    </>
+  ),
+  brandFacebook: (
+    <>
+      <rect x="3.8" y="3.8" width="16.4" height="16.4" rx="4.2" />
+      <path d="M15.2 8.2h-1.6a2 2 0 0 0-2 2v10M9.6 12.6h4.6" />
+    </>
+  ),
+  brandTelegram: (
+    <>
+      <path d="M20.6 4.4 3.6 11l4.9 1.8 1.7 5.6 2.7-3.1" />
+      <path d="m8.5 12.8 12.1-8.4-3.4 14.2-4.3-3.1" />
+    </>
+  ),
+  /* Whatnot is a live-auction stream, so it gets the broadcast glyph rather
+     than an attempt at its wordmark. */
+  brandWhatnot: (
+    <>
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M7.6 7.6a6.2 6.2 0 0 0 0 8.8M16.4 16.4a6.2 6.2 0 0 0 0-8.8" />
+      <path d="M4.8 4.8a10.2 10.2 0 0 0 0 14.4M19.2 19.2a10.2 10.2 0 0 0 0-14.4" />
+    </>
+  ),
+  /* eBay is a listing, and a price tag is the one shape everything in this app
+     already reads as "something for sale". */
+  brandEbay: (
+    <>
+      <path d="M11.2 3.6H19a1.4 1.4 0 0 1 1.4 1.4v7.8a1.4 1.4 0 0 1-.4 1l-7.4 7.4a1.4 1.4 0 0 1-2 0l-7.4-7.4a1.4 1.4 0 0 1 0-2l7.4-7.4a1.4 1.4 0 0 1 .6-.8Z" />
+      <circle cx="16.2" cy="7.8" r="1.4" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M3.8 12h16.4" />
+      <path d="M12 3.8c2.2 2.4 3.3 5.2 3.3 8.2S14.2 17.8 12 20.2c-2.2-2.4-3.3-5.2-3.3-8.2S9.8 6.2 12 3.8Z" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

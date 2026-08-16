@@ -22,6 +22,7 @@ import { track } from './analytics'
 import { authHeaders, CloudError, currentUserId, freshToken, isSignedIn, readError } from './authsession'
 import { CLOUD_AVAILABLE, SUPABASE_URL } from './cloudconfig'
 import { applyTradeReply, db, recordIncomingTrade, upsertFriendFromProfile } from './db'
+import { refreshUnread, resetUnread } from './messaging'
 import { settings } from './settings'
 import { buildProfilePayload, myProfile, sanitizePayload, wantKeyFor } from './social'
 import type { ProfilePayload, ReplyPayload, SocialPayload, TradePayload } from './types'
@@ -35,6 +36,9 @@ export interface SocialProfile {
   handle: string
   displayName: string
 }
+
+/** A Supabase account id, as opposed to a legacy link-imported `uid()`. */
+const IS_USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export interface FriendRequest extends SocialProfile {
   at: number
@@ -53,6 +57,8 @@ export interface SocialSummary {
   friendsUpdated: number
   tradesReceived: number
   repliesApplied: number
+  /** Unread messages across every conversation, after this sync. */
+  messagesWaiting: number
 }
 
 /** A project is configured at all — a fork without one never sees this UI. */
@@ -233,6 +239,19 @@ export function hydrateIdentity(): Promise<unknown> {
   return hydrating
 }
 
+/**
+ * The collector behind an account id.
+ *
+ * The mirror of `lookupHandle`, and it exists because a conversation is
+ * addressed to an account: the messages screen is handed a user id by whatever
+ * sent the user there and still has to put a name at the top of it.
+ */
+export async function lookupProfileById(userId: string): Promise<SocialProfile | null> {
+  if (!userId || !IS_USER_ID.test(userId)) return null
+  const rows = await rest<ProfileRow[]>(`/profiles?user_id=eq.${userId}&select=user_id,handle,display_name`)
+  return rows?.length ? toProfile(rows[0]) : null
+}
+
 export async function lookupHandle(handle: string): Promise<SocialProfile | null> {
   const clean = handle.trim().toLowerCase().replace(/^@/, '')
   if (!clean) return null
@@ -398,8 +417,6 @@ interface BinderRow {
   payload?: unknown
 }
 
-const IS_USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 /**
  * Re-read every binder I am entitled to and that actually moved.
  *
@@ -550,6 +567,9 @@ export async function eraseSocial(): Promise<void> {
   // reclaiming the same name rather than finding a stranger wearing it.
   hydrating = null
   settings().set({ socialOn: false, socialHandle: '', socialCursor: 0, socialAt: 0 })
+  // The conversations went with the profile row (0017's erase_social), so a
+  // badge counting them is now counting nothing.
+  resetUnread()
 }
 
 /* ---------------------------------------------------------------- the loop */
@@ -558,7 +578,15 @@ let running = false
 
 export async function syncSocialNow(force = false): Promise<SocialSummary> {
   if (!socialConfigured()) throw new CloudError('Claim a handle first')
-  if (running) return { published: false, friendsUpdated: 0, tradesReceived: 0, repliesApplied: 0 }
+  if (running) {
+    return {
+      published: false,
+      friendsUpdated: 0,
+      tradesReceived: 0,
+      repliesApplied: 0,
+      messagesWaiting: settings().messageUnread,
+    }
+  }
   running = true
   try {
     // Friends and the inbox are pulled whether or not I publish: someone who
@@ -567,6 +595,13 @@ export async function syncSocialNow(force = false): Promise<SocialSummary> {
     const published = settings().socialOn ? await publishBinder(force) : false
     const friendsUpdated = await pullFriends()
     const inbox = await drainInbox()
+    // Messages are pulled on the same terms as the inbox — having a handle is
+    // enough, publishing is not required. Someone who put no cards up can
+    // still be asked about the ones they have, and a failure here must not
+    // cost the friend refresh that already succeeded.
+    const messagesWaiting = await refreshUnread()
+      .then((threads) => threads.reduce((sum, thread) => sum + thread.unread, 0))
+      .catch(() => settings().messageUnread)
     settings().set({ socialAt: Date.now() })
     if (published || friendsUpdated || inbox.trades || inbox.replies) {
       track('sync_run', {
@@ -576,7 +611,13 @@ export async function syncSocialNow(force = false): Promise<SocialSummary> {
         replies: inbox.replies,
       })
     }
-    return { published, friendsUpdated, tradesReceived: inbox.trades, repliesApplied: inbox.replies }
+    return {
+      published,
+      friendsUpdated,
+      tradesReceived: inbox.trades,
+      repliesApplied: inbox.replies,
+      messagesWaiting,
+    }
   } finally {
     running = false
   }

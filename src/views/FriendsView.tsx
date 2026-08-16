@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Empty, Seg } from '../components/basics'
 import { Icon } from '../components/Icon'
+import { ProfileLinkEditor } from '../components/ProfileLinks'
 import { ShareActions, type SharePack } from '../components/ShareActions'
 import { SocialPanel } from '../components/SocialPanel'
 import { SellerPanel } from '../components/SellerPanel'
@@ -74,6 +75,7 @@ export function FriendsView() {
   const myWantKeys = useMemo(() => wantKeySet(myWants ?? []), [myWants])
   const config = useSettings()
   const toast = useUi((s) => s.toast)
+  const setMessageDraft = useUi((s) => s.setMessageDraft)
   const [pack, setPack] = useState<SharePack | null>(null)
   const [pasteText, setPasteText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -303,6 +305,19 @@ export function FriendsView() {
             maxLength={140}
             aria-label="Contact note"
           />
+          {/* Links ride the binder, so their audience IS the binder's audience
+              — which the scope control directly below decides. Saying which
+              one that currently is beats a general warning nobody reads. */}
+          <ProfileLinkEditor />
+          {config.profileLinks.length > 0 && (
+            <p className="setsec__note">
+              Shown as icons on your binder to{' '}
+              {config.shareScope === 'trade'
+                ? 'anyone you send a link to, and to every signed-in collector while you are publishing'
+                : 'anyone you send a link to, and to friends you have accepted while you are publishing'}
+              .
+            </p>
+          )}
           <Seg
             ariaLabel="What to share"
             size="sm"
@@ -382,6 +397,28 @@ export function FriendsView() {
         <h3>My account</h3>
         <SocialPanel />
       </section>
+
+      {/* One row rather than a list: conversations have their own screen, and
+          a ninth section on this one would push the friends list off the
+          bottom of every phone. It renders only with an account, because
+          without one there is nobody to talk to. */}
+      {hosted && (
+        <section className="setsec">
+          <a className="social-row" href="#/messages">
+            <span className={`social-row__avatar ${config.messageUnread ? 'social-row__avatar--hot' : ''}`} aria-hidden="true">
+              <Icon name="message" size={16} />
+            </span>
+            <span className="social-row__body">
+              <span className="social-row__name">
+                Messages
+                {config.messageUnread > 0 && <em className="social-row__match">{config.messageUnread} new</em>}
+              </span>
+              <span className="social-row__meta">Ask a collector about a card, agree a price, arrange a swap</span>
+            </span>
+            <Icon name="chevronRight" size={16} className="social-row__go" />
+          </a>
+        </section>
+      )}
 
       <SellerPanel />
 
@@ -495,17 +532,38 @@ export function FriendsView() {
                 <span className="matchrow__name">{holders[0] ? nameForKey(myWants ?? [], key) : key}</span>
                 <span className="matchrow__holders">
                   {holders.map((holder) => (
-                    <button
-                      key={holder.userId}
-                      className="matchchip"
-                      onClick={() => {
-                        setHandleInput(holder.handle)
-                        toast(`Tap Add to send @${holder.handle} a friend request`, 'info')
-                      }}
-                    >
-                      @{holder.handle}
-                      <em>×{holder.qty}</em>
-                    </button>
+                    <span key={holder.userId} className="matchchip">
+                      <button
+                        className="matchchip__who"
+                        onClick={() => {
+                          setHandleInput(holder.handle)
+                          toast(`Tap Add to send @${holder.handle} a friend request`, 'info')
+                        }}
+                      >
+                        @{holder.handle}
+                        <em>×{holder.qty}</em>
+                      </button>
+                      {/* Messaging them needs no friendship: they publish a
+                          for-trade binder, which is what makes them reachable
+                          (`can_message` in 0017). Being findable and being
+                          contactable are the same act here — that is the whole
+                          point of publishing one. */}
+                      <button
+                        className="matchchip__msg"
+                        aria-label={`Message @${holder.handle} about ${nameForKey(myWants ?? [], key)}`}
+                        onClick={() => {
+                          setMessageDraft({
+                            userId: holder.userId,
+                            name: holder.displayName,
+                            handle: holder.handle,
+                            body: `Hi — are you still trading your ${nameForKey(myWants ?? [], key)}?`,
+                          })
+                          location.hash = `#/messages/${holder.userId}`
+                        }}
+                      >
+                        <Icon name="message" size={13} />
+                      </button>
+                    </span>
                   ))}
                 </span>
               </div>

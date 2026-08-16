@@ -196,6 +196,16 @@ factor themselves (`sharedRowValue`).
 `direction` says who proposed it. Statuses: `proposed · accepted · declined ·
 completed · canceled`.
 
+`SocialLink` is one place a collector can be reached — `{ platform, value }`
+over a **closed** platform vocabulary, with the handle stored and the URL built
+from a table in `lib/profilelinks.ts`, so an icon can never point somewhere it
+does not claim to. It hangs off `ProfilePayload`/`Friend` rather than off the
+hosted `profiles` row, which is what makes it inherit the binder's audience —
+see [social.md](social.md) and decision 23.
+
+`ChatThread` / `ChatMessage` (`lib/messaging.ts`) are **server-only**: there is
+no Dexie table and no backup entry for them, deliberately (decision 24).
+
 Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload`, all
 carrying `app: 'cardstock-social'`. In a trade payload the sender's side is
 `offer` and what they want back is `want`; `tradeFromPayload` flips that into
@@ -268,6 +278,8 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `pokemonKey` | pokemontcg.io key, from `VITE_POKEMON_KEY` at build time — **not user-editable**, and `merge()` always takes the build's value over a persisted one. `geminiKey`/`geminiModel` are gone: the deck builder runs on our key through `build-deck`. |
 | `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
+| `profileLinks` (`[]`) | Social accounts shown beside the binder. Re-sanitized on rehydrate as well as on the wire, because localStorage is editable and these become `<a href>`s in other people's apps. |
+| `messageUnread` (`0`) | Unread messages, cached so the nav badge is right on the first frame. A cache of a server fact, never the authority; cleared on sign-out. |
 | `referralFrom` (`''`) / `referralAt` (`0`) | The `@handle` whose link brought this install here, and when the server last gave a **final** answer about it. Written at boot from `?via=` and never overwritten — one referrer per account, for ever (`lib/referral.ts`). It is stored rather than read at the point of use because sign-in destroys the URL: the Google route returns to `origin + pathname` with query string and fragment both gone. `referralAt` is cleared on sign-out. |
 | `cardSourceLookup` (`true`) | May the app ask the shared card index about cards that have **no picture at all** (`lib/cardsource.ts`)? On by default: it sends a card id and gets a picture back, the same class of request already made to Scryfall on every search, aimed at our project instead of theirs — never the session token, never a background sweep, never for a card that already has art. |
 | `cardSourceShare` (`false`) | May the pictures and details this user fills in be contributed back? Off by default, and the switch that matters: a photo of a card is a photo the user took, and publishing it is a decision. The editor asks again per card on top of this. |

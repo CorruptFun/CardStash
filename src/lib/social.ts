@@ -1,5 +1,6 @@
 import { CONDITIONS, FINISH_LABEL, GAMES } from './games'
 import { conditionFactor, itemUnitPrice, mergePrices } from './prices'
+import { sanitizeSocialLinks } from './profilelinks'
 import { referralQuery } from './referral'
 import { sanitizeGrade } from './slab'
 import { settings } from './settings'
@@ -15,6 +16,7 @@ import type {
   ShareScope,
   SharedCard,
   SharedWant,
+  SocialLink,
   SocialPayload,
   TradePayload,
   TradeRecord,
@@ -50,6 +52,12 @@ export interface MyProfile {
   name: string
   note?: string
   scope: ShareScope
+  /**
+   * Where else to find this collector. Travels with the binder rather than
+   * with the account, so it inherits the share's audience — see
+   * `lib/profilelinks.ts` for why that is the whole point.
+   */
+  links?: SocialLink[]
 }
 
 /** The stable id this device shares under — minted on first use, then kept. */
@@ -66,6 +74,10 @@ export function myProfile(): MyProfile {
     name: config.profileName.trim(),
     note: config.profileNote.trim() || undefined,
     scope: config.shareScope,
+    // Re-sanitized on the way OUT as well as the way in: the stored list is
+    // localStorage, which is editable by anyone with devtools, and a link
+    // built from it is a document other people's apps will render.
+    links: sanitizeSocialLinks(config.profileLinks),
   }
 }
 
@@ -123,6 +135,7 @@ export function buildProfilePayload(items: CollectionItem[], me: MyProfile, want
     at: Date.now(),
     cards,
     wants: wants.length ? wants.map(wantToShared) : undefined,
+    links: me.links?.length ? me.links : undefined,
   }
 }
 
@@ -189,6 +202,7 @@ export function friendFromProfile(
     remoteRev: remoteRev ?? existing?.remoteRev,
     cards: payload.cards,
     wants: payload.wants,
+    links: payload.links,
     lastDelta,
   }
 }
@@ -439,6 +453,7 @@ export function sanitizePayload(raw: unknown): SocialPayload {
       at: asTime(raw.at),
       cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
       wants: sanitizeSharedWants(raw.wants),
+      links: sanitizeSocialLinks(raw.links),
     }
   }
   if (kind === 'trade') {
@@ -490,6 +505,7 @@ export function sanitizeFriendRecord(raw: unknown): Friend | null {
     remoteRev,
     cards: sanitizeSharedCards(raw.cards, PROFILE_CARD_CAP),
     wants: sanitizeSharedWants(raw.wants),
+    links: sanitizeSocialLinks(raw.links),
     lastDelta: delta && (added || removed) ? { added: added ?? 0, removed: removed ?? 0, at: asTime(delta.at) } : undefined,
   }
 }

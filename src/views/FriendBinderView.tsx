@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, Empty, Modal, Seg, Stepper } from '../components/basics'
 import { Icon } from '../components/Icon'
+import { ProfileLinkIcons } from '../components/ProfileLinks'
 import { ShareActions, type SharePack } from '../components/ShareActions'
 import { Sheet } from '../components/Sheet'
 import { TradeSides } from '../components/TradeSides'
@@ -23,6 +24,7 @@ import {
   wantKeyFor,
   wantKeySet,
 } from '../lib/social'
+import { messagingReady } from '../lib/messaging'
 import { sendToInbox, socialConfigured } from '../lib/socialcloud'
 import type { CollectionItem, Friend, Game, SharedCard, TradeRecord } from '../lib/types'
 import { money, relativeAge, uid, ymd } from '../lib/util'
@@ -48,6 +50,7 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
   const myWants = useLiveQuery(() => db.wants.toArray(), [])
   const openSheet = useUi((s) => s.openSheet)
   const toast = useUi((s) => s.toast)
+  const setMessageDraft = useUi((s) => s.setMessageDraft)
   const [tab, setTab] = useState<'trade' | 'all' | null>(null)
   const [filterText, setFilterText] = useState('')
   const [gameFilter, setGameFilter] = useState<Game | 'all'>('all')
@@ -158,12 +161,27 @@ export function FriendBinderView({ friendId }: { friendId: string }) {
             </span>
           )}
           {friend.note && <span className="friendhead__note">“{friend.note}”</span>}
+          <ProfileLinkIcons links={friend.links} />
         </div>
       </header>
       <div className="friendacts">
         <button className="btn btn--primary" onClick={() => setComposing(true)} disabled={cards.length === 0}>
           <Icon name="swap" size={16} /> Propose a trade
         </button>
+        {/* Only an ACCOUNT can be talked to. A friend imported from a link is
+            a snapshot with a localStorage id behind it and nobody at the other
+            end — the same gate the Buy button uses, for the same reason. */}
+        {IS_ACCOUNT_ID.test(friend.id) && messagingReady() && (
+          <button
+            className="btn btn--ghost"
+            onClick={() => {
+              setMessageDraft({ userId: friend.id, name: friend.name })
+              location.hash = `#/messages/${friend.id}`
+            }}
+          >
+            <Icon name="message" size={15} /> Message
+          </button>
+        )}
         {friend.sourceUrl && (
           <button className="btn btn--ghost" onClick={refresh} disabled={refreshing}>
             <Icon name="refresh" size={15} className={refreshing ? 'spin' : ''} /> Refresh

@@ -24,6 +24,7 @@
     "test:install": "node tests/harness/install-prompt.mjs",
     "test:cloud": "node tests/harness/cloud-live.mjs",
     "test:social": "node tests/harness/social-rls.mjs",
+    "test:messages": "node tests/harness/messages-rls.mjs",
     "test:cardsource": "node tests/harness/cardsource-rls.mjs",
     "test:escrow": "node tests/harness/escrow-rls.mjs"
   },

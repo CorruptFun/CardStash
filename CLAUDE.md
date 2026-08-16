@@ -48,7 +48,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `npm run test:social` — the hosted-social RLS harness against a real Supabase
   project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
   after any migration touching `binders`, `friendships`, `trade_offers` or
-  `inbox`. `npm run test:cardsource` is the same shape for `card_data` — run it
+  `inbox`. `npm run test:messages` is its sibling for `messages` /
+  `message_threads` — run it after any migration touching either, and note it
+  is what proves a third party can neither read a conversation nor write into
+  one, which no schema read can show. `npm run test:cardsource` is the same shape for `card_data` — run it
   after applying `0013` and after any migration touching the card index; it is
   what proves the anon-read / authenticated-write asymmetry actually holds,
   which no schema read can show.
@@ -86,8 +89,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
-  the Dexie writes for friends/trades live in `db.ts`), hosted social
-  (`authsession.ts` + `socialcloud.ts` — see Hosted social below), opt-in backup to
+  the Dexie writes for friends/trades live in `db.ts`; `profilelinks.ts` — the
+  closed platform vocabulary behind a collector's Instagram/Discord/Whatnot
+  icons), hosted social
+  (`authsession.ts` + `socialcloud.ts` — see Hosted social below;
+  `messaging.ts` — collector-to-collector conversations, server-only), opt-in backup to
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
@@ -179,7 +185,7 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0013 — social is 0000–0004), not
+`supabase/migrations/` (0000–0017 — social is 0000–0004, messaging is 0017), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
@@ -258,6 +264,41 @@ dismissed reflexively for the rest of the product's life.
   door on the Friends screen.
 - **`server/` and `lib/sync.ts` are deleted** (the app had no users, so no
   compatibility path was carried). Don't reintroduce a second live tier.
+
+## Where a collector can be found, and talking to them
+
+**Social profile links ride the BINDER, never `profiles`** (`profilelinks.ts`,
+`ProfilePayload.links`, `settings.profileLinks`, decision 23). Migration 0001's
+header is explicit that `profiles` is readable by every signed-in user and
+carries identity only; contact details live on the binder row so they inherit
+scope-driven visibility. Two things are load-bearing: the audience is the
+binder's audience (no second privacy toggle), and **the vocabulary is closed
+and the URL is built from a table, never stored** — a stored URL under a
+platform icon is a redirect a payload could point anywhere. `website` is the
+one URL-holding kind, `https:` only; Discord has no profile page and is
+copy-to-clipboard.
+
+**Messages are their own subsystem** (`supabase/migrations/0017`,
+`lib/messaging.ts`, `views/MessagesView.tsx`, decision 24). Read
+`docs/social.md` before touching any of it. Four things that are load-bearing:
+
+- **It is NOT the trade inbox and must not become it.** `inbox` is
+  recipient-read-only, drained-and-deleted and 30-day TTL — right for a trade
+  payload, wrong for a conversation. `orders` still has no free-text field.
+- **Nothing writes these tables directly.** No INSERT/UPDATE/DELETE policy and
+  only `select` granted; `send_message` / `list_threads` / `mark_thread_read` /
+  `set_thread_block` are the doors, because the denormalized preview, the read
+  watermarks and the block flags are all things a client could forge about the
+  *other* person's row.
+- **No local mirror.** Dexie rows ride `exportBackup`, the CSV export and the
+  Drive backup; a private conversation with somebody else does not belong in a
+  file the user hands around. Threads are fetched, like orders.
+- **Plaintext to us, and the composer says so** (15b's honesty rule). Bounded
+  instead: text plus one optional `SharedCard`, which goes through
+  `sanitizeSharedCard` — the same door a share link uses. No attachments, no
+  images, no addresses. Blocking is one-sided and silent, mirroring
+  `request_friend()`; the badge (`settings.messageUnread`) is a cache, never
+  the authority.
 
 ## Paid trades — buying a card from a friend (in progress)
 

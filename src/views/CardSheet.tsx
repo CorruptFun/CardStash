@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
 import { amountBucket, track } from '../lib/analytics'
 import { canBuyFrom, marketReady, startCheckout } from '../lib/marketplace'
+import { messagingReady } from '../lib/messaging'
 import { printingVariants, refreshCard } from '../lib/cardsearch'
 import { isCustomCard, needsImage } from '../lib/cardpatch'
 import {
@@ -123,6 +124,8 @@ function CardSheet() {
   const toast = useUi((s) => s.toast)
   const openEditor = useUi((s) => s.openEditor)
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
+  const setMessageDraft = useUi((s) => s.setMessageDraft)
+  const closeSheet = useUi((s) => s.closeSheet)
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const [card, setCard] = useState(sheet.card)
   const [finish, setFinish] = useState<Finish>(
@@ -726,6 +729,28 @@ function CardSheet() {
             <button className="btn btn--ghost addbar__buy" onClick={buy} disabled={buying}>
               <Icon name="cart" size={16} />{' '}
               {buying ? 'Opening…' : `Buy · ${money((seller.row.price ?? 0) * conditionFactor(seller.row.condition))}`}
+            </button>
+          )}
+          {/* Asking is offered on a WIDER gate than buying: `canBuy` needs the
+              marketplace switched on and the seller through Stripe
+              verification, where a conversation needs neither. Most of what
+              happens between two collectors is agreeing a swap, and that must
+              not be gated behind a payments feature that ships off. */}
+          {seller && messagingReady() && (
+            <button
+              className="btn btn--ghost"
+              onClick={() => {
+                setMessageDraft({
+                  userId: seller.userId,
+                  name: seller.name,
+                  about: seller.row,
+                  body: `Hi — are you still trading your ${seller.row.name}?`,
+                })
+                closeSheet()
+                location.hash = `#/messages/${seller.userId}`
+              }}
+            >
+              <Icon name="message" size={16} /> Ask
             </button>
           )}
         </div>
