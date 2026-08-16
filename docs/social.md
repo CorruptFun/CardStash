@@ -707,6 +707,23 @@ every poll and cleared on sign-out; and the `about` block goes through
 `sanitizeSharedCard` — the same door a `#/x?d=…` link uses — so a message cannot
 smuggle in a card shape a share link could not.
 
+### The handshake is free (decision 25)
+
+The positioning this feature exists to serve, because it constrains the code:
+**two collectors may do the entire deal in here and pay us nothing.** Message,
+agree a price, settle it however they like, put it in the post. Escrow is there
+for the deals that want it, and it is what the fee buys. It is the user's call,
+every time.
+
+So messaging is never gated on `VITE_MARKETPLACE` or on entitlement — it works
+in a build with the marketplace switched off, which is the deployed one — and
+the Ask button on the card sheet sits on a deliberately *wider* gate than Buy.
+We do not scan message bodies for prices or payment handles, do not interstitial
+someone on the way out, and do not nudge a quiet conversation. Escrow is sold on
+what it does ("the money is held until the card arrives"), never on fear of the
+alternative we are simultaneously offering. Read decision 25 before writing any
+copy near this, or before adding anything that measures where a deal ended up.
+
 Verification is `npm run test:messages` (`tests/harness/messages-rls.mjs`), the
 sibling of `test:social`: five signed-in users and one anonymous caller over
 reachability, third-party reads, forged writes, the caps, the block, erasure and

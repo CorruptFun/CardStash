@@ -1017,3 +1017,74 @@ point this needs a report path and someone to read it, and the honest options
 are a review queue or turning it off, not a stricter cap. Or attachments, which
 would be a new decision about storage, moderation and cost, not an extension of
 this one.
+
+### 25. The handshake is free, and the escrow is the thing you pay for
+
+**The positioning, stated so the code can be held to it:** two collectors who
+find each other here may do the whole deal themselves — message, agree a price,
+send the money however they like, put it in the post — and pay us nothing.
+Or they can run it through escrow, where the money is held until the card
+arrives, and pay the fee for that. **It is the user's call, every time, and the
+product must never make the free path feel like the one it disapproves of.**
+
+This is what eBay was before the fees became the product. Finding people and
+talking to them is the thing collectors actually want and the thing a hobby
+this size has no good venue for; escrow is a service some of those deals want
+and most do not. Charging for the first would be charging rent on the hobby.
+Charging for the second is charging for work we actually do — holding money,
+carrying the chargeback, standing between two strangers who have never met.
+
+**Six things follow, and they are engineering constraints rather than tone:**
+
+- **Messaging is never gated on `VITE_MARKETPLACE` or on entitlement.** It is
+  free, it works with the marketplace switched off (which is how the deployed
+  build ships), and it works for someone who will never pay us. The Ask button
+  on the card sheet is deliberately on a *wider* gate than Buy for exactly this
+  reason — see `CardSheet.tsx`.
+- **We never detect, score, or discourage an off-platform deal.** No scanning
+  message bodies for prices or payment handles, no "are you sure you don't want
+  buyer protection?" interstitial, no nudge after a conversation goes quiet.
+  A platform that polices the exit has decided the exit is the enemy; ours is
+  the offer.
+- **`forTrade` and a sale price stay separate** (decision 19). A listing is not
+  automatically a barter offer and a barter offer is not automatically for
+  sale, because "I'll swap this" and "I'll sell this for $40" and "ask me" are
+  three different things a collector means, and flattening them is how a
+  marketplace starts deciding for people.
+- **The fee is quoted before the money moves, in full, once.** Nothing about
+  the free path is hidden to make the paid one look inevitable.
+- **Escrow is sold on what it does, never on fear.** "The money is held until
+  it arrives" is true and is the whole pitch. "Don't get scammed" is a threat
+  dressed as a feature, and it is also a claim about the free path we are
+  simultaneously offering.
+- **No fee-avoidance clause.** The terms must not prohibit what this decision
+  exists to permit; a rule we would never enforce is worse than no rule.
+
+**What it costs, plainly.** Revenue, first: every deal done in a conversation
+is a fee we chose not to earn, and the ceiling on this business is however many
+people find escrow worth paying for rather than however many transactions cross
+the platform. That is the trade, made with eyes open — the alternative is a
+funnel, and a funnel is what "got out of hand" means.
+
+Second, and more important: **a deal done off-platform has no recourse, and
+some of those will go wrong.** No held funds, no `advance_order()` state graph,
+no dispute path — two people and the post. They will still be angry at us,
+because they met here, and no amount of "you chose the free path" will change
+that. The honest response is the one this decision already requires: say what
+escrow does, plainly, at the moment it is relevant, and then respect the answer.
+What we must not do is discover that failure later and answer it by making the
+free path worse.
+
+Third: an explicit "deal privately if you like" stance is a magnet for people
+who want a venue with no paper trail. The guards are the ones decision 24
+already lists — reachability, caps, blocking, and a channel with nowhere to put
+an attachment. If that stops being enough, the answer is moderation, not a toll
+gate.
+
+**What would reopen it.** Escrow volume that cannot fund itself, at which point
+the choice is a higher fee on the people already choosing to pay, a paid tier
+for something else (binder scanning — decision 13), or retiring escrow. Taking
+the free handshake away is not on that list. Or a legal obligation — a
+jurisdiction that makes us liable for deals arranged here regardless of where
+the money went — which would be a genuine reason to revisit, and a reason to
+say so out loud rather than quietly start nudging.

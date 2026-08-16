@@ -300,6 +300,16 @@ copy-to-clipboard.
   `request_friend()`; the badge (`settings.messageUnread`) is a cache, never
   the authority.
 
+**The handshake is free and the escrow is what you pay for** (decision 25) —
+this is the product's position, not a temporary state, and it constrains code.
+Two collectors may do the whole deal in a conversation and pay us nothing;
+escrow is the optional service the fee buys. Therefore: messaging is **never**
+gated on `VITE_MARKETPLACE` or entitlement (Ask sits on a wider gate than Buy
+in `CardSheet.tsx`, on purpose); we never scan message bodies, interstitial the
+way out, or nudge a quiet thread; escrow is sold on what it does, never on fear
+of the free path we are simultaneously offering. Read decision 25 before
+writing copy near this or adding anything that measures where a deal ended up.
+
 ## Paid trades — buying a card from a friend (in progress)
 
 Escrowed purchases between accepted friends: the buyer pays, the money is held,
