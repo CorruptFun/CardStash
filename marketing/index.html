@@ -41,7 +41,7 @@
 
   --hue:var(--c-cyan);
   --col:min(1080px,100% - 2.5rem);
-  --r-2:14px; --r-1:8px;
+  --r-2:8px; --r-1:5px;
 }
 
 *{box-sizing:border-box}
@@ -57,12 +57,6 @@ body{
   overflow-x:hidden;
 }
 
-/* ---- The spectrum rail: page position, read as hue ---- */
-.rail{
-  position:fixed; inset:0 auto 0 0; width:3px; z-index:5;
-  background:linear-gradient(180deg,#4fc7dd,#7b6bf5 20%,#d072c9 40%,#eaa85f 60%,#6fd49c 80%,#5cb6f0);
-  opacity:.85; pointer-events:none;
-}
 
 .wrap{width:var(--col);margin-inline:auto}
 
@@ -81,12 +75,7 @@ p{margin:0;max-width:64ch}
 .eyebrow{
   font-family:var(--font-mono); font-weight:600; font-size:.7rem;
   letter-spacing:.19em; text-transform:uppercase;
-  color:var(--hue);
-  display:flex; align-items:center; gap:.7rem;
-  margin:0 0 1.1rem;
-}
-.eyebrow::before{
-  content:""; width:26px; height:2px; background:var(--hue); flex:none;
+  color:var(--hue); margin:0 0 1rem;
 }
 
 /* ---- Foil-filled type. The app fills type with --holo to mean "foil"; here it
@@ -172,19 +161,22 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--c-cyan);outline-off
 .cap{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--paper-3);margin-top:.7rem}
 
-/* ---- Games: ten hues, used as data ---- */
+/* ---- Games: the codes actually printed on the cards, in the hue the app already
+   assigns each game. A set code is what a collector reads off a card, so it is
+   the honest label here — a dotted pill would be decoration wearing a hue. ---- */
 .games{padding:clamp(2.5rem,5vw,3.5rem) 0;border-block:1px solid var(--rule)}
-.games__list{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.2rem;padding:0;list-style:none}
-.chip{
-  display:flex;align-items:center;gap:.5rem;
-  font-family:var(--font-mono);font-size:.76rem;font-weight:500;
-  padding:.45rem .8rem;border-radius:999px;
-  border:1px solid color-mix(in srgb,var(--c) 34%,transparent);
-  background:color-mix(in srgb,var(--c) 9%,var(--ink-050));
-  color:var(--paper);
+.gameline{
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:.2rem .6rem;
+  margin:1.1rem 0 0; padding:0; list-style:none;
+  font-family:var(--font-mono); font-size:.9rem; font-weight:600;
+  letter-spacing:.11em;
 }
-.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c);flex:none}
-.chip small{color:var(--paper-3);letter-spacing:.08em}
+.gameline li{color:var(--c)}
+.gameline li+li::before{
+  content:"·"; margin-right:.6rem; color:var(--paper-3);
+  font-weight:500; letter-spacing:0;
+}
+.gamenames{margin-top:1rem;color:var(--paper-2);font-size:.95rem;max-width:72ch}
 
 /* ---- Sections ---- */
 section{padding:clamp(3.5rem,7vw,5.5rem) 0}
@@ -192,25 +184,23 @@ section{padding:clamp(3.5rem,7vw,5.5rem) 0}
 .sec__head h2{font-size:clamp(1.8rem,3.6vw,2.7rem)}
 .sec__head p{margin-top:.95rem;color:var(--paper-2)}
 
-.grid{display:grid;gap:1px;background:var(--rule);
-  border:1px solid var(--rule);border-radius:var(--r-2);overflow:hidden;
-  grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
-.cell{background:var(--ink-050);padding:1.6rem 1.5rem 1.7rem;display:flex;
-  flex-direction:column;gap:.6rem;transition:background .16s}
-.cell:hover{background:var(--ink-100)}
-.cell h3{font-size:1.12rem;font-stretch:112%;letter-spacing:-.008em}
-.cell p{color:var(--paper-2);font-size:.94rem;line-height:1.6}
-.stat{font-family:var(--font-mono);font-weight:600;font-variant-numeric:tabular-nums;
-  color:var(--hue);letter-spacing:-.01em}
-.cell__tag{font-family:var(--font-mono);font-size:.64rem;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--hue)}
+/* ---- Features read as a spec sheet: a rule per entry, aligned across columns.
+   Boxed cards each carrying a coloured micro-label was decoration pretending to
+   be structure — the rule is doing the separating, so nothing else needs to. ---- */
+.list{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+  column-gap:clamp(2rem,5vw,4rem);
+}
+.item{padding:1.45rem 0;border-top:1px solid var(--rule)}
+.item h3{font-size:1.05rem;font-stretch:110%;letter-spacing:-.006em;margin-bottom:.45rem}
+.item p{color:var(--paper-2);font-size:.94rem;line-height:1.6}
 
 /* ---- Steps: a real sequence, so it gets numbers ---- */
 .steps{counter-reset:s;display:grid;gap:1.5rem;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.step{position:relative;padding-top:2.6rem;border-top:1px solid var(--rule-2)}
+.step{position:relative;padding-top:2.5rem;border-top:1px solid var(--rule)}
 .step::before{
-  counter-increment:s;content:counter(s,decimal-leading-zero);
+  counter-increment:s;content:counter(s) "/4";
   position:absolute;top:.9rem;left:0;
   font-family:var(--font-mono);font-size:.72rem;font-weight:600;
   letter-spacing:.14em;color:var(--hue);
@@ -218,12 +208,11 @@ section{padding:clamp(3.5rem,7vw,5.5rem) 0}
 .step h3{font-size:1.05rem;margin-bottom:.5rem}
 .step p{color:var(--paper-2);font-size:.93rem}
 
-/* ---- Honest note ---- */
-.note{border:1px solid var(--rule);border-radius:var(--r-2);background:var(--ink-050);
-  padding:clamp(1.6rem,3vw,2.4rem)}
-.note ul{margin:1.1rem 0 0;padding-left:1.1rem;color:var(--paper-2);font-size:.95rem;
-  display:grid;gap:.6rem}
-.note li::marker{color:var(--hue)}
+/* ---- Straight answers: a definition list, ruled like the spec sheet above. ---- */
+.qa{display:grid;gap:0;margin:0}
+.qa div{padding:1.3rem 0;border-top:1px solid var(--rule)}
+.qa dt{font-weight:600;font-size:1rem;margin-bottom:.4rem}
+.qa dd{margin:0;color:var(--paper-2);font-size:.94rem;max-width:70ch}
 
 footer{padding:3rem 0 4rem;border-top:1px solid var(--rule);color:var(--paper-3);
   font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em}
@@ -256,26 +245,30 @@ footer a{color:var(--paper-2)}
   background:var(--ink-050);padding:0 .4rem}
 @media (max-width:640px){.tiers{min-width:540px}}
 
-/* ---- Account block: the one place the page raises its voice ---- */
+/* ---- The account block inverts to paper. This is the page's one loud moment,
+   and it borrows the app's own emphasis: `.btn--primary` is warm white on
+   near-black, not a coloured fill. ---- */
 .acct{
-  position:relative;overflow:hidden;border-radius:var(--r-2);
-  border:1px solid var(--rule-2);background:var(--ink-050);
-  padding:clamp(1.8rem,4vw,3rem);
+  border-radius:var(--r-2); background:var(--paper); color:#1c1815;
+  padding:clamp(1.9rem,4vw,3.2rem);
 }
-.acct::before{
-  content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--holo);
-}
-.acct h2{font-size:clamp(1.7rem,3.4vw,2.5rem)}
-.acct p{margin-top:1rem;color:var(--paper-2)}
+.acct .eyebrow{color:#6d635a}
+.acct h2{font-size:clamp(1.7rem,3.4vw,2.5rem); color:#12100e}
+.acct p{margin-top:1rem;color:#4b433c}
 .acctgrid{display:grid;gap:1.4rem 2rem;margin-top:2rem;
   grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
-.acctgrid h3{font-size:1rem;margin-bottom:.4rem;font-stretch:110%}
+.acctgrid h3{font-size:1rem;margin-bottom:.4rem;font-stretch:110%;color:#12100e}
 .acctgrid p{margin-top:0;font-size:.92rem}
 .acct .cta{margin-top:2.2rem}
-.fineprint{margin-top:1.4rem;font-size:.85rem;color:var(--paper-3);max-width:60ch}
+.fineprint{margin-top:1.5rem;padding-top:1.2rem;border-top:1px solid rgba(28,24,21,.14);
+  font-size:.85rem;color:#5f564e;max-width:62ch}
+/* Buttons invert with the panel rather than keeping the dark-ground styling. */
+.acct .btn{border-color:rgba(28,24,21,.22);color:#1c1815}
+.acct .btn:hover{border-color:#1c1815}
+.acct .btn--go{background:#12100e;color:var(--paper);border-color:transparent}
+.acct .btn--go::after{opacity:.28}
+.acct a:focus-visible{outline-color:#12100e}
 </style>
-
-<div class="rail" aria-hidden="true"></div>
 
 <header class="hero">
   <div class="wrap">
@@ -368,18 +361,21 @@ footer a{color:var(--paper-2)}
 <div class="games" style="--hue:var(--c-violet)">
   <div class="wrap rv">
     <p class="eyebrow">Nine games, plus sports cards</p>
-    <ul class="games__list">
-      <li class="chip" style="--c:var(--g-mtg)">Magic <small>MTG</small></li>
-      <li class="chip" style="--c:var(--g-pkm)">Pokémon <small>PKM</small></li>
-      <li class="chip" style="--c:var(--g-ygo)">Yu-Gi-Oh! <small>YGO</small></li>
-      <li class="chip" style="--c:var(--g-rft)">Riftbound <small>RIFT</small></li>
-      <li class="chip" style="--c:var(--g-lor)">Lorcana <small>LOR</small></li>
-      <li class="chip" style="--c:var(--g-op)">One Piece <small>OP</small></li>
-      <li class="chip" style="--c:var(--g-swu)">Star Wars: Unlimited <small>SWU</small></li>
-      <li class="chip" style="--c:var(--g-dgm)">Digimon <small>DIGI</small></li>
-      <li class="chip" style="--c:var(--g-gcg)">Gundam <small>GCG</small></li>
-      <li class="chip" style="--c:var(--g-spt)">Sports <small>SPT</small></li>
+    <ul class="gameline">
+      <li style="--c:var(--g-mtg)">MTG</li>
+      <li style="--c:var(--g-pkm)">PKM</li>
+      <li style="--c:var(--g-ygo)">YGO</li>
+      <li style="--c:var(--g-rft)">RIFT</li>
+      <li style="--c:var(--g-lor)">LOR</li>
+      <li style="--c:var(--g-op)">OP</li>
+      <li style="--c:var(--g-swu)">SWU</li>
+      <li style="--c:var(--g-dgm)">DIGI</li>
+      <li style="--c:var(--g-gcg)">GCG</li>
+      <li style="--c:var(--g-spt)">SPT</li>
     </ul>
+    <p class="gamenames">Magic: The Gathering, Pokémon, Yu-Gi-Oh!, Riftbound, Lorcana, One Piece,
+    Star Wars: Unlimited, Digimon and Gundam — plus sports cards, which no catalog covers, so
+    Cardstock reads those straight off the card.</p>
   </div>
 </div>
 
@@ -391,28 +387,24 @@ footer a{color:var(--paper-2)}
       <p>Hover the camera over a card and its price pops up live. Tap once and it’s yours —
       the right printing, the right finish, the right condition.</p>
     </div>
-    <div class="grid rv">
-      <div class="cell">
-        <span class="cell__tag">One tap</span>
+    <div class="list rv">
+      <div class="item">
         <h3>Camera to collection</h3>
         <p>No typing, no set codes to look up. Scan a stack one after another and file the
         whole lot in a single pass when you’re done.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">A page at a time</span>
+      <div class="item">
         <h3>Photograph a whole binder page</h3>
         <p>Up to twelve cards from one photo. You review the list before anything is added,
         and the app remembers which page each card came from.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">Graded &amp; sealed</span>
+      <div class="item">
         <h3>Slabs and sealed product too</h3>
         <p>Scan a PSA, BGS, SGC or CGC holder and the grade is read off the label. A PSA 10
         is tracked as its own copy, never merged with your raw one. Sealed boxes and packs
         count as themselves until you open them.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">Odd ones</span>
+      <div class="item">
         <h3>Cards no catalog has</h3>
         <p>Regional promos, prereleases, error prints. Photograph it, type what it is, and it
         lives in your collection like anything else.</p>
@@ -429,26 +421,22 @@ footer a{color:var(--paper-2)}
       <p>A collection is an asset whether or not you treat it like one. Cardstock treats it
       like one.</p>
     </div>
-    <div class="grid rv">
-      <div class="cell">
-        <span class="cell__tag">Value</span>
+    <div class="list rv">
+      <div class="item">
         <h3>Priced the way you own it</h3>
         <p>Foil and non-foil priced separately, then adjusted for condition — a played copy
         isn’t counted at near-mint money.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">Profit</span>
+      <div class="item">
         <h3>Cost basis and profit &amp; loss</h3>
         <p>Enter what you paid and see what it’s done since, per card and across everything.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">Movement</span>
+      <div class="item">
         <h3>A 30-day line and your movers</h3>
         <p>Which cards gained, which slipped, and by how much in real money — not percentages
         of a card worth forty cents.</p>
       </div>
-      <div class="cell">
-        <span class="cell__tag">Coming from elsewhere</span>
+      <div class="item">
         <h3>Bring the collection you already have</h3>
         <p>Import a CSV from your old tracker — only a name column is required — and export
         everything back out whenever you like. It’s your list.</p>
@@ -576,20 +564,29 @@ footer a{color:var(--paper-2)}
 
 <section style="--hue:var(--c-blue)">
   <div class="wrap">
-    <div class="note rv">
-      <p class="eyebrow">Straight answers</p>
-      <ul>
-        <li><strong>Do I have to sign in?</strong> No. Scanning, your collection, decks, binders
-        and link sharing all work with nothing signed in, and they work offline.</li>
-        <li><strong>What does signing in change?</strong> Your collection is copied to our server
-        so a lost phone isn’t a lost collection. It’s encrypted at rest with a key we hold —
-        that makes it protected storage, not end-to-end encryption, and we’d rather say so.</li>
-        <li><strong>Does an account publish my cards?</strong> No. Claiming a handle publishes
-        nothing. Putting a binder up is a separate switch, and you choose who can see it.</li>
-        <li><strong>Can I get my collection out?</strong> Always. CSV and JSON export, whenever
-        you like, account or not.</li>
-      </ul>
-    </div>
+    <div class="sec__head rv"><p class="eyebrow">Straight answers</p></div>
+    <dl class="qa rv">
+      <div>
+        <dt>Do I have to sign in?</dt>
+        <dd>No. Scanning, your collection, decks, binders and link sharing all work with
+        nothing signed in, and they work offline.</dd>
+      </div>
+      <div>
+        <dt>What does signing in change?</dt>
+        <dd>Your collection is copied to our server, so a lost phone isn’t a lost collection.
+        It’s encrypted at rest with a key we hold — that makes it protected storage, not
+        end-to-end encryption, and we’d rather say so than imply otherwise.</dd>
+      </div>
+      <div>
+        <dt>Does an account publish my cards?</dt>
+        <dd>No. Claiming a handle publishes nothing. Putting a binder up is a separate switch,
+        and you choose who can see it.</dd>
+      </div>
+      <div>
+        <dt>Can I get my collection out again?</dt>
+        <dd>Always. CSV and JSON export, whenever you like, account or not.</dd>
+      </div>
+    </dl>
   </div>
 </section>
 
