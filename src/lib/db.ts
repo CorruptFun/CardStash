@@ -853,7 +853,10 @@ const SCAN_TRAY_LIMIT = 30
  * frame rather than the printing's default; a re-scan that reads a finish
  * replaces a previous blank one, but never clears a reading with nothing.
  */
-export async function recordScan(card: Card, read: { finish?: Finish; grade?: GradeInfo } = {}): Promise<string> {
+export async function recordScan(
+  card: Card,
+  read: { finish?: Finish; grade?: GradeInfo; pinned?: boolean } = {},
+): Promise<string> {
   // Re-scanning the card already at the head of the tray refreshes that row
   // instead of stacking a duplicate tile.
   const latest = await db.scans.orderBy('at').last()
@@ -865,10 +868,15 @@ export async function recordScan(card: Card, read: { finish?: Finish; grade?: Gr
       card,
       finish: read.finish ?? latest.finish,
       grade: read.grade ?? latest.grade,
+      // A re-scan that PINNED the edition upgrades a row that didn't, but a
+      // re-scan that pinned nothing never downgrades one that did — same rule
+      // as finish above, and for the same reason: the reading that saw more
+      // wins, whichever attempt it came from.
+      pinned: read.pinned || latest.pinned,
     })
   } else {
     id = uid()
-    await db.scans.add({ id, cardId: card.id, at: Date.now(), card, finish: read.finish, grade: read.grade })
+    await db.scans.add({ id, cardId: card.id, at: Date.now(), card, finish: read.finish, grade: read.grade, pinned: read.pinned })
     const count = await db.scans.count()
     if (count > SCAN_TRAY_LIMIT) {
       const stale = await db.scans

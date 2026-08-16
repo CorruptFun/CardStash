@@ -298,8 +298,13 @@ export function ScanView({ active }: { active: boolean }) {
       const grade = hit.identification.grade
       // What the scanner read rides along on the tray row, so a batch add
       // files the copy that was in frame — foil, slab and all — rather than
-      // the printing's default.
-      const scanId = guarded(() => recordScan(hit.card, { finish, grade }), 'Save scan')
+      // the printing's default. `pinned` rides too: whether the EDITION was
+      // read is part of what the scanner saw, and the tray is where the user
+      // meets the card again.
+      const scanId = guarded(
+        () => recordScan(hit.card, { finish, grade, pinned: hit.identification.pinned }),
+        'Save scan',
+      )
       // Sports "search" is recall over cards this device has seen, and the
       // one just scanned should be findable now rather than when the memo
       // happens to expire.
@@ -1034,7 +1039,7 @@ export function ScanView({ active }: { active: boolean }) {
         <BinderReview
           cards={pageCards}
           onClose={() => setPageCards(null)}
-          onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
+          onOpenCard={(card, finish, printingUnconfirmed) => openSheet({ card, origin: 'scan', finish, printingUnconfirmed })}
           onAdded={(added, itemIds) => {
             setPageCards(null)
             if (!added) return
@@ -1079,7 +1084,18 @@ export function ScanView({ active }: { active: boolean }) {
               <div key={scan.id} className="tray__item">
                 <button
                   className="tray__open"
-                  onClick={() => openSheet({ card: scan.card, origin: 'scan', finish: scanRowFinish(scan), grade: scan.grade })}
+                  onClick={() =>
+                    openSheet({
+                      card: scan.card,
+                      origin: 'scan',
+                      finish: scanRowFinish(scan),
+                      grade: scan.grade,
+                      // Explicit `false` only — an older row carries no
+                      // reading, and warning about an edition that may well
+                      // have been pinned is worse than staying quiet.
+                      printingUnconfirmed: scan.pinned === false,
+                    })
+                  }
                 >
                   <span className="tray__thumb">
                     <CardImg card={scan.card} className="tray__img" />
@@ -1123,7 +1139,7 @@ export function ScanView({ active }: { active: boolean }) {
         <ScanBatch
           onClose={() => setBatchOpen(false)}
           onForget={scanner.forgetHit}
-          onOpenCard={(card, finish) => openSheet({ card, origin: 'scan', finish })}
+          onOpenCard={(card, finish, printingUnconfirmed) => openSheet({ card, origin: 'scan', finish, printingUnconfirmed })}
           onAdded={(added, itemIds, scanIds) => {
             setBatchOpen(false)
             if (!added) return
