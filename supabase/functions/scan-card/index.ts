@@ -26,6 +26,15 @@ const CORS = {
 
 /** Monthly allowance per subscriber. Generous — a heavy month of binder work. */
 const MONTHLY_LIMIT = Number(Deno.env.get('SCAN_MONTHLY_LIMIT') ?? '1000')
+/**
+ * What someone with NO subscription gets. A rescue costs ~$0.00015, so this is
+ * pennies a year and it is the difference between a scanner that looks like it
+ * works and one that looks broken to the people deciding whether to pay.
+ *
+ * ORDINARY SCANNING IS NOT METERED — it runs on the device and costs nothing.
+ * Only this fallback, for a card the local pipeline could not read, is counted.
+ */
+const FREE_MONTHLY_LIMIT = Number(Deno.env.get('SCAN_FREE_MONTHLY_LIMIT') ?? '50')
 
 /**
  * Pinned server-side, NOT taken from the request. A client-chosen model is a
@@ -108,10 +117,13 @@ Deno.serve(async (req: Request) => {
   const credit = await fetch(`${SUPABASE_URL}/rest/v1/rpc/consume_scan_credit`, {
     method: 'POST',
     headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_user: user.id, p_limit: MONTHLY_LIMIT }),
+    body: JSON.stringify({ p_user: user.id, p_limit: MONTHLY_LIMIT, p_free_limit: FREE_MONTHLY_LIMIT }),
   }).catch(() => null)
   if (!credit?.ok) return json({ error: 'entitlement check failed' }, 503)
   const remaining = Number(await credit.json())
+  // A non-finite answer is NOT permission. If the RPC ever changes shape, this
+  // must fail closed rather than hand out a paid call to everyone.
+  if (!Number.isFinite(remaining)) return json({ error: 'entitlement check failed' }, 503)
   if (remaining < 0) return json({ error: 'not subscribed' }, 403)
   if (remaining === 0) return json({ error: 'monthly allowance used' }, 429)
 

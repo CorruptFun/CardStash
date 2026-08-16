@@ -34,7 +34,13 @@ const CORS = {
 }
 
 /** Builds per subscriber per month. A build is far dearer than a scan. */
-const MONTHLY_LIMIT = Number(Deno.env.get('BUILD_MONTHLY_LIMIT') ?? '60')
+const MONTHLY_LIMIT = Number(Deno.env.get('BUILD_MONTHLY_LIMIT') ?? '12')
+/**
+ * The free taste. Small on purpose: a build is ~250x the cost of a rescue, so
+ * this is the feature the subscription actually sells. Enough to feel what it
+ * does and want more; not enough to be the product.
+ */
+const FREE_MONTHLY_LIMIT = Number(Deno.env.get('BUILD_FREE_MONTHLY_LIMIT') ?? '3')
 const MODEL = Deno.env.get('GEMINI_BUILD_MODEL') ?? 'gemini-flash-latest'
 
 /** Caps, so one request cannot become an essay's worth of tokens. */
@@ -72,7 +78,20 @@ const json = (body: unknown, status = 200) =>
 
 const clamp = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '')
 
-function buildPrompt(body: Record<string, unknown>): string | null {
+/**
+ * Ask Gemini, once a day per game, what the metagame currently looks like.
+ * Grounded — this is the only call that pays for Google Search.
+ */
+function metaPrompt(game: string): string {
+  return [
+    `Use Google Search to check the CURRENT competitive ${GAME_FULL_NAME[game]} metagame:`,
+    'recent tournament results, tier lists, and what is actually winning.',
+    'Reply with ONLY 3-5 markdown bullets, each naming a deck or strategy and citing a date or source.',
+    'No preamble, no headings, no closing remarks.',
+  ].join(' ')
+}
+
+function buildPrompt(body: Record<string, unknown>, meta: string): string | null {
   const game = clamp(body.game, 24)
   if (!GAME_FULL_NAME[game]) return null
 
@@ -91,7 +110,12 @@ function buildPrompt(body: Record<string, unknown>): string | null {
   const useCollection = body.useCollection === true && !!collectionList
 
   return [
-    `You are an expert ${GAME_FULL_NAME[game]} deck builder. Use Google Search to check the CURRENT competitive metagame (tier lists, recent tournament results) before answering.`,
+    `You are an expert ${GAME_FULL_NAME[game]} deck builder.`,
+    // The meta arrives as text rather than being looked up again. See the cache
+    // note in Deno.serve below for why that is the whole cost model.
+    meta
+      ? `Here is the current metagame, already researched. Treat it as fact and do NOT search:\n${meta}`
+      : 'Use Google Search to check the CURRENT competitive metagame (tier lists, recent tournament results) before answering.',
     clamp(body.format, 60) ? `Format: ${clamp(body.format, 60)}.` : '',
     clamp(body.style, MAX_STYLE_CHARS) ? `The player wants: ${clamp(body.style, MAX_STYLE_CHARS)}.` : '',
     seedList
@@ -103,7 +127,9 @@ function buildPrompt(body: Record<string, unknown>): string | null {
       : 'Assume the player is starting from scratch.',
     '',
     'Reply in markdown with exactly this structure:',
-    '1. `## Meta snapshot` — 3-5 bullets on the current meta with dates/sources.',
+    meta
+      ? '1. `## Meta snapshot` — reproduce the bullets you were given above, unchanged.'
+      : '1. `## Meta snapshot` — 3-5 bullets on the current meta with dates/sources.',
     '2. Then 2 deck proposals. Each one:',
     '   - `## Deck: <deck name>` — one line on the game plan and why it fits.',
     '   - A fenced code block starting with ```decklist containing ONLY lines of the form `<qty> <exact card name>`' +
@@ -113,6 +139,25 @@ function buildPrompt(body: Record<string, unknown>): string | null {
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** One Gemini call. `grounded` is the expensive switch — see the cache note below. */
+async function askGemini(key: string, prompt: string, grounded: boolean, maxTokens: number): Promise<string> {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      ...(grounded ? { tools: [{ google_search: {} }] } : {}),
+      generationConfig: { temperature: 0.6, maxOutputTokens: maxTokens },
+    }),
+  }).catch(() => null)
+  if (!res?.ok) return ''
+  const payload = await res.json().catch(() => null)
+  return ((payload?.candidates?.[0]?.content?.parts ?? []) as { text?: string }[])
+    .map((p) => p?.text ?? '')
+    .join('')
+    .trim()
 }
 
 Deno.serve(async (req: Request) => {
@@ -140,38 +185,61 @@ Deno.serve(async (req: Request) => {
   const credit = await fetch(`${SUPABASE_URL}/rest/v1/rpc/consume_build_credit`, {
     method: 'POST',
     headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_user: user.id, p_limit: MONTHLY_LIMIT }),
+    body: JSON.stringify({ p_user: user.id, p_limit: MONTHLY_LIMIT, p_free_limit: FREE_MONTHLY_LIMIT }),
   }).catch(() => null)
   if (!credit?.ok) return json({ error: 'entitlement check failed' }, 503)
   const remaining = Number(await credit.json())
+  if (!Number.isFinite(remaining)) return json({ error: 'entitlement check failed' }, 503)
   if (remaining < 0) return json({ error: 'not subscribed' }, 403)
   if (remaining === 0) return json({ error: 'monthly allowance used' }, 429)
 
   // --- build ---------------------------------------------------------------
-  let prompt: string | null
+  let body: Record<string, unknown>
   try {
-    prompt = buildPrompt((await req.json()) as Record<string, unknown>)
+    body = (await req.json()) as Record<string, unknown>
   } catch {
     return json({ error: 'bad request' }, 400)
   }
+  const game = typeof body.game === 'string' ? body.game : ''
+  if (!GAME_FULL_NAME[game]) return json({ error: 'bad request' }, 400)
+
+  // THE CACHE, AND WHY IT IS THE WHOLE COST MODEL. Grounding a build with
+  // Google Search costs roughly ten times the tokens do — and the question it
+  // answers ("what is winning in Modern right now") has the SAME answer for
+  // every user on a given day. So it is asked once per game per day and the
+  // text is handed to every build after. First build of the day for a game
+  // pays for the lookup; the rest are a fraction of a cent.
+  //
+  // A miss is never fatal: if grounding fails we build ungrounded rather than
+  // refusing, because a deck built without today's tier list is still a deck,
+  // and a user who paid should not be told "no" because a search timed out.
+  let meta = ''
+  const cached = await fetch(`${SUPABASE_URL}/rest/v1/rpc/read_meta_snapshot`, {
+    method: 'POST',
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_game: game }),
+  }).catch(() => null)
+  if (cached?.ok) meta = (await cached.json().catch(() => '')) || ''
+
+  if (!meta) {
+    meta = await askGemini(GEMINI_KEY, metaPrompt(game), true, 600)
+    if (meta) {
+      // Two builds can miss at once and both ground; the insert does nothing on
+      // conflict. One wasted lookup beats serialising every build behind a writer.
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/take_meta_snapshot`, {
+        method: 'POST',
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_game: game, p_markdown: meta }),
+      }).catch(() => null)
+    }
+  }
+
+  const prompt = buildPrompt(body, meta)
   if (!prompt) return json({ error: 'bad request' }, 400)
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: { temperature: 0.6, maxOutputTokens: 4096 },
-    }),
-  }).catch(() => null)
-  if (!res?.ok) return json({ error: 'upstream failed' }, 502)
-
-  const payload = await res.json().catch(() => null)
-  const markdown: string = (payload?.candidates?.[0]?.content?.parts ?? [])
-    .map((p: { text?: string }) => p?.text ?? '')
-    .join('')
-    .trim()
+  // Ungrounded: the meta is already in the prompt, and searching again would
+  // pay twice for one answer.
+  const markdown = await askGemini(GEMINI_KEY, prompt, !meta, 4096)
   if (!markdown) return json({ error: 'upstream failed' }, 502)
 
   // Parsing into decklists stays on the client: it is presentation logic, it is
