@@ -717,3 +717,78 @@ result seems absurd, check this list before writing code.
     the ones that mattered had not (lesson 69). Diff the CELLS, not the
     summary: 43/90 to 43/90 hid one regression and one silently skipped code
     path, and either alone would have been read as noise.
+73. **Grade the printing on the NUMBER alone; adding a `setCode` equality check
+    manufactures failures out of catalog aliases.** The grader compares printed
+    numbers and it is tempting to tighten it by demanding the set codes agree
+    too. Measured over the 118 cells currently graded `printing: 'ok'`, exactly
+    2 disagree on set code and BOTH are aliases rather than errors:
+    `pokemon/rayquaza-vmax` truth `SWSH7` against answer `EVS` (both Evolving
+    Skies) and `pokemon/pikachu-modern` truth `SV08` against answer `SSP` (both
+    Surging Sparks). Zero true positives, two false positives — lesson 71's
+    trap in a new place, a veto that produces the exact failure it was added to
+    catch. The asymmetry is structural, not a data-entry slip: the fixture
+    manifest's `setCode` comes from the catalog that FETCHED the image, the
+    outcome's from whichever catalog ANSWERED the scan, and TCGdex and
+    pokemontcg.io do not share a set vocabulary. Two names for one set is
+    normal; two numbers for one printing is not.
+74. **The collector-line READ RATE decides the printing; the selection logic is
+    downstream of it.** Per-cell over the four fixtures that lose printings the
+    correlation is essentially perfect — a line that yields a number gives the
+    right printing, a line that yields nothing gives the wrong one.
+    `charizard-base` reads `4/102` on 3 of 12 cells and is right on exactly
+    those 3, answering Celebrations `SWSH11.5TG TG03` on the other 9;
+    `rayquaza-vmax` reads `70/203` on 1 of 12 and is right on exactly that one;
+    `riftbound/short-name-1` reads nothing on all 8 and is wrong on all 8. The
+    rule that generalises: **a printing resolver has nothing to rank when
+    `number` and `total` are both null**, and 39 of the 51 wrong-printing cells
+    are in that state. Before designing scoring for a candidate list, check how
+    often there is any evidence to score it with — otherwise the clever part
+    runs on a quarter of the cases and the other three quarters keep answering
+    whatever the catalog listed first (lesson 70). The one fixture that breaks
+    the correlation names the second mechanism rather than refuting the first:
+    `mtg/borderless-any` reads `PRM 2` on 5 of 12 and is still wrong on all 12,
+    because `matchMtg`'s fuzzy fallback answers a failed exact lookup with the
+    base printing.
+75. **A guard whose gate asks a different question from the flag it sets fires
+    on the wrong cells, and both halves look correct in isolation.** The
+    printing tie-break was called under `!refined?.read.number` — "was a number
+    read?" — while the meta it exists to repair is `pinned =
+    linePinnedPrinting(refined)`, "did that number agree with the card
+    returned?". A line that reads and then resolves to nothing sits in the gap,
+    which is precisely the case `linePinnedPrinting`'s own docstring names: on
+    `borderless-any` the line reads `PRM 2` on 5 of 12 cells, the exact lookup
+    fails, `matchMtg`'s fuzzy fallback returns the base printing, and the old
+    gate counted that as pinned. The scan therefore told the user its edition
+    was unconfirmed and simultaneously refused the one mechanism that could
+    confirm it. It now gates on `!pinned`, the same expression that reaches the
+    UI. When a guard exists to repair a state, gate it on the state's own
+    predicate — never on a proxy that is usually equal to it, because "usually
+    equal" is a description of the cells where the bug is not.
+
+76. **Asking the model to CHOOSE from the catalog's printings measured worse
+    than asking it to describe the frame, and the reason generalises.** The
+    open rescue prompt asks for a transcription plus `treatment`; the closed
+    one hands over the exact-name printing list and asks which number it is.
+    Closed sounds strictly safer — a pick outside the list is discarded, so the
+    wrong-card class becomes unreachable rather than merely unlikely — and on
+    one fixture it is: `counterspell-retro` went wrong → ok on the clean cells,
+    which the treatment path had never got. But the full matrix came back
+    **179/223 against 180/223, MTG 33/47 against 34/47**, and the printing gate
+    failed it at `mtg 72% → 70%`. It trades cells rather than adding them, at a
+    larger prompt.
+    Two mechanisms, both worth knowing before trying this again.
+    **The cap must protect the ANSWER, not the favourite.** Ordering the
+    shortlist by the believed set is what a first cut does, and it is exactly
+    backwards: the believed set is the one the fuzzy match got WRONG, so twenty
+    slots filled with MSC printings of Lightning Bolt while the borderless
+    PW26 #5 — the reason the tie-break ran at all — never made the list. The
+    model answered `unsure`, correctly, and four cells that had been right went
+    wrong. Taking one printing per distinct treatment first recovered them.
+    **A prompt that asks a new question stops answering the old one.** With the
+    choose prompt in place, `tiebreak-read` came back `treatment: null` on every
+    call, so the frame path that was doing the real work went silent — the
+    closed question did not beat treatment, it REPLACED it. Asking for both
+    explicitly ("answer `treatment` even when you set `unsure`") recovered the
+    clean cells but not the glare ones, where the model declines and describes
+    nothing. If this is revisited, the shape to try is the open prompt WITH a
+    candidate list appended, so `pick` can only ever add to `treatment`.

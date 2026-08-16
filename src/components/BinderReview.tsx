@@ -71,7 +71,7 @@ function ReviewRow({
   row: Row
   index: number
   onToggle: () => void
-  onOpen: (card: Card, finish: Finish) => void
+  onOpen: (card: Card, finish: Finish, printingUnconfirmed: boolean) => void
   onRetry: () => void
 }) {
   const hit = row.outcome.ok ? row.outcome : null
@@ -100,7 +100,7 @@ function ReviewRow({
           <>
             <button
               className="binderrow__name"
-              onClick={() => onOpen(hit.card, finish)}
+              onClick={() => onOpen(hit.card, finish, !hit.identification.pinned)}
               aria-label={`Details for ${hit.card.name}`}
             >
               <span>{hit.card.name}</span>
@@ -209,7 +209,7 @@ export function BinderReview({
   hidden?: boolean
   onClose: () => void
   onScanMore?: () => void
-  onOpenCard: (card: Card, finish: Finish) => void
+  onOpenCard: (card: Card, finish: Finish, printingUnconfirmed: boolean) => void
   onAdded: (added: number, itemIds: string[], binder: CustomBinder | null) => void
 }) {
   const [rows, setRows] = useState<Row[]>(() => cards.map((c) => ({ ...c, include: preTicked(c.outcome) })))

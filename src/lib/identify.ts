@@ -1134,12 +1134,27 @@ async function identifyViaOcr(
         const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
         if (better) card = better
       }
-      // Nothing printed pinned the EDITION — the collector line was never read,
-      // or read without a number — so the card on screen is whatever a fuzzy
-      // name match defaulted to. On a card with more than one frame that is a
-      // coin toss the user pays for, in the wrong art and the wrong price. Ask
-      // the cloud read which printing this is, if the user switched it on.
-      if (!refined?.read.number) {
+      // Nothing printed pinned the EDITION — so the card on screen is whatever
+      // a fuzzy name match defaulted to. On a card with more than one frame
+      // that is a coin toss the user pays for, in the wrong art and the wrong
+      // price. Ask the cloud read which printing this is, if the user
+      // switched it on.
+      //
+      // The condition is `pinned`, NOT "was a number read", and the difference
+      // is the whole point. `linePinnedPrinting` requires the chosen card's own
+      // number to AGREE with the read; a number that read and then resolved to
+      // nothing is precisely the case it was written to catch — `matchMtg`
+      // carries a fuzzy fallback, so a borderless print whose line read "PRM 2"
+      // resolves to no card under that set, falls back to the name, and returns
+      // the base printing while a refinement has technically happened.
+      //
+      // Gating on `read.number` therefore SKIPPED the tie-break on exactly the
+      // frames it exists for: the scan reported an unconfirmed edition and
+      // simultaneously declined the one mechanism that could confirm it.
+      // Measured on the standard matrix, `borderless-any` reads "PRM 2" on 5 of
+      // its 12 cells and answers the base printing on all 12.
+      const pinned = linePinnedPrinting(refined)
+      if (!pinned) {
         const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
         if (settled) {
           traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
@@ -1159,7 +1174,7 @@ async function identifyViaOcr(
           confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
-          pinned: linePinnedPrinting(refined),
+          pinned,
         },
       }
     }
@@ -1479,7 +1494,29 @@ async function identifyViaOcr(
         confidence: CLOUD_CONFIDENCE,
         via: 'cloud',
         foil: detectFoil(reading.canvas) ? true : undefined,
-        pinned: !!read.number,
+        // NEVER pinned, however confidently the model transcribed a number.
+        //
+        // `pinned` means the PRINTED LINE chose this printing, and it is what
+        // the sheet believes when it stops offering the picker. A model's
+        // number is not that: it is one reading of the whole card, and it is
+        // the part measured to be least reliable. `!!read.number` also could
+        // not be repaired by verifying the number against the card, the way
+        // `linePinnedPrinting` does for OCR — the card was SELECTED by that
+        // number, so the two agree circularly.
+        //
+        // Measured: on the `worst` degradation the model answered Arceus VSTAR
+        // as BRS 176 when the card is BRS 184, and Lugia VSTAR as SIT 202 when
+        // it is SIT 211 — in both cases the base printing's number for an
+        // alt-art card, both sharing the alt art's printed total, so even
+        // corroborating on `printedTotal` would have agreed. Those two arrived
+        // as "wrong printing while claiming the code was read", the one class
+        // the user has no way to catch, and they are the whole reason this is
+        // false rather than clever.
+        //
+        // The card itself still stands: these were MISSES before the rescue
+        // read them. Identifying the card and pinning the edition are separate
+        // achievements and are reported separately.
+        pinned: false,
       },
     }
   }

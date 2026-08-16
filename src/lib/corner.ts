@@ -352,6 +352,27 @@ export function looksLikeCollectorLine(text: string): boolean {
   if (/\b[A-Z]{1,4}\d{0,3}\s*-\s*[A-Z]{0,2}\s?\d{2,4}\b/.test(upper)) return true
   // The Yu-Gi-Oh passcode.
   if (/(?:^|\D)\d{8}(?!\d)/.test(upper)) return true
+  // "MSH★EN", "NEO·EN", "MH3 • EN" — the modern MTG line's second row: a set
+  // code beside a language token.
+  //
+  // Every other shape here is a NUMBER, and a modern Magic card prints none of
+  // them: no fraction since the 2010s, no set-dash code, no passcode. So this
+  // function answered false for every modern MTG card ever put in front of it,
+  // and a sideways Magic card could never settle which way was up from its own
+  // printed line — it fell through to the word-count heuristic, and a wrong
+  // guess puts the collector region on the card's TOP edge, where there is
+  // nothing to read. No number read means no printing pinned, which means the
+  // fuzzy name match answers with Scryfall's one default printing. That is the
+  // wrong-variant report, arriving from an orientation bug.
+  //
+  // Deliberately the code-beside-language shape and not the number: it is the
+  // same evidence `parseCornerInfo` already trusts for `setCode`, it is
+  // strongly positional (bottom edge, under the rules box), and it cannot be
+  // tripped by the digits that live all over a card's top half — mana values,
+  // power/toughness, a year in the copyright line. `LANGS` excludes the code
+  // slot so "EN EN" cannot self-match.
+  const nearLang = upper.match(/\b([A-Z][A-Z0-9]{2,4})\b[^A-Z0-9\n]{0,4}(EN|DE|FR|IT|ES|PT|JA|JP|KO|RU|ZH)\b/)
+  if (nearLang && !LANGS.has(nearLang[1])) return true
   return false
 }
 

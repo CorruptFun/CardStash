@@ -407,6 +407,19 @@ export interface ScanRecord {
   finish?: Finish
   grade?: GradeInfo
   /**
+   * Did the printed collector line CHOOSE this printing, or is the edition on
+   * show the source's default? Mirrors `IdentificationMeta.pinned`, and rides
+   * the tray row because the card sheet opened from a tile has no other way
+   * back to it — without this the tray showed a guessed edition looking
+   * exactly as settled as a read one.
+   *
+   * Three-valued on purpose: `undefined` is "unknown", not "unconfirmed".
+   * Rows the tray already held before this shipped carry no reading, and
+   * marking them unconfirmed would put a warning on cards that may well have
+   * been pinned. Only an explicit `false` earns the chip.
+   */
+  pinned?: boolean
+  /**
    * This scan has been filed into the collection — by Collect mode or by the
    * batch-add screen. The tray is a log, not a collection, so a filed row
    * stays visible; the flag is only what stops the batch screen offering the

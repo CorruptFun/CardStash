@@ -64,6 +64,11 @@ node tests/harness/run-matrix.mjs \
 node tests/harness/run-matrix.mjs \
   --baseline=tests/harness/report/baseline.json        # exit 1 on any
                                                        # per-game regression
+                                                       # of the pass rate AND
+                                                       # of the printing rate
+node tests/harness/run-matrix.mjs \
+  --min-printing-rate=0.6                              # absolute floor on the
+                                                       # printing column
 node tests/harness/preview.mjs \
   --keys=dark-magician --degradations=foil-text        # LOOK at a degradation
 npm run build && node tests/harness/smoke-app.mjs      # built-bundle smoke
@@ -98,7 +103,10 @@ keep `baseline.json` from before your change to gate against.
    evidence requirement — see the guard invariants in
    `references/pipeline-map.md` before touching any threshold.
 5. **Adversarially verify.** Re-run the FULL matrix with
-   `--baseline=<pre-change report>`; a fix ships only if no game drops. Then
+   `--baseline=<pre-change report>`; a fix ships only if no game drops on the
+   pass rate AND no game drops on the printing column (see below — a change
+   can raise the name rate while halving the editions those names are filed
+   under). Then
    `npm run test:unit`, `npm run build`, `smoke-app.mjs`. For large diffs,
    fan out reviewer subagents per lens (pipeline correctness, phone
    perf/battery, UI, harness integrity) and have separate agents try to
@@ -113,6 +121,36 @@ keep `baseline.json` from before your change to gate against.
    artifacts (see `references/lessons.md`). When a failure makes no sense,
    verify the stub answered what the real API would, and LOOK at the actual
    pixels (render the crop to a PNG and view it) before writing code.
+
+## The printing column (right card, wrong version)
+
+Every run reports a second number beside the pass rate: `printing: N/M
+identified cells landed on the fixture's own printing`, broken down per game,
+plus `N wrong while claiming the code was read`. **Check it on every
+scan-pipeline change.** The pass gate is a NAME gate — a Base Set Charizard
+answered as a Celebrations TG03 is a four-figure card priced at three dollars
+and a green tick (lesson 67) — so a change can improve the thing the pass rate
+measures while wrecking the thing the user reports.
+
+Standing baseline on main: **205/282 identified (73%), printing 118/169, 4
+wrong while claiming the code was read** — onepiece 18/18, riftbound 42/50,
+pokemon 35/55, mtg 23/46.
+
+Printing is **gated separately and never folded into the pass rate**: doing so
+would move every stored baseline at once and make the before/after comparison
+this harness exists for meaningless (lesson 62). Three gates:
+`PRINTING REGRESSION` (per-game rate over the keys shared with `--baseline`),
+`PRINTING CLAIMED WORSE` (cells wrong while `pinned` — the class the user
+cannot catch, because the sheet is not offering the picker — which may never
+grow), and `--min-printing-rate` as an absolute floor. Both baseline
+comparisons recompute from `cells[].printing`, so reports predating the
+per-game counters still work as baselines.
+
+Limits worth knowing before reading the number: Yu-Gi-Oh is excluded
+(`REPLICA_ART_GAMES` — the rendered replicas print no code at all, lesson 63);
+clips and binder pages carry no printing ground truth, so this is graded on
+singles only; and treatment/frame, finish and language are not graded at all.
+Grade on the NUMBER, never on the set code — see lesson 73.
 
 ## The foil suite (`npm run test:foil`)
 

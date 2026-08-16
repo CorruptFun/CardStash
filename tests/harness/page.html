@@ -22,6 +22,37 @@
     import { detectCardRegions, refineCardCrop } from '/src/lib/vision'
     import { scanPage, PAGE_MAX_EDGE } from '/src/lib/multiscan'
 
+    /**
+     * Arm (or disarm) the cloud rescue's SIGN-IN gate.
+     *
+     * Both cloud entry points in identify.ts are gated on `isSignedIn()`, not
+     * on a key: the bring-your-own-key route went away when the rescue became
+     * part of the subscription, and the `geminiKey` setting is now read by
+     * nothing. A run that only set the key therefore made ZERO calls and
+     * reported no change — indistinguishable from a fix that does not work,
+     * which is exactly lesson 55's trap.
+     *
+     * This session is never sent anywhere real. The runner intercepts
+     * `/functions/v1/scan-card` and answers it from Gemini directly, so the
+     * token is only ever a truthy value for the arming check. `expiresAt` is
+     * far future so `freshToken()` returns it rather than attempting a refresh
+     * against a host the interceptor would abort.
+     */
+    function armCloudSession(key) {
+      const SESSION_KEY = 'cardstock-cloud-session'
+      if (!key) return localStorage.removeItem(SESSION_KEY)
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          accessToken: 'harness',
+          refreshToken: 'harness',
+          expiresAt: Date.now() + 86_400_000,
+          email: 'harness@invalid',
+          userId: '00000000-0000-4000-8000-000000000000',
+        }),
+      )
+    }
+
     const images = new Map()
     async function loadImage(url) {
       if (images.has(url)) return images.get(url)
@@ -93,6 +124,7 @@
           cloudScanModel: cell.cloudModel ?? '',
           cloudScanRescue: !!cell.cloudKey,
         })
+        armCloudSession(cell.cloudKey)
         const img = await loadImage(cell.imageUrl)
         let canvas
         if (cell.photo) {
@@ -231,6 +263,7 @@
           cloudScanModel: cell.cloudModel ?? '',
           cloudScanRescue: !!cell.cloudKey,
         })
+        armCloudSession(cell.cloudKey)
         const imgs = await Promise.all(cell.imageUrls.map(loadImage))
         const canvas = document.createElement('canvas')
         canvas.width = imgs[0].naturalWidth
@@ -295,6 +328,7 @@
           cloudScanModel: cell.cloudModel ?? '',
           cloudScanRescue: !!cell.cloudKey,
         })
+        armCloudSession(cell.cloudKey)
         const img = await loadImage(cell.imageUrl)
         const canvas = cell.photo
           ? fitPhoto(img, cell.maxEdge ?? PAGE_MAX_EDGE)
