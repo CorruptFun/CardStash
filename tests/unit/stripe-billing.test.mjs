@@ -176,3 +176,57 @@ test('a missing period end on a subscription event is equally refused', () => {
   const absent = subscriptionFromEvent(subEvent({ current_period_end: undefined }))
   assert.equal(entitlementWindow(absent, 3).active, false)
 })
+
+/* ------------------------------------------------------- the founding seat */
+
+test('a one-off purchase with our seat metadata is a lifetime grant', () => {
+  const paid = {
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        mode: 'payment',
+        payment_status: 'paid',
+        client_reference_id: USER,
+        metadata: { user_id: USER, founding_seat: '7' },
+      },
+    },
+  }
+  const out = subscriptionFromEvent(paid)
+  assert.equal(out.founding, true)
+  assert.equal(out.userId, USER)
+})
+
+test('a one-off charge WITHOUT our seat metadata is not a lifetime grant', () => {
+  // The guard that matters: an unrelated one-off payment on the same Stripe
+  // account must never be mistaken for someone buying a founding seat.
+  const stray = {
+    type: 'checkout.session.completed',
+    data: { object: { mode: 'payment', payment_status: 'paid', client_reference_id: USER, metadata: { user_id: USER } } },
+  }
+  assert.equal(subscriptionFromEvent(stray), null)
+})
+
+test('a seat number outside 1-100 is refused', () => {
+  for (const seat of ['0', '101', '-1', 'abc', '']) {
+    const evt = {
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          mode: 'payment',
+          payment_status: 'paid',
+          client_reference_id: USER,
+          metadata: { user_id: USER, founding_seat: seat },
+        },
+      },
+    }
+    assert.equal(subscriptionFromEvent(evt), null, `seat ${JSON.stringify(seat)} must be refused`)
+  }
+})
+
+test('a subscription checkout is still a subscription, not a founding seat', () => {
+  const sub = {
+    type: 'checkout.session.completed',
+    data: { object: { mode: 'subscription', payment_status: 'paid', client_reference_id: USER, subscription: 'sub_1' } },
+  }
+  assert.equal(subscriptionFromEvent(sub).founding, undefined)
+})

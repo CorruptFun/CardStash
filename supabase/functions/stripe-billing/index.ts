@@ -56,6 +56,8 @@ const GRACE_DAYS = Number(Deno.env.get('STRIPE_GRACE_DAYS') ?? '3')
 const FEATURES = ['cloud-scan', 'ai-builder'] as const
 
 const PRICE_ID = Deno.env.get('STRIPE_PRICE_ID') ?? ''
+/** The one-off founding price. Empty = the offer is off and everyone buys yearly. */
+const FOUNDING_PRICE_ID = Deno.env.get('STRIPE_FOUNDING_PRICE_ID') ?? ''
 const RETURN_URL = Deno.env.get('STRIPE_BILLING_RETURN_URL') ?? 'https://cardstock.corrupt.solutions/'
 
 async function stripe(path: string, key: string, form: Record<string, string>): Promise<Response | null> {
@@ -121,6 +123,40 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // FOUNDING SEAT, if the offer is on and this person qualifies. The SQL
+    // decides both halves — that they were referred, and that a seat is free —
+    // so neither can be skipped by calling the function directly. A seat is
+    // RESERVED here and only claimed when the money lands; an abandoned
+    // checkout releases it when the reservation lapses (migration 0014).
+    let seat = 0
+    if (FOUNDING_PRICE_ID) {
+      const reserve = await fetch(`${SUPABASE_URL}/rest/v1/rpc/reserve_founding_seat`, {
+        method: 'POST',
+        headers: { apikey: SERVICE_KEY, Authorization: auth, 'Content-Type': 'application/json' },
+        body: '{}',
+      }).catch(() => null)
+      if (reserve?.ok) seat = Number(await reserve.json().catch(() => 0)) || 0
+    }
+
+    if (seat > 0) {
+      const founding = await stripe('checkout/sessions', STRIPE_KEY, {
+        // A one-off charge, NOT a subscription: this buys access outright.
+        mode: 'payment',
+        'line_items[0][price]': FOUNDING_PRICE_ID,
+        'line_items[0][quantity]': '1',
+        success_url: `${RETURN_URL}#/settings?subscribed=1`,
+        cancel_url: `${RETURN_URL}#/settings`,
+        client_reference_id: user.id,
+        'metadata[user_id]': user.id,
+        'metadata[founding_seat]': String(seat),
+        ...(user.email ? { customer_email: String(user.email) } : {}),
+      })
+      if (!founding?.ok) return json({ error: 'could not start checkout' }, 502)
+      const session = await founding.json().catch(() => null)
+      if (typeof session?.url !== 'string') return json({ error: 'could not start checkout' }, 502)
+      return json({ url: session.url, founding: true, seat })
+    }
+
     const checkout = await stripe('checkout/sessions', STRIPE_KEY, {
       mode: 'subscription',
       'line_items[0][price]': PRICE_ID,
@@ -162,6 +198,39 @@ Deno.serve(async (req: Request) => {
     const sub = subscriptionFromEvent(event)
     // Not an event we act on. 200 — see the header.
     if (!sub) return json({ ok: true, ignored: true })
+
+    // A founding purchase is not a window at all: `expires_at = NULL` means no
+    // expiry (0005), and the seat is claimed so an abandoned-then-completed
+    // checkout cannot leave a paid customer without one.
+    if (sub.founding) {
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_founding_seat`, {
+        method: 'POST',
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_user: sub.userId }),
+      }).catch(() => null)
+
+      const now = new Date().toISOString()
+      const grant = await fetch(`${SUPABASE_URL}/rest/v1/entitlements?on_conflict=user_id,feature`, {
+        method: 'POST',
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify(
+          FEATURES.map((feature) => ({
+            user_id: sub.userId,
+            feature,
+            expires_at: null,
+            source: 'stripe-founding',
+            updated_at: now,
+          })),
+        ),
+      }).catch(() => null)
+      if (!grant?.ok) return json({ error: 'write failed' }, 503)
+      return json({ ok: true, founding: true, features: FEATURES })
+    }
 
     const { active, expiresAt } = entitlementWindow(sub, GRACE_DAYS)
 

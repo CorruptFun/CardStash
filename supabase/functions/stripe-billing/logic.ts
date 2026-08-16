@@ -95,6 +95,13 @@ export interface SubscriptionEvent {
   periodEnd: number
   /** Stripe's id, for logging and idempotency. */
   subscriptionId: string
+  /**
+   * A one-off FOUNDING purchase: lifetime access, no renewal, no expiry.
+   * Distinguished from a subscription because the entitlement it writes has
+   * `expires_at = NULL` (migration 0005: null means no expiry) and because a
+   * seat has to be claimed against it.
+   */
+  founding?: boolean
 }
 
 /**
@@ -129,10 +136,22 @@ export function subscriptionFromEvent(event: unknown): SubscriptionEvent | null 
   if (!userId) return null
 
   if (type === 'checkout.session.completed') {
-    // A completed checkout means paid NOW. The period end arrives with the
-    // subscription event moments later; until then grant a short window so the
-    // thing they just bought works immediately. `periodEnd: 0` signals that.
-    if (object.mode !== 'subscription' || object.payment_status !== 'paid') return null
+    if (object.payment_status !== 'paid') return null
+
+    // A one-off purchase is the FOUNDING seat: paid once, keeps access for
+    // good. Guarded on our own metadata rather than on the mode alone, so an
+    // unrelated one-off charge on the same account can never be mistaken for a
+    // lifetime grant.
+    if (object.mode === 'payment') {
+      const seat = Number((metadata as Record<string, unknown>).founding_seat)
+      if (!Number.isInteger(seat) || seat < 1 || seat > 100) return null
+      return { userId, status: 'active', periodEnd: 0, subscriptionId: '', founding: true }
+    }
+
+    // A completed subscription checkout means paid NOW. The period end arrives
+    // with the subscription event moments later; until then grant a short
+    // window so the thing they just bought works immediately.
+    if (object.mode !== 'subscription') return null
     return {
       userId,
       status: 'active',
