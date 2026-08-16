@@ -905,58 +905,319 @@ point the flag threshold stops being enough and this needs a review queue —
 that is a scale problem to solve when it exists, not a reason to build a
 moderation console for a table with nothing in it.
 
+### 23. Where a collector can be found rides the binder, not the directory
+
+Collectors asked to show their Instagram, Discord and Whatnot beside their
+binder. The obvious place is the `profiles` row — it is the identity table, it
+already has a display name, and one more column is cheap.
+
+**It is the wrong place, and migration 0001 says why in its own header.**
+`profiles` is readable by *every signed-in user*, because resolving `@rae` to a
+user id is what a directory is for, and a directory nobody can read is not one.
+So it carries identity **only**. The contact blurb ("DM @rae on Discord") was
+deliberately put on the binder row instead, where it inherits the visibility
+rule: `scope='trade'` means any signed-in collector, `scope='all'` means
+accepted friends. Social links are the same class of fact — how to reach a
+person — so they go the same way, as `ProfilePayload.links` and
+`Friend.links`.
+
+Three things fall out of that, and all three are the point rather than a cost:
+
+- **The audience is the binder's audience**, which the user already chose with
+  a control they already understand. No second privacy toggle was added, for
+  the same reason 0003 reused the scope control rather than adding one.
+- **It works with no account at all.** Links travel in a `#/x?d=…` link and in
+  a `.json` file exactly like the note beside them. Putting them on `profiles`
+  would have made a serverless share strictly worse than a hosted one, which
+  decision 6 forbids.
+- **Moving them later widens them silently.** A column on `profiles` is visible
+  to every stranger in the directory the moment it exists, with no migration
+  and no notice to the people whose links they are.
+
+**The vocabulary is closed and the URL is built, never stored.** A handle-kind
+link stores the handle; `socialLinkUrl()` builds the href from a table in
+`lib/profilelinks.ts`. This is the security half. Every one of these ends up as
+an `<a href>` in someone else's app, rendered from a document that arrived over
+the wire from a person the reader has never met — and a stored URL is a stored
+redirect: the icon says Instagram and the destination says whatever the sender
+typed. Building it makes "the icon matches the destination" a property of the
+code. `website` is the single exception, is `https:`-only, and renders as a
+neutral globe rather than borrowing anyone's mark.
+
+**What it costs.** A closed list needs editing when a platform people actually
+use is missing, and `website` is the escape hatch until then. Handle formats
+are the platforms' business and they change them; the table is one edit and the
+stored data does not migrate, which is the other reason not to store URLs.
+
+**What would reopen it.** Wanting a link visible to people who have *not* been
+given the binder — a public profile page. That is a different feature with a
+different audience, and it would need its own decision rather than a column
+quietly added to `profiles`.
+
+### 24. Messaging is its own subsystem, and it is not the trade inbox
+
+People buying and selling cards need to talk: is it still available, will you
+take $12, can you ship Tuesday. Today that conversation happens on Discord and
+Instagram — outside the app that knows which card is being discussed.
+
+Two existing things looked like they could carry it, and neither can.
+
+**Not `inbox` (0004).** It is recipient-read-only, sender-stamped,
+drained-and-deleted, 30-day TTL, capped at 20 undrained per pair. Every one of
+those properties is correct for handing someone a trade payload and wrong for a
+conversation: a sender who cannot read the thread back cannot see what they
+said, and a row deleted on read is not a history. Widening it would have taken
+each of those guarantees away from the thing they were built for.
+
+**Not `orders` (0006).** Decision 19 refused a free-text field on an order and
+that refusal stands: a message box attached to a payment is an unmoderated
+channel between two people who are, by construction, in a dispute, and it
+invites "just send me the money directly" next to a button that would have
+escrowed it. `messages` is the conversation *before* anyone agrees anything. It
+is not attached to an order, and an order still has no free-text field.
+
+So: `message_threads` + `messages` (0019), one row per pair, both participants
+reading, RPCs as the only writers.
+
+**Who may open one** is the `send_to_inbox()` rule plus "they spoke to me
+first" — friends, `scope='trade'` publishers, or anyone already in the
+conversation. Publishing nothing and accepting nobody leaves you unreachable,
+which is the correct default and the same one the inbox already had.
+
+**It is plaintext to us, and the copy in the composer says so.** `binders` is
+plaintext because a friend's app has to read it; this is plaintext for exactly
+the same reason. Decision 15b's honesty rule applies — never describe it as
+unreadable by us. What it is instead is **bounded**: text and one optional card
+reference. No attachments, no images, no addresses; there is nowhere to put
+one, which removes the worst payload class by construction rather than by
+policy.
+
+**Blocking is one-sided and silent**, mirroring `request_friend()` returning
+`pending` to someone who has been blocked. The thread leaves the blocker's
+list, the sender's own history is untouched, and they are never told — being
+told is an instruction to make a second account.
+
+**Nothing is stored locally.** No Dexie table, for `marketplace.ts`'s reason
+(a shared fact whose every button needs the network) plus one more: Dexie rows
+ride `exportBackup`, the CSV export and the daily Drive backup, and a private
+conversation with somebody else does not belong in a file the user hands
+around.
+
+**What it costs, stated rather than discovered later.** This is the first
+unmoderated person-to-person channel in the product. The caps (15 unanswered
+per pair, 120 an hour) and the reachability rule bound the spam; blocking
+bounds the individual case. There is no reporting queue and no moderation
+console, because there is nothing in the table yet — and building one for an
+empty table is how the wrong one gets built. It is also a standing cost we did
+not have: conversations are plaintext rows we hold about people, which is why
+`erase_social()` was extended rather than left alone, and why the prune exists.
+
+**What would reopen it.** Volume that makes blocking insufficient — at which
+point this needs a report path and someone to read it, and the honest options
+are a review queue or turning it off, not a stricter cap. Or attachments, which
+would be a new decision about storage, moderation and cost, not an extension of
+this one.
+
+### 25. The handshake is free, and the escrow is the thing you pay for
+
+**The positioning, stated so the code can be held to it:** two collectors who
+find each other here may do the whole deal themselves — message, agree a price,
+send the money however they like, put it in the post — and pay us nothing.
+Or they can run it through escrow, where the money is held until the card
+arrives, and pay the fee for that. **It is the user's call, every time, and the
+product must never make the free path feel like the one it disapproves of.**
+
+This is what eBay was before the fees became the product. Finding people and
+talking to them is the thing collectors actually want and the thing a hobby
+this size has no good venue for; escrow is a service some of those deals want
+and most do not. Charging for the first would be charging rent on the hobby.
+Charging for the second is charging for work we actually do — holding money,
+carrying the chargeback, standing between two strangers who have never met.
+
+**Six things follow, and they are engineering constraints rather than tone:**
+
+- **Messaging is never gated on `VITE_MARKETPLACE` or on entitlement.** It is
+  free, it works with the marketplace switched off (which is how the deployed
+  build ships), and it works for someone who will never pay us. The Ask button
+  on the card sheet is deliberately on a *wider* gate than Buy for exactly this
+  reason — see `CardSheet.tsx`.
+- **We never detect, score, or discourage an off-platform deal.** No scanning
+  message bodies for prices or payment handles, no "are you sure you don't want
+  buyer protection?" interstitial, no nudge after a conversation goes quiet.
+  A platform that polices the exit has decided the exit is the enemy; ours is
+  the offer.
+- **`forTrade` and a sale price stay separate** (decision 19). A listing is not
+  automatically a barter offer and a barter offer is not automatically for
+  sale, because "I'll swap this" and "I'll sell this for $40" and "ask me" are
+  three different things a collector means, and flattening them is how a
+  marketplace starts deciding for people.
+- **The fee is quoted before the money moves, in full, once.** Nothing about
+  the free path is hidden to make the paid one look inevitable.
+- **Escrow is sold on what it does, never on fear.** "The money is held until
+  it arrives" is true and is the whole pitch. "Don't get scammed" is a threat
+  dressed as a feature, and it is also a claim about the free path we are
+  simultaneously offering.
+- **No fee-avoidance clause.** The terms must not prohibit what this decision
+  exists to permit; a rule we would never enforce is worse than no rule.
+
+**What it costs, plainly.** Revenue, first: every deal done in a conversation
+is a fee we chose not to earn, and the ceiling on this business is however many
+people find escrow worth paying for rather than however many transactions cross
+the platform. That is the trade, made with eyes open — the alternative is a
+funnel, and a funnel is what "got out of hand" means.
+
+Second, and more important: **a deal done off-platform has no recourse, and
+some of those will go wrong.** No held funds, no `advance_order()` state graph,
+no dispute path — two people and the post. They will still be angry at us,
+because they met here, and no amount of "you chose the free path" will change
+that. The honest response is the one this decision already requires: say what
+escrow does, plainly, at the moment it is relevant, and then respect the answer.
+What we must not do is discover that failure later and answer it by making the
+free path worse.
+
+Third: an explicit "deal privately if you like" stance is a magnet for people
+who want a venue with no paper trail. The guards are the ones decision 24
+already lists — reachability, caps, blocking, and a channel with nowhere to put
+an attachment. If that stops being enough, the answer is moderation, not a toll
+gate.
+
+**What would reopen it.** Escrow volume that cannot fund itself, at which point
+the choice is a higher fee on the people already choosing to pay, a paid tier
+for something else (binder scanning — decision 13), or retiring escrow. Taking
+the free handshake away is not on that list. Or a legal obligation — a
+jurisdiction that makes us liable for deals arranged here regardless of where
+the money went — which would be a genuine reason to revisit, and a reason to
+say so out loud rather than quietly start nudging.
+
+### 26. A binder carries its own audience, and "public" stops at signed-in
+
+Collectors organise by binder, not by collection: the vintage run, the box for
+the weekend, the cards being kept. Until now the app had exactly one binder —
+your whole collection, filtered by a single **For trade / Everything** switch —
+and one audience for it. `CustomBinder` gives a named selection its own
+audience, and the whole-collection binder is untouched beside it.
+
+**Three visibilities, and `private` is a real one.** `private` is never
+uploaded at all — not "published to nobody", genuinely not sent — and it is
+what every binder starts as, whatever the caller passes to `createBinder`. A
+binder that arrived public because a picker defaulted that way is the accident
+this feature must not have.
+
+**`public` means any signed-in collector. It does not mean the open web**, and
+that line is the load-bearing part. A binder readable by `anon` is a binder
+anyone holding the publishable key can enumerate: an inventory of valuable
+cards attached to a handle, which is precisely what `trade_offers` refuses to
+be (0003: "readable means dumpable, and a dump of this is a shopping list for
+anyone deciding who to rob"). The open-web version is a different feature — a
+public profile page, with crawlers, an abuse surface and a scraping story — and
+it deserves its own decision rather than a loosened policy.
+
+**`tradeable` is a second switch, not a synonym for public.** Both halves are
+required to enter the global want index. Friends-only is never globally
+matchable — 0003's invariant, applied one level down — and a public binder that
+is merely on display is a display case, not an offer. The same split as
+`socialConfigured()` vs `socialPublishing()` (16) and `cardSourceLookup` vs
+`cardSourceShare` (22): being visible and being available are different
+sentences, and collapsing them decides for the user.
+
+**A sibling table, not a wider `binders`.** `binders` is `primary key
+(user_id)` and `pullFriends`, `match_wants`, `send_to_inbox` and `can_message`
+all read that shape. Re-keying it to (user_id, binder_id) would have touched
+every one of them, and re-done the RLS harness, for a feature that only adds a
+case. The cost of the sibling is real and worth naming: `trade_offers` needed a
+`source` column so two publishers stop evicting each other, `match_wants` grew
+a second liveness check, and reachability now has two clauses instead of one.
+That is three careful edits against rewriting the table everything social
+depends on.
+
+**Rows point at collection rows, not at cards.** A binder holds copies you own,
+and finish, condition, grade and price all live on `CollectionItem`. Copying
+them into the binder would have made a **fourth** denormalized `Card` for
+`savePatch` to chase — the failure mode CLAUDE.md already warns about, where
+fixing a picture updates the sheet and leaves a grid showing the old one.
+Pointing at the row means a binder always shows the copy actually owned, and
+the price refreshes underneath. Quantities clamp to the collection twice, in
+`addToBinder` and again in `resolveBinderRows`, because the collection can
+shrink long after the binder row was written and the claim is one a friend
+drives across town for.
+
+**A binder is its own payload kind**, the fourth. It could have been a
+`ProfilePayload` with a name on it, and that is the version that eventually
+overwrites somebody's collection snapshot with a four-card subset. A separate
+kind makes "file this under its sender, never merge it into their cards" a
+property of the type rather than a rule in a merge function.
+
+**What it costs.** A fourth wire kind, which an older client rejects as "not a
+Cardstock share" — acceptable, and the honest alternative was a shape that
+could be misread. Forty binders per account, and a poll that fetches friends'
+binders in full rather than by revision (they are selections, not collections;
+a cheap revision probe would be a second round trip to save less than it
+spends). And a third publishing surface for a user to keep track of, which is
+why every screen names the audience in words rather than describing privacy in
+the abstract.
+
+**What would reopen it.** Wanting a binder anyone can open without an account —
+which is the open-web decision above, and should be taken as one. Or binder
+counts that make the fetch-in-full poll expensive, at which point these want
+the `remoteRev` treatment the main binder already has.
+
 ---
 
-### 23. A binder is a label on a real object, and its QR is a link to nothing but this app
+### 27. A binder is also an object on a shelf, and its QR is a link to nothing but this app
 
-**Why.** Somebody who scans a whole binder into the app has done the hard part
-and still cannot answer the only question they will actually ask afterwards:
-*which* binder is this card in, and where in it. So binders are first-class —
-but as **locations**, not as a second collection. A binder holds no cards; cards
-point at one (`CollectionItem.binderId`). Everything else follows from that:
-deleting a binder unfiles cards and deletes none, a card can be found without
-opening a binder, and the shelf can be reorganized without touching the
-collection.
+**Why.** Decision 26 made a binder a named selection with its own audience.
+Most of those selections are also a *physical thing* — a ring binder, a box, a
+shelf — and the question a collector actually asks while holding one is "which
+of these is this, and what page is the Charizard on". Two small additions
+answer it without a second concept: a page number on the binder row, and a
+label you print and stick on the cover.
 
-**The physical half is a printed QR, and it decides the design.** A sticker
-outlives the session that made it, the device that made it, and often the
-person's memory of making it. So:
+**One binder, not two.** The alternative was a separate "physical location"
+model with its own table and `CollectionItem.binderId`. That was built and
+thrown away deliberately: it split a collection row per binder (a card in two
+binders became two rows), and it put a second thing called "binder" in a UI
+that already had one. `BinderCard.page` gets the same answer for one optional
+field, and it is *better placed* — the same copy can sit in two binders, and
+"page 3" is only true of one of them.
+
+**The label decides the rest of the design.** A sticker outlives the session
+that made it, the device that made it, and often the memory of making it. So:
 
 - **It carries a plain URL to this deployment**, `…#/binders/<id>`, built from
   the app's own `location` — never a shortener, never an id that needs a server
-  to resolve. Any phone camera opens it; no account, no install, no network
-  beyond loading the app itself. A stranger who scans it sees whatever *their*
-  app has, which is nothing: the link carries no collection.
-- **It rides the fragment**, like every other route here, so a printed label
-  keeps working offline and never sends the id to a server even where one is
-  listening. (The referral code is the mirror image — `?via=` rides the search
-  string precisely so the two can never be confused; decision on referrals in
-  social.md.)
+  to resolve. Any phone camera opens it: no account, no install, no network
+  beyond loading the app. A stranger who scans it sees whatever *their* app
+  has, which is nothing — the link carries no cards, not even for a `public`
+  binder, whose contents still travel only through `socialcloud.ts`.
+- **It rides the fragment**, so a printed label works offline and the id is
+  never sent to a server even where one is listening. (`?via=` rides the search
+  string for the mirror-image reason — the two can never be confused.)
 - **The encoder is ours** (`lib/qr.ts`, ~400 lines, no dependency). You print a
-  label in the room the binder is in, frequently on a laptop that has never
-  signed into anything. An image API or a CDN script would be the one part of
-  this feature that fails while the rest of the app works. `tests/unit/qr.test.mjs`
-  decodes what it produces with a real decoder, because "it looks like a QR
-  code" is not evidence and a subtly wrong encoder produces a sticker that is
-  discovered to be useless weeks later, already glued down.
-- **The id is designed to be typed back.** Ten characters of base32 without
-  `i`, `l`, `o`, `0` or `1`, printed under the symbol in two groups of five. A
-  scuffed sticker is a solvable problem; an unprintable id is not.
+  label in the room the binder is in, often on a laptop that has never signed
+  into anything. `tests/unit/qr.test.mjs` decodes what it produces with a real
+  decoder, because "it looks like a QR code" is not evidence and a subtly wrong
+  encoder is discovered weeks later, already glued down.
+- **The id is printed underneath, grouped in fives**, because a scuffed sticker
+  is a solvable problem.
 
-**The cost, stated plainly.** Binder + page make a collection row's identity
-(`sameBinder`, beside `sameGrade` and `sameOpened`), so the same card in two
-binders is two rows. That is the honest model — one merged row of qty 2 cannot
-say what is in *this* binder — but it does mean a collection filed across
-several binders has more rows than one that is not, and code that assumes one
-row per printing (there is none today) would need to say which it means.
-Binders are also **not tombstoned**, exactly as decks are not: a binder deleted
-on one device comes back until every device has synced, which costs a tap. The
-alternative — mixing binder ids into the tombstone table the collection merge
-reads by id — costs cards, and that trade is not close.
+**Scanning a page fills a binder.** The page-scan review is a session now: one
+review screen accumulates page after page, the binder is chosen once on it, and
+each confirmed row is written twice — `addToCollection` for the copy, then
+`addToBinder(binderId, itemId, 1, page)` for the arrangement. That order is
+deliberate: a failure between them leaves a card filed outside a binder, which
+the user can fix, where the other order leaves a binder pointing at nothing.
 
-**What would reopen it.** Slots rather than pages (a 3x3 page has nine
-positions, and the detector already returns them in reading order), which is a
-strictly additive field on the same rows. Or sharing a binder *label* with a
-friend, which would be the first thing here to leave the device — and is
-exactly what the current design refuses, because the QR is a route into your own
-app and nothing else.
+**The cost.** `#/binders/:id` is now printed on paper, so it is the one route in
+this app that can never be renamed — and deleting a binder silently retires
+whatever labels are on shelves. Page numbers are also only as true as the last
+scan: re-reading page 7 keeps the page a copy was first seen on rather than
+moving it, which is right for a re-scan and wrong for a card that genuinely
+moved. Moving cards between pages is hand-editing work this does not have yet.
+
+**What would reopen it.** Slots as well as pages — a 3x3 page has nine
+positions and the detector already returns them in reading order, which is
+strictly additive on the same row. Or letting the app *read* a label through
+the camera (`BarcodeDetector`), which is deliberately not in the scan pipeline
+today: any phone camera already opens the link, and a per-frame barcode pass is
+exactly the kind of change the scan harness exists to gate.
+

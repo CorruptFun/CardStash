@@ -14,6 +14,7 @@
     "test:scan": "node tests/harness/run-matrix.mjs",
     "test:scanui": "node tests/harness/drive-scan-ui.mjs",
     "test:batch": "node tests/harness/batch-add-ui.mjs",
+    "test:invite": "node tests/harness/invite-ui.mjs",
     "test:lowlight": "node tests/harness/run-matrix.mjs --degradations=lowlight,dim,dark --mode=hinted --stack=3",
     "test:capture": "node tests/harness/capture-stack.mjs",
     "test:camera": "node tests/harness/camera-lifecycle.mjs",
@@ -25,6 +26,7 @@
     "test:install": "node tests/harness/install-prompt.mjs",
     "test:cloud": "node tests/harness/cloud-live.mjs",
     "test:social": "node tests/harness/social-rls.mjs",
+    "test:messages": "node tests/harness/messages-rls.mjs",
     "test:cardsource": "node tests/harness/cardsource-rls.mjs",
     "test:escrow": "node tests/harness/escrow-rls.mjs"
   },

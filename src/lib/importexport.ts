@@ -1,5 +1,4 @@
 import type { ImportRow } from './cardsearch'
-import { cleanBinderName, cleanBinderPage } from './binders'
 import { gradeShort } from './slab'
 import { parseCsv, csvField } from './csv'
 import { FINISH_LABEL, GAMES } from './games'
@@ -141,14 +140,6 @@ export interface CsvImportRow extends ImportRow {
   forTrade?: number
   grade?: GradeInfo
   marketValue?: number
-  /**
-   * The binder NAME as written in the file, not an id. A CSV crosses devices
-   * and apps, where an id means nothing — the importer looks the name up and
-   * makes the binder if it is new, so a round trip through a spreadsheet keeps
-   * the shelf in order.
-   */
-  binder?: string
-  binderPage?: number
 }
 
 /**
@@ -202,8 +193,6 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
   const forTrade = col('for trade', 'trade', 'for_trade', 'trade quantity')
   const grade = col('grade', 'grading', 'slab')
   const marketValue = col('market value', 'value', 'my value', 'unit price (usd)')
-  const binder = col('binder', 'location', 'storage', 'folder')
-  const binderPage = col('binder page', 'page')
   if (name === -1) throw new Error('No "Name" column found — is this a collection CSV export?')
 
   const parsed: CsvImportRow[] = []
@@ -235,8 +224,6 @@ export function parseCollectionCsv(text: string): CsvImportRow[] {
       marketValue: marketValue === -1 || /unit price/.test(header[marketValue] ?? '')
         ? undefined
         : parsePurchasePrice(cells[marketValue]),
-      binder: binder === -1 ? undefined : cleanBinderName(cells[binder] ?? '') || undefined,
-      binderPage: binderPage === -1 ? undefined : cleanBinderPage(cells[binderPage]),
     })
   }
   if (!parsed.length) throw new Error('No importable rows found')
@@ -264,21 +251,13 @@ const EXPORT_HEADER = [
   'For trade',
   'Grade',
   'Sealed',
-  'Binder',
-  'Binder page',
   'Unit price (USD)',
   'Purchase price',
   'API id',
   'Added',
 ]
 
-/**
- * `binderNames` maps binder id to name. Ids are meaningless outside this
- * device, so the export writes the NAME and the importer resolves it back —
- * which is also what makes a CSV from another app importable with its own
- * "Location" column.
- */
-export function collectionToCsv(items: CollectionItem[], binderNames?: Map<string, string>): string {
+export function collectionToCsv(items: CollectionItem[]): string {
   const lines = [EXPORT_HEADER.join(',')]
   for (const item of items) {
     lines.push(
@@ -295,8 +274,6 @@ export function collectionToCsv(items: CollectionItem[], binderNames?: Map<strin
         item.forTrade ?? '',
         item.grade ? gradeShort(item.grade) : '',
         item.opened == null ? '' : item.opened ? 'opened' : 'sealed',
-        (item.binderId ? binderNames?.get(item.binderId) : '') ?? '',
-        item.binderPage ?? '',
         itemUnitPrice(item)?.toFixed(2) ?? '',
         item.purchasePrice?.toFixed(2) ?? '',
         item.card.apiId,

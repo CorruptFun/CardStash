@@ -57,7 +57,7 @@ view reaches past `lib` to an HTTP endpoint directly.
 | `corner.ts` | 283 | Collector-line crop regions and the parsers that dig set code / number / passcode out of noisy OCR. |
 | `vision.ts` | 939 | Frame analysis (motion, sharpness, card region), deskew/crop refinement, foil sheen, perceptual hash, sideways detection, **and `detectCardRegions` — the multi-card detector**. |
 | `multiscan.ts` | 203 | Binder-page / multi-card scanning: detect regions, crop, identify each on a reduced budget, hand the lot to a review screen. Writes nothing itself. |
-| `binders.ts` | 145 | Binders — the physical shelf. Pure: names, printable ids, the label URL, page grouping, `sanitizeBinder`. The table and CRUD live in `db.ts`. |
+| `binders.ts` | 220 | Binders: resolving their rows against the collection, what a visibility means — and the physical half (page grouping, the printed label's URL and code). Pure; the table and CRUD live in `db.ts`. |
 | `qr.ts` | 400 | A dependency-free QR encoder (byte mode, level M, versions 1-10) — for the printed binder label, which is made offline in the room the binder is in. |
 | `entitlement.ts` | 40 | The seam for the planned paid tier. A `GATED` table, every row `false`. Checked at entry points only — never at `detectCardRegions`. |
 | `camera.ts` | 251 | `getUserMedia` lifecycle, torch/exposure controls, iOS stream parking, frame capture (incl. low-light stacking). |
@@ -213,6 +213,8 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | the diagnostics endpoint | Only when sharing is on **and** a token is set | write |
 | the shared card index (`lookup_card_data` on our own project) | Only for cards with **no image at all**, driven by what is on screen, batched and debounced, misses cached three days. Sends card ids with the publishable key as `anon` — **never the session token**. Off with `cardSourceLookup` | read |
 | the shared card index (`submit_card_data` / `flag_card_data`) | Only when the user turns on contributing **and** ticks the box on that card. Attributed, so it needs an account | write |
+| messages (`list_threads` / `send_message` on our own project) | Only with a handle claimed. Polled with friends and the inbox; the body is plaintext to us | read/write |
+| custom binders (`publish_custom_binder` / `custom_binders` on our own project) | Only for binders the user set to friends or public — a private binder is never uploaded. Pushed with the poller, read with the friend refresh | read/write |
 
 The scan pipeline never sends an image anywhere. Card identification is
 Tesseract + canvas math on-device; the APIs are only asked by name, set and

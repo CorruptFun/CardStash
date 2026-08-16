@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { GAMES } from './games'
-import type { Game, ShareScope } from './types'
+import { sanitizeSocialLinks } from './profilelinks'
+import type { Game, ShareScope, SocialLink } from './types'
 
 /**
  * Our pokemontcg.io key, compiled in. Optional: without one the app uses the
@@ -133,6 +134,15 @@ export interface Settings {
   profileName: string
   /** Short blurb on the shared binder ("DM @rae on Discord to trade"). */
   profileNote: string
+  /**
+   * Social accounts shown beside the shared binder, as icons a friend can tap.
+   *
+   * Stored here rather than on the hosted `profiles` row on purpose: these are
+   * contact details, so they ride the BINDER and inherit its audience (see
+   * `lib/profilelinks.ts`). That also keeps them working with no account at
+   * all — they travel in a `#/x?d=…` link like the note beside them.
+   */
+  profileLinks: SocialLink[]
   /** What a profile share includes: the trade binder, or the whole collection. */
   shareScope: ShareScope
   /**
@@ -166,6 +176,13 @@ export interface Settings {
   socialCursor: number
   /** Last successful social sync. */
   socialAt: number
+  /**
+   * Unread messages across every conversation, cached so the nav badge is
+   * right on the first frame after a cold launch instead of appearing two
+   * seconds in. A cache of a server fact like `socialHandle`, never the
+   * authority — every poll overwrites it, and signing out clears it.
+   */
+  messageUnread: number
   /**
    * The `@handle` whose link brought this install here, or ''.
    *
@@ -241,6 +258,7 @@ export const useSettings = create<Settings>()(
       profileId: '',
       profileName: '',
       profileNote: '',
+      profileLinks: [],
       shareScope: 'trade',
       driveBackup: false,
       driveAt: 0,
@@ -250,6 +268,7 @@ export const useSettings = create<Settings>()(
       socialHandle: '',
       socialCursor: 0,
       socialAt: 0,
+      messageUnread: 0,
       referralFrom: '',
       referralAt: 0,
       cardSourceLookup: true,
@@ -284,6 +303,10 @@ export const useSettings = create<Settings>()(
         // Build config, never the stored copy: an install that persisted an
         // empty key back when this was a text field must still pick up ours.
         merged.pokemonKey = POKEMON_KEY
+        // localStorage is editable by anyone with devtools, and this list ends
+        // up as `<a href>`s in other people's apps. Rehydration is the door,
+        // so it gets the same sanitizer a pasted link does.
+        merged.profileLinks = sanitizeSocialLinks(merged.profileLinks) ?? []
         if (persisted && typeof (persisted as Partial<Settings>).diagConsentAt !== 'number') {
           merged.diagShare = false
           merged.diagConsentAt = 0

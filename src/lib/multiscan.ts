@@ -64,7 +64,7 @@ export interface PageCard {
    *
    * A binder is scanned page after page into ONE review screen, so the page
    * number is the only thing that survives to say where a card physically is.
-   * It rides onto the collection row as `binderPage` when the page is filed —
+   * It rides onto the binder row (`BinderCard.page`) when the page is filed —
    * which is what turns "somewhere in this binder" into "page 7".
    */
   page: number

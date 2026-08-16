@@ -40,14 +40,12 @@ does **not** delete what is already in the user's Drive — that is their data, 
 their account, and silently destroying it on a toggle would be the wrong default.
 The copy says so.
 
-**Binders are local, and a printed label adds no egress.** A binder is a name
-and an id (`lib/binders.ts`); its QR code encodes a URL to this same app —
+**A printed binder label adds no egress.** Its QR code encodes a URL to this same app —
 `…#/binders/<id>` — with the id in the **fragment**, which browsers never send
 to a server. Scanning someone else's label loads the app and looks the id up in
-the scanner's own IndexedDB, where it is not found. Binders ride the JSON
-backup, the Drive backup and the vault like every other table, and they are
-stripped from nothing because they travel to nobody: no share payload, no
-published binder, no analytics event carries a binder name.
+the scanner's own IndexedDB, where it is not found — the label carries no cards,
+not even for a `public` binder, whose contents still travel only through the
+paths above. No analytics event carries a binder name or a page.
 
 ## Network egress, exhaustively
 

@@ -54,6 +54,19 @@ export interface SheetRequest {
   }
 }
 
+/** A conversation about to be opened, and what it is about. */
+export interface MessageDraft {
+  /** Their Supabase account id — the only thing a conversation is addressed to. */
+  userId: string
+  /** Their name, so the screen has a heading before any fetch comes back. */
+  name?: string
+  handle?: string
+  /** The card being discussed, if the user came from one. */
+  about?: SharedCard
+  /** Suggested opening line, which the user is free to replace. */
+  body?: string
+}
+
 export interface SearchPrefill {
   query: string
   game?: Game
@@ -98,6 +111,18 @@ interface UiState {
   /** Cards handed to the AI builder to design around ("build around these"). */
   builderSeeds: Card[] | null
   setBuilderSeeds: (seeds: Card[] | null) => void
+  /**
+   * What a conversation should open with, handed over by whatever screen sent
+   * the user there — the card sheet's "Ask about this card", a want match, a
+   * friend's binder.
+   *
+   * Routed through the store rather than the URL for the same reason
+   * `builderSeeds` is: a `SharedCard` in a hash fragment would be a share
+   * payload in the one place `decodeShareText` is looking for one, and the
+   * draft is worthless the moment the app is reloaded anyway.
+   */
+  messageDraft: MessageDraft | null
+  setMessageDraft: (draft: MessageDraft | null) => void
 }
 
 let toastSeq = 1
@@ -131,6 +156,8 @@ export const uiStore = createStore<UiState>((set, get) => ({
   setSearchPrefill: (searchPrefill) => set({ searchPrefill }),
   builderSeeds: null,
   setBuilderSeeds: (builderSeeds) => set({ builderSeeds }),
+  messageDraft: null,
+  setMessageDraft: (messageDraft) => set({ messageDraft }),
 }))
 
 export function useUi<T>(selector: (state: UiState) => T): T {

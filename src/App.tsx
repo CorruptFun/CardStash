@@ -7,6 +7,7 @@ import { Toasts } from './components/Toasts'
 import { Welcome } from './components/Welcome'
 import { trackScreen } from './lib/analytics'
 import { shouldShowWelcome } from './lib/onboarding'
+import { useSettings } from './lib/settings'
 import { warmOwnedCatalogs } from './lib/tcgcsv'
 import { uiStore } from './store/ui'
 import { BuilderView } from './views/BuilderView'
@@ -21,6 +22,7 @@ import { IngestView } from './views/IngestView'
 import { ScanView } from './views/ScanView'
 import { SearchView } from './views/SearchView'
 import { SettingsView } from './views/SettingsView'
+import { MessagesView } from './views/MessagesView'
 import { OrderView } from './views/OrderView'
 import { TradeView } from './views/TradeView'
 
@@ -28,14 +30,24 @@ type Route =
   | { name: 'scan' }
   | { name: 'search' }
   | { name: 'collection' }
-  /** The binders screen, and the target a printed QR label opens: `#/binders/<id>`. */
-  | { name: 'binders'; binderId: string | null }
   | { name: 'decks'; deckId: string | null }
   | { name: 'builder' }
   | { name: 'settings' }
-  | { name: 'friends'; friendId: string | null }
+  | { name: 'friends'; friendId: string | null; binderId: string | null }
   | { name: 'trades'; tradeId: string | null }
   | { name: 'orders'; orderId: string | null }
+  /**
+   * Conversations. Addressed by the OTHER PERSON's account id rather than by a
+   * thread id, so the same link works whether or not a conversation exists —
+   * see the header of MessagesView.
+   */
+  | { name: 'messages'; otherId: string | null }
+  /**
+   * Binders the user built by hand: the list, or one of them. The detail route
+   * is **printed on paper** — it is what a binder's QR label carries — so it is
+   * the one route here that can never be renamed.
+   */
+  | { name: 'binders'; binderId: string | null }
   /** Share-link landing: `#/x?d=<blob>` (profile, trade, or reply). */
   | { name: 'ingest'; blob: string | null }
 
@@ -50,8 +62,6 @@ function parseRoute(hash: string): Route {
       return { name: 'search' }
     case 'collection':
       return { name: 'collection' }
-    case 'binders':
-      return { name: 'binders', binderId: parts[1] ? decodeURIComponent(parts[1]) : null }
     case 'decks':
       return { name: 'decks', deckId: parts[1] ?? null }
     case 'builder':
@@ -59,11 +69,16 @@ function parseRoute(hash: string): Route {
     case 'settings':
       return { name: 'settings' }
     case 'friends':
-      return { name: 'friends', friendId: parts[1] ?? null }
+      return { name: 'friends', friendId: parts[1] ?? null, binderId: parts[2] ?? null }
     case 'trades':
       return { name: 'trades', tradeId: parts[1] ?? null }
     case 'orders':
       return { name: 'orders', orderId: parts[1] ?? null }
+    case 'messages':
+      return { name: 'messages', otherId: parts[1] ?? null }
+    case 'binders':
+      // decoded because this id can arrive from a scanned QR label.
+      return { name: 'binders', binderId: parts[1] ? decodeURIComponent(parts[1]) : null }
     case 'x':
       return { name: 'ingest', blob: query.get('d') }
     default:
@@ -74,14 +89,15 @@ function parseRoute(hash: string): Route {
 const TABS: { route: string; icon: IconName; label: string; match: string[] }[] = [
   { route: '#/scan', icon: 'scan', label: 'Scan', match: ['scan'] },
   { route: '#/search', icon: 'search', label: 'Search', match: ['search'] },
-  { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection', 'binders'] },
-  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'ingest'] },
+  { route: '#/collection', icon: 'cards', label: 'Collection', match: ['collection'] },
+  { route: '#/friends', icon: 'users', label: 'Friends', match: ['friends', 'trades', 'orders', 'messages', 'binders', 'ingest'] },
   { route: '#/decks', icon: 'decks', label: 'Decks', match: ['decks', 'builder'] },
   { route: '#/settings', icon: 'settings', label: 'Settings', match: ['settings'] },
 ]
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash))
+  const unread = useSettings((state) => state.messageUnread)
   const [welcome, setWelcome] = useState(() => shouldShowWelcome())
   const [installVisible, setInstallVisible] = useState(false)
   const [nudgeVisible, setNudgeVisible] = useState(false)
@@ -117,16 +133,23 @@ export function App() {
         </div>
         {route.name === 'search' && <SearchView />}
         {route.name === 'collection' && <CollectionView />}
-        {route.name === 'binders' && (
-          <BindersView key={route.binderId ?? 'all'} binderId={route.binderId} navigate={navigate} />
-        )}
         {route.name === 'decks' && <DecksView deckId={route.deckId} navigate={navigate} />}
         {route.name === 'builder' && <BuilderView navigate={navigate} />}
         {route.name === 'settings' && <SettingsView />}
         {route.name === 'friends' &&
-          (route.friendId ? <FriendBinderView key={route.friendId} friendId={route.friendId} /> : <FriendsView />)}
+          (route.friendId ? (
+            <FriendBinderView
+              key={route.friendId}
+              friendId={route.friendId}
+              binderId={route.binderId}
+            />
+          ) : (
+            <FriendsView />
+          ))}
         {route.name === 'trades' && <TradeView tradeId={route.tradeId} />}
         {route.name === 'orders' && <OrderView key={route.orderId ?? 'none'} orderId={route.orderId} />}
+        {route.name === 'messages' && <MessagesView otherId={route.otherId} />}
+        {route.name === 'binders' && <BindersView key={route.binderId ?? 'all'} binderId={route.binderId} />}
         {route.name === 'ingest' && <IngestView blob={route.blob} />}
       </main>
       {/* One banner slot, three claimants, in descending order of what it costs
@@ -144,9 +167,21 @@ export function App() {
       <nav className="nav safe-bottom" aria-label="Main">
         {TABS.map((tab) => {
           const active = tab.match.includes(route.name)
+          // Unread messages are the one thing in this app that is waiting on
+          // the user rather than the other way round, so the tab that holds
+          // them says so. Read from the settings cache so it is right on the
+          // first frame rather than two seconds into the first poll.
+          const badge = tab.route === '#/friends' ? unread : 0
           return (
             <a key={tab.route} href={tab.route} className={`nav__tab ${active ? 'nav__tab--on' : ''}`}>
-              <Icon name={tab.icon} size={22} />
+              <span className="nav__glyph">
+                <Icon name={tab.icon} size={22} />
+                {badge > 0 && (
+                  <em className="nav__badge" aria-label={`${badge} unread messages`}>
+                    {badge > 9 ? '9+' : badge}
+                  </em>
+                )}
+              </span>
               <span>{tab.label}</span>
             </a>
           )

@@ -12,7 +12,7 @@ import {
   unpublish,
   type SocialProfile,
 } from '../lib/socialcloud'
-import { redeemReferral } from '../lib/referral'
+import { announceReferrer } from './InvitePanel'
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
@@ -85,9 +85,10 @@ export function SocialPanel() {
       setProfile(next)
       setHandle('')
       // Fire and forget, never awaited: if the referral was banked from a
-      // friend's link it is redeemed here, and a failure must not turn a
-      // successful claim into a red toast about a discount.
-      void redeemReferral()
+      // friend's link it is redeemed here, and the friendship it promised is
+      // made. A failure must not turn a successful claim into a red toast
+      // about a discount.
+      void announceReferrer(toast)
       toast(`You are @${next.handle}`, 'success')
     })
 
@@ -117,6 +118,8 @@ export function SocialPanel() {
       if (summary.friendsUpdated) parts.push(`${summary.friendsUpdated} updated`)
       if (summary.tradesReceived) parts.push(`${summary.tradesReceived} new trade${summary.tradesReceived === 1 ? '' : 's'}`)
       if (summary.repliesApplied) parts.push(`${summary.repliesApplied} repl${summary.repliesApplied === 1 ? 'y' : 'ies'}`)
+      if (summary.messagesWaiting)
+        parts.push(`${summary.messagesWaiting} unread message${summary.messagesWaiting === 1 ? '' : 's'}`)
       toast(parts.length ? `Synced — ${parts.join(' · ')}` : 'Synced — nothing new', 'success')
     })
 
@@ -142,7 +145,7 @@ export function SocialPanel() {
         </p>
         <SignIn
           onSignedIn={() => {
-            void redeemReferral()
+            void announceReferrer(toast)
             loadMyProfile().then(setProfile).catch(() => setProfile(null))
           }}
         />

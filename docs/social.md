@@ -46,13 +46,14 @@ on one id rather than forking.
 
 ## Payloads
 
-Three kinds, all carrying `app: 'cardstock-social', v: 1`:
+Four kinds, all carrying `app: 'cardstock-social', v: 1`:
 
 | Kind | Built by | Contents |
 | ---- | -------- | -------- |
-| `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]` |
+| `profile` | `buildProfilePayload(items, me, wants)` | `id`, `name`, `note`, `scope`, `at`, `cards: SharedCard[]`, `wants?: SharedWant[]`, `links?: SocialLink[]` |
 | `trade` | `buildTradePayload(trade, me)` | `id`, `at`, `from`, `to?`, `note?`, `offer` (what the sender hands over), `want` (what they want back) |
 | `reply` | `buildReplyPayload(trade, me, status, note)` | `id`, `at`, `from`, `status: accepted \| declined`, `note?` |
+| `binder` | `buildBinderPayload(binder, cards, me)` | `id` (the binder's), `at`, `from`, `name`, `note?`, `tradeable`, `cards: SharedCard[]` — one custom binder, filed under its sender and never merged into their card list |
 
 **Perspective flips at the wire.** A `TradeRecord` stores `give`/`get` from the
 local user's point of view. `buildTradePayload` sends `give` as `offer`;
@@ -73,6 +74,38 @@ never an **opened** sealed product.
 `SharedCard.price` is the finish's market unit **without** the condition factor
 applied; `sharedRowValue()` multiplies it in on the viewer's side. Both sides
 therefore agree on the maths even if their app versions differ.
+
+## Social profile links
+
+A collector can show where else to find them — Instagram, Discord, a Whatnot
+store — as tappable icons under their name on their binder. `lib/profilelinks.ts`
+is the whole pure half; `settings.profileLinks` is where mine live;
+`components/ProfileLinks.tsx` is the editor and the icon row.
+
+**They ride the binder, not the directory profile,** and that is the decision
+rather than an implementation detail. `profiles` (migration 0001) is readable by
+every signed-in user and its own header says it carries identity ONLY — the
+contact blurb lives on the binder row precisely so it inherits scope-driven
+visibility. Links are the same class of fact, so they go the same way. Three
+things follow:
+
+- their audience is the **binder's** audience: anyone you send a link to, plus
+  every signed-in collector under `scope: 'trade'`, or accepted friends only
+  under `scope: 'all'`;
+- they work with **no account at all** — they travel in a `#/x?d=…` link and a
+  `.json` file like the note beside them;
+- moving them to `profiles` later would silently widen them to every stranger
+  in the directory. Don't.
+
+**The vocabulary is closed and the URL is built, never stored.** A handle-kind
+link stores the *handle*; `socialLinkUrl()` builds the href from a table. That
+makes "the icon matches the destination" a property of the code rather than a
+promise about data that arrived over the wire — an `<a href>` rendered from a
+stranger's payload is otherwise a stored redirect wearing an Instagram glyph.
+`website` is the one kind that holds a URL, is `https:`-only, and renders as a
+neutral globe. Discord has no profile page, so it is copy-to-clipboard rather
+than a link to a 404. Capped at 8 per profile, one per platform, sanitized on
+the way in *and* on the way out of localStorage.
 
 ## Wire format
 
@@ -155,7 +188,7 @@ Flow with **no server**:
 `sanitizePayload(raw)` is the only door. Rules:
 
 - an `app` field, if present, must equal `cardstock-social`;
-- `kind` must be one of the three; anything else throws `NOT_SOCIAL`;
+- `kind` must be one of the four; anything else throws `NOT_SOCIAL`;
 - a trade with neither an offer nor a want is rejected;
 - strings are trimmed and length-capped (name 60, note 400, cardId 160, card
   name 200, setName 120, number 32, rarity 40, image URL 500);
@@ -178,7 +211,8 @@ the same treatment as a pasted link.
 
 Accounts, mutual friends, a trade inbox and global want-matching, on the same
 project that already holds the cloud vault. Schema in `supabase/migrations/`
-(`0001`–`0004`); applied and verified against the live project 2026-08-14.
+(`0001`–`0004`, plus `0019` for messages); the first four were applied and
+verified against the live project 2026-08-14.
 
 **It is dormant until the user opts in.** Signed out, none of this runs and the
 link path behaves exactly as it always has.
@@ -607,6 +641,171 @@ on free users the tiering explicitly keeps free.
 
 ---
 
+## Messages (v0.19.0)
+
+Two collectors talking about a card: `supabase/migrations/0019`,
+`lib/messaging.ts`, `views/MessagesView.tsx`. Read decision 24 before touching
+any of it.
+
+**It is not the trade inbox, and it must not become it.** `inbox` (0004) is
+recipient-read-only, sender-stamped, drained-and-deleted, 30-day TTL, capped at
+20 undrained per pair. Every one of those is right for handing someone a trade
+payload and wrong for a conversation — a sender who cannot read the thread back
+cannot see what they said. This document said the inbox was not the channel for
+this. It still is not.
+
+| | `inbox` | `messages` |
+| --- | --- | --- |
+| Read by | recipient only | both participants |
+| Lifetime | deleted on drain, 30-day TTL | kept, 365-day prune |
+| Carries | a whole `TradePayload` | text, plus one optional `SharedCard` |
+| Cap | 20 undrained per pair | 15 unanswered per pair, 120/hour globally |
+
+**Who may open one** is the `send_to_inbox()` rule plus one clause: accepted
+friends, anyone publishing a `scope='trade'` binder, **or anyone who has already
+spoken to you**. That last one is not politeness — without it, answering someone
+who unpublished between their message and your reply fails, and the person who
+started the conversation is the one who gets ignored. Publish nothing and accept
+nobody and you are unreachable, which stays the correct default.
+
+**Routed by the person, not the thread.** `#/messages/<their account id>` opens
+the conversation whether or not one exists yet, so "message this collector" is
+the same link from a binder, a card sheet and a want match, and there is no
+separate new-thread state to fall out of step. The thread id is a server detail.
+
+**Nothing is stored locally.** No Dexie table, for `marketplace.ts`'s reason and
+one more: Dexie rows ride `exportBackup`, the CSV export and the daily Drive
+backup, and a private conversation with somebody else does not belong in a file
+the user hands around. Threads are fetched; the screens say so when they cannot.
+
+**Plaintext, and the copy says so.** `binders` is plaintext because a friend's
+app has to read it; this is plaintext for exactly the same reason, and the
+vault's encryption (15b — a key we hold) does not extend here. What it is
+instead is *bounded*: text and one card reference. No attachments, no images,
+no addresses — there is nowhere to put one.
+
+**Blocking is one-sided and silent.** `set_thread_block` sets my side only. The
+thread leaves my list; their messages are still accepted and stored; they are
+never told. That mirrors `request_friend()` returning `pending` to someone who
+has been blocked, and for the same reason: being told is an instruction to make
+a second account. Messaging them again lifts my own block and never touches
+theirs.
+
+**Nothing may write these tables directly.** No INSERT/UPDATE/DELETE policy and
+no grant beyond `select` — the denormalized preview, the read watermarks and the
+block flags are all things a client could otherwise forge about the *other*
+person's row. `send_message` / `mark_thread_read` / `set_thread_block` /
+`list_threads` are the only doors.
+
+**`erase_social()` takes conversations with it** — 0019 replaces 0004's version
+rather than adding a second RPC, because a "delete everything" button that
+needs two calls is one forgotten call away from being a lie. It still leaves
+`vaults` alone, and still leaves `orders` alone.
+
+Two client rules worth keeping: the unread badge is a **cache** (`messageUnread`
+in settings) so it is right on the first frame after a cold launch, corrected by
+every poll and cleared on sign-out; and the `about` block goes through
+`sanitizeSharedCard` — the same door a `#/x?d=…` link uses — so a message cannot
+smuggle in a card shape a share link could not.
+
+## Custom binders (v0.19.0)
+
+Binders the user builds by hand — "my vintage Charizards", "the box I'm selling
+at the weekend" — each with **its own audience**. `lib/binders.ts` is the pure
+half, `views/BindersView.tsx` the screens, `supabase/migrations/0020` the
+server. Read decision 26 before changing what a visibility means.
+
+A binder is usually also a **physical object**, and two things say so without a
+second concept: `BinderCard.page` (stamped by a binder page scan, grouped on
+the screen) and a printed QR label carrying `…#/binders/<id>` — local, offline,
+carrying no cards, and nothing to do with visibility. That half is decision 27
+and `docs/data-model.md`; nothing in it touches the server.
+
+**They sit BESIDE the whole-collection binder, not instead of it.** `binders`
+(0003) is `primary key (user_id)` — one row — and four things read that shape:
+`pullFriends`, `match_wants`, `send_to_inbox`'s reachability and `can_message`.
+Re-keying it would have touched every one of them for a feature that only adds
+a case, so `custom_binders` is a sibling expressing the same rule the same way.
+
+| `visibility` | Who can read it | Uploaded? |
+| ------------ | --------------- | --------- |
+| `private` | only you | **no** — never leaves the device |
+| `friends` | accepted friends | yes |
+| `public` | **any signed-in collector** | yes |
+
+`public` stops at signed-in, deliberately. A binder readable by `anon` is one
+anybody holding the publishable key can enumerate — a list of valuable cards
+attached to a handle, which is exactly what `trade_offers` refuses to be. That
+is a decision to revisit deliberately, not by loosening a policy.
+
+**`tradeable` is a second switch, not a synonym.** Only a binder that is *both*
+public and tradeable enters the global want index (`isDiscoverable`). A
+friends-only binder is never globally matchable — 0003's invariant, one level
+down — and a public binder that is merely on display is a display case, not an
+offer. Publishing a public tradeable binder also makes you **reachable**
+(`send_to_inbox`, `can_message`), because otherwise the offer exists and nobody
+is permitted to ask about it.
+
+**Rows point at collection rows, not at cards.** `BinderCard.itemId` is a
+`CollectionItem.id`, so finish, condition, grade and price come off the copy the
+user actually owns — and a card patch that fixes a picture fixes it here too,
+with no fourth denormalized `Card` to chase (see `savePatch`). Quantities clamp
+to what the collection still holds, in `addToBinder` *and* again in
+`resolveBinderRows`, because the collection can shrink long after the binder row
+was written and a friend acts on the claim.
+
+**A binder is its own payload kind** (`kind: 'binder'`), not a `ProfilePayload`
+with a name on it. Importing one must never touch the sender's main snapshot: a
+binder is a subset, and merging "Rae's four Charizards" over "everything Rae
+owns" would look like a friend who had thrown their collection away.
+`upsertFriendBinder` files it under the sender — creating a stub record if they
+are not followed yet — and leaves `Friend.cards` alone. `friendFromProfile`
+returns the favour: a profile refresh keeps the binders it knows nothing about.
+
+**`trade_offers` gained `source`.** Two publishers per user now feed it and
+`replace_trade_offers` deletes wholesale, so without a per-source slice
+publishing a binder would evict the main binder's offers and vice versa. `''`
+is the main binder; anything else is a binder id. `unpublish_binder` was
+narrowed to `source = ''` for the same reason — taking your collection binder
+down must not silently empty the binders you deliberately published.
+
+**Nothing writes `custom_binders` directly**: no write policy, no write grant,
+`publish_custom_binder` / `unpublish_custom_binder` are the only doors — the
+row and its index slice have to move together. `publish_custom_binder` computes
+`public AND tradeable` **itself** rather than trusting the caller, so a client
+cannot push a friends-only binder into the global index by sending offers with
+it. Capped at 40 per account.
+
+Local storage is Dexie v9 (`binders`, `binderCards`), they ride the backup and
+the vault (`cloudmerge` merges them like decks), and `sanitizeBackup` forces
+anything it does not clearly recognise back to `private` — a restore must never
+be the thing that publishes a binder.
+
+### The handshake is free (decision 25)
+
+The positioning this feature exists to serve, because it constrains the code:
+**two collectors may do the entire deal in here and pay us nothing.** Message,
+agree a price, settle it however they like, put it in the post. Escrow is there
+for the deals that want it, and it is what the fee buys. It is the user's call,
+every time.
+
+So messaging is never gated on `VITE_MARKETPLACE` or on entitlement — it works
+in a build with the marketplace switched off, which is the deployed one — and
+the Ask button on the card sheet sits on a deliberately *wider* gate than Buy.
+We do not scan message bodies for prices or payment handles, do not interstitial
+someone on the way out, and do not nudge a quiet conversation. Escrow is sold on
+what it does ("the money is held until the card arrives"), never on fear of the
+alternative we are simultaneously offering. Read decision 25 before writing any
+copy near this, or before adding anything that measures where a deal ended up.
+
+Verification is `npm run test:messages` (`tests/harness/messages-rls.mjs`), the
+sibling of `test:social`: five signed-in users and one anonymous caller over
+reachability, third-party reads, forged writes, the caps, the block, erasure and
+the same control tests, so a refusal is provably a refusal. Run it after any
+migration touching `messages` or `message_threads`.
+
+---
+
 ## Paid trades (v0.18.0, in progress)
 
 Everything above is barter: cards for cards, no money anywhere in the model.
@@ -641,6 +840,9 @@ sender-stamped, 30-day TTL, capped at 20 undrained per pair — built for handin
 someone a trade payload, not for a shipping conversation. An order deliberately
 carries no free-text field either: the moment one exists it is an unmoderated
 message channel between two people who are, by construction, in a dispute.
+`messages` (above) does not change that: it is a channel between two people
+*before* anyone has agreed anything, it is not attached to an order, and an
+order still has no free-text field.
 
 **Verification** is `npm run test:escrow` (`tests/harness/escrow-rls.mjs`), the
 sibling of `test:social` — 45 assertions over buyer, seller, stranger and anon,
@@ -690,3 +892,48 @@ wearing a hat.
 Verification is `tests/unit/referral.test.mjs`, which pins the two easiest things
 to break: a sharer without a handle gets a byte-identical link, and a payload and
 a referral in one URL never eat each other.
+
+### The invite, and the friendship it promises (v0.18.0)
+
+Recording who invited whom decides a price and nothing else — the two of them
+were never connected, so the person doing the inviting still had to be added
+back by hand, by handle. `supabase/migrations/0017` closes that: an invite ends
+in a friendship.
+
+**`InvitePanel` (Friends → Invite a friend) is the whole entry point.** It shows
+`inviteLink(handle)` — `origin + pathname + ?via=<handle>`, never
+`location.href`, because the screen the inviter happened to be on is not part of
+the invitation. It sits below **My account** on purpose: the link *is* the
+handle, so with no handle there is nothing to hand out, and the fix is directly
+above. `referral_joins()` gives the inviter a count of who has arrived, which is
+what tells them the link works long before anyone buys anything.
+
+**`befriend_referrer()` takes no argument, and that is the security property.**
+0002 is emphatic that a requester may never flip their own row to accepted —
+"that is the whole consent gate" — and this does not weaken it. The accepted
+edge is authorised by the `referrals` row alone, which is proof that both sides
+acted: one wrote the invite, one followed it and made an account. There is
+nothing a caller can pass in, so there is nothing to point at a stranger.
+
+**A refusal is never laundered.** A `blocked` row in either direction ends the
+call and is left exactly as it was. Someone who declined a person must not find
+them back in their friends list because that person sent an invite link. A
+`pending` row is completed instead of duplicated — both sides have now said
+yes, which is the case `request_friend()` already auto-accepts.
+
+**A friendship is a row on the server; every screen reads Dexie.** So
+`seedFriendRows()` writes a cards-less local row for an accepted friend who has
+not published a binder, on both sides — `befriendReferrer()` does it
+immediately, so the Friends screen is not empty while the toast still says
+"you and @rae are now friends", and `pullFriends()` does it for everyone else.
+Publishing is a separate switch from having an account (two switches, above), so
+before this an accepted friend who had not turned it on was invisible, which
+reads as "adding a friend did nothing". The rows carry no cards and the next
+pull fills them in; they are only ever written for ids with no local row, so a
+link-imported friend's cards can never be blanked by one.
+
+Verified in `tests/harness/social-rls.mjs` §6b — the accepted edge, the
+idempotent second call, no friendship before a profile exists, the block that
+survives an invite, and `referral_joins()` counting only your own without ever
+becoming a window onto the graph. `npm run test:social` after touching any of
+it; the client half is in `tests/unit/referral.test.mjs`.

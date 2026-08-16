@@ -333,6 +333,92 @@ try {
   const cleared = await rest(alice.token, `/inbox?recipient=eq.${alice.id}`, { method: 'DELETE' })
   check('the recipient can clear their inbox', cleared.status < 300, `${cleared.status}`)
 
+  console.log('\n\x1b[1m5b. Custom binders carry their own audience\x1b[0m')
+  // dave publishes nothing at all through the main binder, which is what makes
+  // him the right subject: everything below has to come from the custom one.
+  const daveBinder = {
+    app: 'cardstock-social',
+    v: 1,
+    kind: 'binder',
+    id: `vintage${stamp}`,
+    at: stamp,
+    from: { id: dave.id, name: 'Dave' },
+    name: 'Vintage',
+    tradeable: true,
+    cards: [
+      { cardId: 'mtg:def', game: 'mtg', name: 'Shivan Dragon', finish: 'nonfoil', condition: 'NM', qty: 1, forTrade: 1 },
+    ],
+  }
+  const pubBinder = await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `vintage${stamp}`,
+    p_name: 'Vintage',
+    p_note: null,
+    p_visibility: 'public',
+    p_tradeable: true,
+    p_payload: daveBinder,
+    p_card_count: 1,
+    p_offers: [{ want_key: SHIVAN, game: 'mtg', name: 'Shivan Dragon', qty: 1 }],
+  })
+  check('publish a public custom binder', pubBinder.status === 200, `${pubBinder.status} ${JSON.stringify(pubBinder.body)}`)
+
+  const strangerReads = await rest(carol.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id,name`)
+  check('a STRANGER CAN read a public custom binder', (strangerReads.body ?? []).length === 1, JSON.stringify(strangerReads.body))
+  const anonBinder = await rest(PUBLISHABLE, '/custom_binders?select=binder_id')
+  check('ANONYMOUS reads none — public means signed in, not the open web', anonBinder.status !== 200 || (anonBinder.body ?? []).length === 0, `${anonBinder.status}`)
+  const forgeBinder = await rest(carol.token, '/custom_binders', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: dave.id, binder_id: 'x', name: 'x', visibility: 'public', payload: {} }),
+  })
+  check('direct INSERT is refused (no policy, no grant)', forgeBinder.status >= 400, `${forgeBinder.status}`)
+  const privateUpload = await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `p${stamp}`,
+    p_name: 'Private',
+    p_note: null,
+    p_visibility: 'private',
+    p_tradeable: false,
+    p_payload: daveBinder,
+    p_card_count: 1,
+  })
+  check("'private' is not a value this table holds", JSON.stringify(privateUpload.body).includes('bad_visibility'), JSON.stringify(privateUpload.body))
+
+  // A public tradeable binder is an advertisement, so it must make its owner
+  // reachable — otherwise the offer exists and nobody may ask about it.
+  const askDave = await rpc(carol.token, 'send_to_inbox', { p_recipient: dave.id, p_payload: tradePayload })
+  check('publishing one makes you REACHABLE, though your main binder is down', askDave.status === 200, `${askDave.status} ${JSON.stringify(askDave.body)}`)
+
+  const binderMatch = await rpc(carol.token, 'match_wants', { p_keys: [SHIVAN] })
+  check('a public tradeable binder IS globally matchable', (binderMatch.body ?? []).some((r) => r.user_id === dave.id), JSON.stringify(binderMatch.body))
+
+  // Publishing the main binder must not evict the custom binder's offers, and
+  // vice versa — that is what `trade_offers.source` exists for.
+  const stillMain = await rpc(carol.token, 'match_wants', { p_keys: [LOTUS, SHIVAN] })
+  const keys = (stillMain.body ?? []).map((r) => `${r.want_key}|${r.user_id}`)
+  check('THE TWO PUBLISHERS DO NOT EVICT EACH OTHER', keys.includes(`${LOTUS}|${alice.id}`) && keys.includes(`${SHIVAN}|${dave.id}`), JSON.stringify(keys))
+
+  // Flipping to friends-only must drop it out of the global index, exactly as
+  // an 'all' flip does for the main binder.
+  await rpc(dave.token, 'publish_custom_binder', {
+    p_binder_id: `vintage${stamp}`,
+    p_name: 'Vintage',
+    p_note: null,
+    p_visibility: 'friends',
+    p_tradeable: true,
+    p_payload: daveBinder,
+    p_card_count: 1,
+    p_offers: [{ want_key: SHIVAN, game: 'mtg', name: 'Shivan Dragon', qty: 1 }],
+  })
+  const afterFriendsOnly = await rpc(carol.token, 'match_wants', { p_keys: [SHIVAN] })
+  check("'public' -> 'friends' EVICTS from the global index", !(afterFriendsOnly.body ?? []).some((r) => r.user_id === dave.id), JSON.stringify(afterFriendsOnly.body))
+  const strangerBlocked = await rest(carol.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id`)
+  check('...and a stranger can no longer read it', (strangerBlocked.body ?? []).length === 0, JSON.stringify(strangerBlocked.body))
+
+  const takenDown = await rpc(dave.token, 'unpublish_custom_binder', { p_binder_id: `vintage${stamp}` })
+  check('unpublish_custom_binder succeeds', takenDown.status < 300, `${takenDown.status}`)
+  const goneForOwner = await rest(dave.token, `/custom_binders?user_id=eq.${dave.id}&select=binder_id`)
+  check('...and the row is gone', (goneForOwner.body ?? []).length === 0, JSON.stringify(goneForOwner.body))
+  const mainSurvives = await rpc(carol.token, 'match_wants', { p_keys: [LOTUS] })
+  check('TAKING A BINDER DOWN LEAVES THE MAIN BINDER INDEXED', (mainSurvives.body ?? []).some((r) => r.user_id === alice.id), JSON.stringify(mainSurvives.body))
+
   console.log('\n\x1b[1m6. Erasure leaves the vault alone\x1b[0m')
   await rest(alice.token, '/rpc/put_vault', {
     method: 'POST',
@@ -355,6 +441,78 @@ try {
   check('the want-index entry is gone', (indexGone.body ?? []).length === 0, JSON.stringify(indexGone.body))
   const vaultAfter = await rest(alice.token, '/vaults?select=revision')
   check('THE VAULT SURVIVES', vaultAfter.body?.length === 1, JSON.stringify(vaultAfter.body))
+
+  // An invite link creates an ACCEPTED edge with no request and no answer,
+  // which is the one thing 0002 spends its whole comment block forbidding. It
+  // is allowed here because the referral row is proof that both sides acted —
+  // one wrote the invite, one followed it — and because the function takes no
+  // argument, so there is nothing a caller can point at a stranger. The two
+  // checks that matter are the last two: a refusal must survive an invite, and
+  // the count must not become a window onto the graph.
+  console.log('\n\x1b[1m6b. An invite introduces two people (0017)\x1b[0m')
+  const ivy = await makeUser(`ivy+${stamp}@probe.test`)
+  const jack = await makeUser(`jack+${stamp}@probe.test`)
+  const kim = await makeUser(`kim+${stamp}@probe.test`)
+  const liam = await makeUser(`liam+${stamp}@probe.test`)
+  await rpc(ivy.token, 'set_profile', { p_handle: `ivy${stamp}`, p_display_name: 'Ivy' })
+  await rpc(jack.token, 'set_profile', { p_handle: `jack${stamp}`, p_display_name: 'Jack' })
+  await rpc(kim.token, 'set_profile', { p_handle: `kim${stamp}`, p_display_name: 'Kim' })
+
+  const claimed = await rpc(jack.token, 'claim_referral', { p_handle: `ivy${stamp}` })
+  check('an invited collector claims the referral', claimed.body === true, JSON.stringify(claimed.body))
+  const introduced = await rpc(jack.token, 'befriend_referrer', {})
+  check(
+    'befriend_referrer returns the inviter\'s handle',
+    introduced.body === `ivy${stamp}`,
+    `${introduced.status} ${JSON.stringify(introduced.body)}`,
+  )
+  const edge = await rest(ivy.token, `/friendships?requester=eq.${ivy.id}&addressee=eq.${jack.id}&select=status`)
+  check('THEY ARE ACCEPTED FRIENDS, with nothing left to answer', edge.body?.[0]?.status === 'accepted', JSON.stringify(edge.body))
+  const seenByJack = await rest(jack.token, `/friendships?select=status,requester`)
+  check('...and the invited side sees the same edge', (seenByJack.body ?? []).some((f) => f.requester === ivy.id && f.status === 'accepted'), JSON.stringify(seenByJack.body))
+
+  const again = await rpc(jack.token, 'befriend_referrer', {})
+  check('a second call says nothing rather than announcing it twice', again.body === null, JSON.stringify(again.body))
+  const oneEdge = await rest(ivy.token, `/friendships?addressee=eq.${jack.id}&select=status`)
+  check('...and left exactly one row', (oneEdge.body ?? []).length === 1, JSON.stringify(oneEdge.body))
+
+  const noReferral = await rpc(dave.token, 'befriend_referrer', {})
+  check('someone who arrived on their own gets no friend', noReferral.body === null, JSON.stringify(noReferral.body))
+
+  // The invited person must have a profile first: a friend nobody can name,
+  // look up or answer is not an introduction.
+  const beforeSetup = await rpc(liam.token, 'claim_referral', { p_handle: `ivy${stamp}` })
+  check('a referral can be claimed before a handle exists', beforeSetup.body === true, JSON.stringify(beforeSetup.body))
+  const tooEarly = await rpc(liam.token, 'befriend_referrer', {})
+  check('...but no friendship is made until they set up their profile', tooEarly.body === null, JSON.stringify(tooEarly.body))
+  const noEdgeYet = await rest(ivy.token, `/friendships?addressee=eq.${liam.id}&select=status`)
+  check('...and nothing was written meanwhile', (noEdgeYet.body ?? []).length === 0, JSON.stringify(noEdgeYet.body))
+
+  // The safety property. Someone who declined a person must not find them back
+  // in their friends list because that person sent them an invite link.
+  await rpc(ivy.token, 'request_friend', { p_handle: `kim${stamp}` })
+  await rest(kim.token, `/friendships?requester=eq.${ivy.id}&addressee=eq.${kim.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'blocked' }),
+  })
+  const kimClaim = await rpc(kim.token, 'claim_referral', { p_handle: `ivy${stamp}` })
+  check('a blocked collector can still claim the referral (it is only a price)', kimClaim.body === true, JSON.stringify(kimClaim.body))
+  const laundered = await rpc(kim.token, 'befriend_referrer', {})
+  check('AN INVITE CANNOT LAUNDER A BLOCK', laundered.body === null, JSON.stringify(laundered.body))
+  const stillBlocked = await rest(kim.token, `/friendships?requester=eq.${ivy.id}&addressee=eq.${kim.id}&select=status`)
+  check('...and the refusal is exactly as it was', stillBlocked.body?.[0]?.status === 'blocked', JSON.stringify(stillBlocked.body))
+
+  const joins = await rpc(ivy.token, 'referral_joins', {})
+  check('the inviter is told how many joined', joins.body === 3, JSON.stringify(joins.body))
+  const theirJoins = await rpc(jack.token, 'referral_joins', {})
+  check('...and it counts only my own, never the graph', theirJoins.body === 0, JSON.stringify(theirJoins.body))
+  const whoJoined = await rest(ivy.token, `/referrals?select=user_id,referred_by`)
+  check('THE GRAPH ITSELF STAYS PRIVATE — a count is not a list', (whoJoined.body ?? []).length === 0, JSON.stringify(whoJoined.body))
+
+  const anonBefriend = await rpc(PUBLISHABLE, 'befriend_referrer', {})
+  check('anonymous cannot call befriend_referrer', anonBefriend.status >= 400, `${anonBefriend.status}`)
+  const anonJoins = await rpc(PUBLISHABLE, 'referral_joins', {})
+  check('anonymous cannot call referral_joins', anonJoins.status >= 400, `${anonJoins.status}`)
 
   console.log('\n\x1b[1m7. Controls — a refusal must mean refusal, not absence\x1b[0m')
   const ghost = await rpc(carol.token, 'definitely_not_a_function', {})

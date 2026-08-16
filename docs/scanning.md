@@ -548,9 +548,12 @@ Three things hold it together:
   and a resume bar is on screen — it is the only route back to cards that are
   not saved anywhere yet.
 
-The binder is chosen once, on the review screen, and rides onto every filed row
-as `binderId` + `binderPage`. That is what a printed QR label points at later
-(data-model.md, `Binder`).
+The binder is chosen once, on the review screen. Each confirmed row is then
+written twice — `addToCollection` for the copy, `addToBinder(binderId, itemId,
+1, page)` for the arrangement — in that order, because a failure between them
+leaves a card filed outside a binder (fixable) rather than a binder pointing at
+nothing. The page rides onto `BinderCard.page`, which is what the binder screen
+groups by and what a printed QR label leads back to (decision 27).
 
 ## 6a. Batch add — the tray as a review screen (`components/ScanBatch.tsx`)
 

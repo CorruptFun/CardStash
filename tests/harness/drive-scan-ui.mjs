@@ -213,16 +213,19 @@ try {
   const filing = await page.evaluate(async () => {
     const { db } = await import('/src/lib/db.ts')
     const binders = await db.binders.toArray()
-    const rows = await db.collection.toArray()
+    const cards = await db.binderCards.toArray()
+    const items = await db.collection.toArray()
+    const itemIds = new Set(items.map((i) => i.id))
     return {
       binders: binders.map((b) => b.name),
-      filed: rows.filter((r) => r.binderId === binders[0]?.id).length,
-      pages: [...new Set(rows.map((r) => r.binderPage))].sort(),
-      total: rows.length,
+      filed: cards.filter((c) => c.binderId === binders[0]?.id && itemIds.has(c.itemId)).length,
+      pages: [...new Set(cards.map((c) => c.page))].sort(),
+      rows: items.length,
     }
   })
   check(filing.binders.length === 1 && filing.binders[0] === 'Shelf A', 'the binder named on the review screen exists', filing.binders.join(', '))
-  check(filing.filed === filing.total, 'every filed card points at it', `${filing.filed}/${filing.total}`)
+  // One binder row per collection row, each pointing at a row that exists.
+  check(filing.filed === filing.rows, 'every filed card is in it', `${filing.filed}/${filing.rows}`)
   // Every row knows a page, and re-reading a card that is already filed keeps
   // the page it was first seen on rather than overwriting it — the same
   // photograph twice must not move a card to page 2 of the binder.

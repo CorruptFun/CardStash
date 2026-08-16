@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { CardImg, ManaCost, Seg, Stepper, Toggle } from '../components/basics'
+import { BinderPicker } from '../components/BinderPicker'
 import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
 import { Sheet } from '../components/Sheet'
 import { amountBucket, track } from '../lib/analytics'
 import { canBuyFrom, marketReady, startCheckout } from '../lib/marketplace'
+import { messagingReady } from '../lib/messaging'
 import { printingVariants, refreshCard } from '../lib/cardsearch'
 import { isCustomCard, needsImage } from '../lib/cardpatch'
 import {
@@ -123,6 +125,8 @@ function CardSheet() {
   const toast = useUi((s) => s.toast)
   const openEditor = useUi((s) => s.openEditor)
   const setBuilderSeeds = useUi((s) => s.setBuilderSeeds)
+  const setMessageDraft = useUi((s) => s.setMessageDraft)
+  const closeSheet = useUi((s) => s.closeSheet)
   const pokemonKey = useSettings((s) => s.pokemonKey)
   const [card, setCard] = useState(sheet.card)
   const [finish, setFinish] = useState<Finish>(
@@ -134,6 +138,7 @@ function CardSheet() {
   const [refreshing, setRefreshing] = useState(false)
   const [didAdd, setDidAdd] = useState(false)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
+  const [binderPickOpen, setBinderPickOpen] = useState(false)
   const [allPrintings, setAllPrintings] = useState(false)
   const printingsRef = useRef<HTMLElement | null>(null)
   const [variants, setVariants] = useState<Card[] | null>(null)
@@ -225,16 +230,6 @@ function CardSheet() {
 
   const comps = useMemo(() => groupComps(card.prices.entries), [card.prices.entries])
   const sortedCopies = useMemo(() => sortCopies(copies ?? []), [copies])
-  /**
-   * Which binder each copy is filed in. Looked up once for the sheet rather
-   * than per row — "where is this card" is the question a shelf full of
-   * labelled binders exists to answer, and it belongs beside the copy it is
-   * true of.
-   */
-  const binderNames = useLiveQuery(
-    async () => new Map((await db.binders.toArray()).map((binder) => [binder.id, binder.name])),
-    [],
-  )
   const copiesValue = useMemo(() => collectionValue(sortedCopies), [sortedCopies])
   const copiesCount = sortedCopies.reduce((sum, row) => sum + row.qty, 0)
   const trend = useMemo(() => cardTrend(history ?? []), [history])
@@ -498,12 +493,7 @@ function CardSheet() {
             </span>
           </div>
           {sortedCopies.map((row) => (
-            <CopyRow
-              key={row.id}
-              row={row}
-              game={card.game}
-              binderName={row.binderId ? binderNames?.get(row.binderId) : undefined}
-            />
+            <CopyRow key={row.id} row={row} game={card.game} />
           ))}
         </section>
       )}
@@ -737,14 +727,53 @@ function CardSheet() {
               <Icon name="decks" size={16} /> Deck
             </button>
           )}
+          {/* Only for a copy the user actually owns: a binder is an arrangement
+              of physical cards, and the row is what carries the finish, the
+              condition and the grade. From a search result the honest answer
+              is the Add button beside this one. */}
+          {!sheet.deckId && sheet.item && (
+            <button className="btn btn--ghost" onClick={() => setBinderPickOpen(true)}>
+              <Icon name="cards" size={16} /> Binder
+            </button>
+          )}
           {canBuy && seller && (
             <button className="btn btn--ghost addbar__buy" onClick={buy} disabled={buying}>
               <Icon name="cart" size={16} />{' '}
               {buying ? 'Opening…' : `Buy · ${money((seller.row.price ?? 0) * conditionFactor(seller.row.condition))}`}
             </button>
           )}
+          {/* Asking is offered on a WIDER gate than buying: `canBuy` needs the
+              marketplace switched on and the seller through Stripe
+              verification, where a conversation needs neither. Most of what
+              happens between two collectors is agreeing a swap, and that must
+              not be gated behind a payments feature that ships off. */}
+          {seller && messagingReady() && (
+            <button
+              className="btn btn--ghost"
+              onClick={() => {
+                setMessageDraft({
+                  userId: seller.userId,
+                  name: seller.name,
+                  about: seller.row,
+                  body: `Hi — are you still trading your ${seller.row.name}?`,
+                })
+                closeSheet()
+                location.hash = `#/messages/${seller.userId}`
+              }}
+            >
+              <Icon name="message" size={16} /> Ask
+            </button>
+          )}
         </div>
       </section>
+      {sheet.item && (
+        <BinderPicker
+          open={binderPickOpen}
+          onClose={() => setBinderPickOpen(false)}
+          itemId={sheet.item.id}
+          cardName={card.name}
+        />
+      )}
       <DeckPicker
         open={deckPickOpen}
         onClose={() => setDeckPickOpen(false)}
@@ -786,7 +815,7 @@ function SportsFacts({ card }: { card: Card }) {
   )
 }
 
-function CopyRow({ row, game, binderName }: { row: CollectionItem; game: Game; binderName?: string }) {
+function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const toast = useUi((s) => s.toast)
   const sealed = row.opened != null || !!row.card.sealed
   const [editing, setEditing] = useState(false)
@@ -861,12 +890,6 @@ function CopyRow({ row, game, binderName }: { row: CollectionItem; game: Game; b
             <span className="tradechip">
               <Icon name="swap" size={11} /> {row.forTrade}
             </span>
-          )}
-          {binderName && (
-            <a className="binderchip" href={`#/binders/${row.binderId}`} title={`In ${binderName}`}>
-              <Icon name="binder" size={11} /> {binderName}
-              {row.binderPage ? ` · p${row.binderPage}` : ''}
-            </a>
           )}
         </span>
         <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>

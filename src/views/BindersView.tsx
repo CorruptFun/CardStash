@@ -1,270 +1,349 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CardImg, Empty, Modal } from '../components/basics'
+import { CardImg, Empty, Modal, Seg, Stepper } from '../components/basics'
 import { BinderLabel } from '../components/BinderLabel'
 import { Icon } from '../components/Icon'
-import { BINDER_NAME_MAX, BINDER_NOTE_MAX, byPage, pageLabel } from '../lib/binders'
-import { createBinder, db, deleteBinder, setItemsBinder, updateBinder } from '../lib/db'
-import { GAME_SHORT, isFoilFinish } from '../lib/games'
-import { collectionValue, itemUnitPrice, totalQty } from '../lib/prices'
-import type { Binder, CollectionItem } from '../lib/types'
-import { money } from '../lib/util'
+import { ShareActions, type SharePack } from '../components/ShareActions'
+import { Sheet } from '../components/Sheet'
+import {
+  VISIBILITY_BLURB,
+  VISIBILITY_LABEL,
+  binderQty,
+  binderSharedCards,
+  byPage,
+  pageLabel,
+  binderValue,
+  isDiscoverable,
+  isPublished,
+  resolveBinderRows,
+  type BinderRow,
+} from '../lib/binders'
+import {
+  addToBinder,
+  createBinder,
+  db,
+  deleteBinder,
+  removeFromBinder,
+  setBinderCardQty,
+  updateBinder,
+} from '../lib/db'
+import { isFoilFinish } from '../lib/games'
+import { itemUnitPrice } from '../lib/prices'
+import { settings } from '../lib/settings'
+import { buildBinderPayload, encodeBlob, myProfile, payloadFileText, shareUrl } from '../lib/social'
+import { socialConfigured, unpublishCustomBinder } from '../lib/socialcloud'
+import type { BinderVisibility, CollectionItem } from '../lib/types'
+import { money, relativeAge, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
-
-/**
- * Binders — the physical shelf, in the app.
- *
- * A binder is a label, and this screen is where labels get made, printed and
- * thrown away. The one rule the whole screen is built around: a binder never
- * owns its cards. Deleting one unfiles 200 rows and deletes nothing, which is
- * what makes the delete button safe to put next to the rename button, and it
- * is said out loud in the confirm rather than left to be discovered.
- *
- * The cards are listed by PAGE, because the reason to open a binder in the app
- * while holding the physical one is to find out which page a card is on.
- */
 
 const NO_ITEMS: CollectionItem[] = []
 
-/** New / rename, one form. Both write through db.ts so `updatedAt` moves. */
-function BinderEditor({
-  binder,
-  onClose,
-  onSaved,
-}: {
-  binder: Binder | null
-  onClose: () => void
-  onSaved: (binder: Binder | null) => void
-}) {
-  const [name, setName] = useState(binder?.name ?? '')
-  const [note, setNote] = useState(binder?.note ?? '')
-  const save = async () => {
-    if (!name.trim()) return
-    if (binder) {
-      const ok = await guarded(async () => (await updateBinder(binder.id, { name, note }), true), 'Binder')
-      if (ok) onSaved({ ...binder, name, note })
-      return
-    }
-    const created = await guarded(() => createBinder(name, note), 'Binder')
-    if (created) onSaved(created)
-  }
-  return (
-    <Modal open onClose={onClose} title={binder ? 'Rename binder' : 'New binder'}>
-      <div className="form">
-        <input
-          className="input"
-          autoFocus
-          maxLength={BINDER_NAME_MAX}
-          placeholder="Binder name"
-          aria-label="Binder name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && void save()}
-        />
-        <input
-          className="input"
-          maxLength={BINDER_NOTE_MAX}
-          placeholder="Where it lives — “shelf 2, left” (optional)"
-          aria-label="Where the binder lives"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-        />
-        <div className="modalactions">
-          <button className="btn btn--ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn btn--primary" disabled={!name.trim()} onClick={() => void save()}>
-            {binder ? 'Save' : 'Create binder'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
+/**
+ * Binders the user builds by hand: the list, and one of them.
+ *
+ * These sit BESIDE the whole-collection binder on the Friends screen, they do
+ * not replace it — see decision 26. Each carries its own audience, so a public
+ * binder is possible while the collection behind it stays private, and every
+ * one of them can be handed over as a link with no account at all.
+ */
+export function BindersView({ binderId }: { binderId: string | null }) {
+  return binderId ? <BinderDetail key={binderId} binderId={binderId} /> : <BinderList />
 }
 
-function BinderRow({ binder, items, onOpen }: { binder: Binder; items: CollectionItem[]; onOpen: () => void }) {
-  const count = totalQty(items)
-  const value = collectionValue(items)
-  return (
-    <button className="binderitem" onClick={onOpen}>
-      <span className="binderitem__icon">
-        <Icon name="binder" size={20} />
-      </span>
-      <span className="binderitem__body">
-        <strong>{binder.name}</strong>
-        <span className="binderitem__meta">
-          {count} {count === 1 ? 'card' : 'cards'}
-          {binder.note ? ` · ${binder.note}` : ''}
-        </span>
-      </span>
-      <span className="binderitem__value">{money(value)}</span>
-      <Icon name="chevronRight" size={15} />
-    </button>
-  )
-}
+/* ---------------------------------------------------------------- the list */
 
-function BinderList({ navigate }: { navigate: (hash: string) => void }) {
+function BinderList() {
   const binders = useLiveQuery(() => db.binders.orderBy('updatedAt').reverse().toArray(), [])
-  const filed = useLiveQuery(() => db.collection.filter((item) => !!item.binderId).toArray(), []) ?? NO_ITEMS
-  const [creating, setCreating] = useState(false)
-  const byBinder = useMemo(() => {
-    const map = new Map<string, CollectionItem[]>()
-    for (const item of filed) {
-      if (!item.binderId) continue
-      map.set(item.binderId, [...(map.get(item.binderId) ?? []), item])
+  const rows = useLiveQuery(() => db.binderCards.toArray(), [])
+  const items = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
+  const [name, setName] = useState('')
+  const toast = useUi((s) => s.toast)
+
+  const counts = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const { row } of resolveBinderRows(rows ?? [], items)) {
+      map.set(row.binderId, (map.get(row.binderId) ?? 0) + row.qty)
     }
     return map
-  }, [filed])
+  }, [rows, items])
+
+  const create = async () => {
+    const clean = name.trim()
+    if (!clean) return
+    const binder = await guarded(() => createBinder(clean), 'New binder')
+    if (!binder) return
+    setName('')
+    toast(`Created “${binder.name}”`, 'success')
+    location.hash = `#/binders/${binder.id}`
+  }
 
   return (
     <div className="screen safe-top">
       <header className="screenhead">
-        <h1>Binders</h1>
-        <button className="btn btn--ghost btn--sm" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={15} /> New
-        </button>
+        <a className="iconbtn" href="#/friends" aria-label="Back to friends">
+          <Icon name="chevronLeft" size={20} />
+        </a>
+        <h1>My binders</h1>
       </header>
-      {binders && binders.length === 0 ? (
-        <Empty
-          icon="binder"
-          title="No binders yet"
-          body="A binder is a label for a real one on your shelf. Make one, file cards into it — scan a page in Page mode, or select rows in your collection — then print its QR code and stick it on the cover."
-          action={
-            <div className="empty__btns">
-              <button className="btn btn--primary" onClick={() => setCreating(true)}>
-                <Icon name="plus" size={16} /> New binder
-              </button>
-              <a className="btn btn--ghost" href="#/scan">
-                <Icon name="scan" size={16} /> Scan a page
-              </a>
-            </div>
-          }
-        />
-      ) : (
-        <div className="binderlist">
-          {(binders ?? []).map((binder) => (
-            <BinderRow
-              key={binder.id}
-              binder={binder}
-              items={byBinder.get(binder.id) ?? NO_ITEMS}
-              onOpen={() => navigate(`#/binders/${binder.id}`)}
-            />
-          ))}
+
+      <section className="setsec">
+        <div className="addfriend">
+          <input
+            className="input"
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && void create()}
+            placeholder="New binder — “Vintage Charizards”"
+            maxLength={60}
+            aria-label="New binder name"
+          />
+          <button className="btn btn--primary" onClick={() => void create()} disabled={!name.trim()}>
+            <Icon name="plus" size={16} /> Create
+          </button>
         </div>
-      )}
-      {creating && (
-        <BinderEditor
-          binder={null}
-          onClose={() => setCreating(false)}
-          onSaved={(binder) => {
-            setCreating(false)
-            if (binder) navigate(`#/binders/${binder.id}`)
-          }}
+        <p className="setsec__note">
+          A binder is a selection of copies you own, with its own audience. Every one starts <b>private</b> — nothing
+          is uploaded until you say so, and you can hand someone a link either way.
+        </p>
+      </section>
+
+      {binders && binders.length === 0 && (
+        <Empty
+          icon="cards"
+          title="No binders yet"
+          body="Make one for the cards you’re selling this weekend, or the run you’re proud of. Add cards from any card’s sheet, or from inside the binder."
         />
       )}
+
+      <div className="social-list">
+        {(binders ?? []).map((binder) => {
+          const count = counts.get(binder.id) ?? 0
+          return (
+            <a className="social-row" key={binder.id} href={`#/binders/${binder.id}`}>
+              <span className="social-row__avatar social-row__avatar--trade" aria-hidden="true">
+                <Icon name="cards" size={16} />
+              </span>
+              <span className="social-row__body">
+                {/* The name gets the whole line. A badge beside it competes
+                    with the ellipsis and loses — "Vintage Charizards…" with
+                    the badge clipped off is worse than either alone. */}
+                <span className="social-row__name">{binder.name}</span>
+                <span className="social-row__meta">
+                  {count} {count === 1 ? 'card' : 'cards'}
+                  {isDiscoverable(binder) ? ' · for trade' : ''} · updated {relativeAge(binder.updatedAt)} ago
+                </span>
+              </span>
+              <span className={`vispill vispill--${binder.visibility}`}>{VISIBILITY_LABEL[binder.visibility]}</span>
+              <Icon name="chevronRight" size={16} className="social-row__go" />
+            </a>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-function BinderDetail({ binderId, navigate }: { binderId: string; navigate: (hash: string) => void }) {
+/* ---------------------------------------------------------------- one binder */
+
+function BinderDetail({ binderId }: { binderId: string }) {
   /**
    * `?? null` is load-bearing: Dexie resolves a missing row to `undefined`,
    * which is the same value `useLiveQuery` reports while it is still running.
-   * Without it, a QR pointing at a binder this device has never had renders a
-   * blank screen for ever instead of saying so.
+   * Without it the "No such binder" state below is unreachable and the screen
+   * stays blank for ever — which stopped being a hand-typed-URL curiosity the
+   * moment binders started carrying printed labels that outlive the device
+   * that made them.
    */
   const binder = useLiveQuery(async () => (await db.binders.get(binderId)) ?? null, [binderId])
-  const items = useLiveQuery(() => db.collection.where('binderId').equals(binderId).toArray(), [binderId]) ?? NO_ITEMS
-  const openSheet = useUi((s) => s.openSheet)
+  const cardRows = useLiveQuery(() => db.binderCards.where('binderId').equals(binderId).toArray(), [binderId])
+  const items = useLiveQuery(() => db.collection.toArray(), []) ?? NO_ITEMS
   const toast = useUi((s) => s.toast)
-  const [labelOpen, setLabelOpen] = useState(false)
-  const [renaming, setRenaming] = useState(false)
+  const openSheet = useUi((s) => s.openSheet)
+  const [adding, setAdding] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [labelOpen, setLabelOpen] = useState(false)
+  const [pack, setPack] = useState<SharePack | null>(null)
 
-  const pages = useMemo(
-    () => byPage([...items].sort((a, b) => a.name.localeCompare(b.name))),
-    [items],
-  )
-  const count = totalQty(items)
-  const value = collectionValue(items)
+  const rows = useMemo(() => resolveBinderRows(cardRows ?? [], items), [cardRows, items])
+  const qty = binderQty(rows)
+  const value = binderValue(rows)
 
-  // A binder that was deleted on another device, or a QR pointing at one this
-  // device has never had. Say which, rather than showing an empty binder that
-  // looks like a bug.
-  if (binder === undefined) return null
-  if (binder === null) {
+  if (binder === undefined) return <div className="screen safe-top" />
+  if (!binder) {
     return (
       <div className="screen safe-top">
         <header className="screenhead">
-          <a className="iconbtn" href="#/binders" aria-label="All binders">
+          <a className="iconbtn" href="#/binders" aria-label="Back to binders">
             <Icon name="chevronLeft" size={20} />
           </a>
           <h1>Binder</h1>
         </header>
-        <Empty
-          icon="binder"
-          title="No such binder on this device"
-          body="That label was made in another install, or it has since been deleted. Binders live on the device that made them — restore a backup, or turn on the cloud vault to bring them across."
-          action={
-            <a className="btn btn--ghost" href="#/binders">
-              All binders
-            </a>
-          }
-        />
+        <Empty icon="cards" title="No such binder" body="It may have been deleted on this device." />
       </div>
     )
   }
 
-  const removeBinder = async () => {
-    const unfiled = await guarded(() => deleteBinder(binder.id), 'Delete binder')
+  /**
+   * Changing the audience is written straight through, and taking a binder
+   * DOWN is pushed immediately rather than waiting for the next poll — the
+   * 25-second gap is fine for publishing something and is not fine for
+   * un-publishing it.
+   */
+  const setVisibility = async (visibility: BinderVisibility) => {
+    const wasPublished = isPublished(binder)
+    await guarded(async () => (await updateBinder(binder.id, { visibility }), true), 'Binder')
+    if (wasPublished && visibility === 'private' && socialConfigured()) {
+      await unpublishCustomBinder(binder.id).catch(() => {
+        toast('Saved here — it will come down from the server on the next sync', 'info')
+      })
+    }
+  }
+
+  const share = async () => {
+    const payload = buildBinderPayload(binder, binderSharedCards(rows, binder.tradeable), myProfile())
+    if (!payload.cards.length) {
+      toast('Add some cards to this binder first', 'error')
+      return
+    }
+    const blob = await encodeBlob(payload)
+    setPack({
+      url: shareUrl(blob),
+      fileText: payloadFileText(payload),
+      fileName: `cardstock-binder-${ymd()}.json`,
+      title: `${binder.name} — ${settings().profileName || 'a Cardstock collector'}`,
+      text: `${binder.name} — ${payload.cards.length} cards in Cardstock`,
+      kind: 'profile',
+    })
+  }
+
+  const remove = async () => {
+    await guarded(async () => (await deleteBinder(binder.id), true), 'Delete binder')
     setConfirmDelete(false)
-    if (unfiled == null) return
-    toast(`Deleted ${binder.name} · ${unfiled} ${unfiled === 1 ? 'card kept' : 'cards kept'}`, 'success')
-    navigate('#/binders')
+    toast(`Deleted “${binder.name}”`, 'success')
+    location.hash = '#/binders'
   }
 
   return (
     <div className="screen safe-top">
-      <header className="screenhead binderhead">
-        <a className="iconbtn" href="#/binders" aria-label="All binders">
+      <header className="screenhead friendhead">
+        <a className="iconbtn" href="#/binders" aria-label="Back to binders">
           <Icon name="chevronLeft" size={20} />
         </a>
-        <div className="binderhead__id">
+        <div className="friendhead__id">
           <h1>{binder.name}</h1>
-          <span className="binderhead__meta">
-            {count} {count === 1 ? 'card' : 'cards'} · {money(value)}
-            {binder.note ? ` · ${binder.note}` : ''}
+          <span className="friendhead__meta">
+            {qty} {qty === 1 ? 'card' : 'cards'} · {money(value)}
           </span>
         </div>
       </header>
-      <div className="colltools">
-        <button className="btn btn--primary btn--sm" onClick={() => setLabelOpen(true)}>
-          <Icon name="qr" size={15} /> Print label
-        </button>
-        <button className="btn btn--ghost btn--sm" onClick={() => setRenaming(true)}>
-          <Icon name="pencil" size={15} /> Rename
-        </button>
-        <button className="btn btn--ghost btn--sm" onClick={() => setConfirmDelete(true)}>
-          <Icon name="trash" size={15} /> Delete
-        </button>
-      </div>
-      {!items.length && (
+
+      <section className="setsec">
+        <input
+          className="input"
+          type="text"
+          value={binder.name}
+          onChange={(event) => void updateBinder(binder.id, { name: event.target.value })}
+          maxLength={60}
+          aria-label="Binder name"
+        />
+        <input
+          className="input"
+          type="text"
+          value={binder.note ?? ''}
+          onChange={(event) => void updateBinder(binder.id, { note: event.target.value })}
+          placeholder="What’s in it, or what you want for it"
+          maxLength={140}
+          aria-label="Binder note"
+        />
+      </section>
+
+      <section className="setsec">
+        <h3>Who can see it</h3>
+        <Seg
+          ariaLabel="Who can see this binder"
+          size="sm"
+          options={[
+            { value: 'private', label: 'Private' },
+            { value: 'friends', label: 'Friends' },
+            { value: 'public', label: 'Public' },
+          ]}
+          value={binder.visibility}
+          onChange={(next) => void setVisibility(next as BinderVisibility)}
+        />
+        {/* The audience is named, never described in the abstract — the same
+            standard the SocialPanel banner is held to. Anyone flipping this
+            must know which thing they just did. */}
+        <div className={`audience audience--${binder.visibility === 'public' ? 'open' : 'friends'}`}>
+          <Icon
+            name={binder.visibility === 'private' ? 'eye' : binder.visibility === 'public' ? 'eye' : 'users'}
+            size={15}
+          />
+          <span>{VISIBILITY_BLURB[binder.visibility]}</span>
+        </div>
+        {!socialConfigured() && binder.visibility !== 'private' && (
+          <p className="setsec__note">
+            Claim a handle on the Friends screen and this goes up automatically. Until then it stays on this device —
+            the link below still works for anyone you send it to.
+          </p>
+        )}
+        <div className="setrow">
+          <div className="setrow__text">
+            <span>Offer these for trade</span>
+            <em>
+              {binder.visibility === 'public'
+                ? 'Collectors hunting these cards find you, and can message you about them.'
+                : 'Takes effect when this binder is public — a friends-only binder is never globally matchable.'}
+            </em>
+          </div>
+          <button
+            className={`btn btn--sm ${binder.tradeable ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => void updateBinder(binder.id, { tradeable: !binder.tradeable })}
+          >
+            {binder.tradeable ? 'On' : 'Off'}
+          </button>
+        </div>
+      </section>
+
+      <section className="setsec">
+        <div className="friendacts">
+          <button className="btn btn--primary" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={16} /> Add cards
+          </button>
+          <button className="btn btn--ghost" onClick={share} disabled={!rows.length}>
+            <Icon name="share" size={15} /> Share
+          </button>
+          {/* The physical half of a binder. Nothing about it touches the
+            * network or the binder's audience: the QR is a link to this app's
+            * own route, and it carries no cards. */}
+          <button className="btn btn--ghost" onClick={() => setLabelOpen(true)}>
+            <Icon name="qr" size={15} /> Print label
+          </button>
+          <button className="btn btn--ghost" onClick={() => setConfirmDelete(true)}>
+            <Icon name="trash" size={15} /> Delete
+          </button>
+        </div>
+        {pack && <ShareActions pack={pack} />}
+        <p className="setsec__note">
+          A link works with no account on either side — it carries this binder only, and lands under your name on
+          their Friends tab without touching anything else they have of yours.
+        </p>
+      </section>
+
+      {rows.length === 0 && (
         <Empty
           icon="cards"
-          title="Nothing filed here yet"
-          body="Scan a page in Page mode and pick this binder on the review screen — or select rows in your collection and tap Binder."
-          action={
-            <a className="btn btn--primary" href="#/scan">
-              <Icon name="scan" size={16} /> Scan a page
-            </a>
-          }
+          title="Nothing in this binder yet"
+          body="Add cards you own — the finish, condition and grade come from the copy in your collection, so what you show is what you have."
         />
       )}
-      {pages.map((group) => (
-        <section key={group.page ?? 'unpaged'} className="binderpage">
-          {/* One unpaged pile is just "the binder" — a lone "UNPAGED" heading
-            * labels nothing. Headings appear once pages exist to tell apart. */}
-          {(pages.length > 1 || group.page != null) && (
+
+      {/* Grouped by the page they were scanned off, so the app and the object
+        * on the shelf read the same way round. Headings appear only once pages
+        * exist to tell apart — a lone "UNPAGED" labels nothing. */}
+      {byPage(rows, ({ row }) => row.page).map((group) => (
+        <section className="binderpage" key={group.page ?? 'unpaged'}>
+          {group.page != null && (
             <h2 className="binderpage__head">
               <span>{pageLabel(group.page)}</span>
               <em>
@@ -273,113 +352,140 @@ function BinderDetail({ binderId, navigate }: { binderId: string; navigate: (has
             </h2>
           )}
           <div className="cardgrid">
-            {group.rows.map((item) => (
-              <button
-                key={item.id}
-                className="cardcell"
-                onClick={() => openSheet({ card: item.card, item, origin: 'collection' })}
-              >
-                <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
-                {item.qty > 1 && <span className="cardcell__qty">×{item.qty}</span>}
-                <span className="cardcell__price">{money((itemUnitPrice(item) ?? 0) * item.qty)}</span>
-                <span className="cardcell__name">{item.name}</span>
-                <span className="cardcell__set">{item.setCode ?? GAME_SHORT[item.game]}</span>
-              </button>
+            {group.rows.map(({ row, item }) => (
+              <div className="bindercell" key={row.id}>
+                <button
+                  className="cardcell"
+                  onClick={() => openSheet({ card: item.card, item, origin: 'collection' })}
+                  aria-label={item.name}
+                >
+                  <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
+                  <span className="cardcell__price">{money((itemUnitPrice(item) ?? 0) * row.qty)}</span>
+                  <span className="cardcell__name">{item.name}</span>
+                  <span className="cardcell__set">
+                    {item.setCode ?? item.card.setCode}
+                    {item.condition !== 'NM' ? ` · ${item.condition}` : ''}
+                  </span>
+                </button>
+                <div className="bindercell__qty">
+                  <Stepper
+                    value={row.qty}
+                    min={0}
+                    max={item.qty}
+                    onChange={(next) => void setBinderCardQty(row.id, next)}
+                  />
+                  <button
+                    className="bindercell__x"
+                    aria-label={`Remove ${item.name} from this binder`}
+                    onClick={() => void removeFromBinder(row.id)}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
       ))}
-      {labelOpen && <BinderLabel binder={binder} count={count} onClose={() => setLabelOpen(false)} />}
-      {renaming && (
-        <BinderEditor binder={binder} onClose={() => setRenaming(false)} onSaved={() => setRenaming(false)} />
-      )}
-      {confirmDelete && (
-        <Modal open onClose={() => setConfirmDelete(false)} title={`Delete ${binder.name}?`}>
-          <p className="setsec__note">
-            The label goes; the {count} {count === 1 ? 'card' : 'cards'} stay in your collection, unfiled. Any printed
-            QR code for this binder stops working.
-          </p>
-          <div className="modalactions">
-            <button className="btn btn--ghost" onClick={() => setConfirmDelete(false)}>
-              Keep it
-            </button>
-            <button className="btn btn--danger" onClick={() => void removeBinder()}>
-              Delete binder
-            </button>
-          </div>
-        </Modal>
-      )}
+
+      {labelOpen && <BinderLabel binder={binder} count={qty} onClose={() => setLabelOpen(false)} />}
+
+      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title={`Delete “${binder.name}”?`}>
+        <p className="setsec__note">
+          The binder goes, and it comes down from the server if it was up. <b>Your cards are not touched</b> — a binder
+          is an arrangement of copies you own, never the copies themselves.
+        </p>
+        <div className="modalactions">
+          <button className="btn btn--ghost" onClick={() => setConfirmDelete(false)}>
+            Cancel
+          </button>
+          <button className="btn btn--danger" onClick={remove}>
+            Delete
+          </button>
+        </div>
+      </Modal>
+
+      <Sheet open={adding} onClose={() => setAdding(false)} tall>
+        {adding && <AddCards binderId={binder.id} items={items} rows={rows} />}
+      </Sheet>
     </div>
   )
 }
 
-export function BindersView({ binderId, navigate }: { binderId: string | null; navigate: (hash: string) => void }) {
-  return binderId ? <BinderDetail binderId={binderId} navigate={navigate} /> : <BinderList navigate={navigate} />
-}
-
 /**
- * Move a selection of collection rows into a binder — the manual half of
- * filing, for the cards that were already in the app before their binder was.
- * Lives here so the picker and the screen it files into never drift apart.
+ * Fill a binder from the collection.
+ *
+ * The bulk path, and the one that matters: building a thirty-card binder one
+ * card sheet at a time is how a feature gets tried once. Rows already in the
+ * binder stay listed with a tick rather than disappearing, so tapping twice is
+ * "two copies" instead of a card vanishing out from under the finger.
  */
-export function BinderPickerModal({
-  open,
-  ids,
-  onClose,
-}: {
-  open: boolean
-  ids: string[]
-  onClose: () => void
-}) {
-  const binders = useLiveQuery(() => db.binders.orderBy('updatedAt').reverse().toArray(), [])
-  const toast = useUi((s) => s.toast)
-  const [creating, setCreating] = useState(false)
-  if (!open) return null
+function AddCards({ binderId, items, rows }: { binderId: string; items: CollectionItem[]; rows: BinderRow[] }) {
+  const [filter, setFilter] = useState('')
+  const inBinder = useMemo(() => new Map(rows.map(({ row }) => [row.itemId, row.qty])), [rows])
 
-  const file = async (binder: Binder | null) => {
-    const ok = await guarded(async () => (await setItemsBinder(ids, binder?.id ?? null), true), 'Binder')
-    if (!ok) return
-    const noun = `${ids.length} ${ids.length === 1 ? 'row' : 'rows'}`
-    toast(binder ? `Filed ${noun} in ${binder.name}` : `Unfiled ${noun}`, 'success')
-    onClose()
-  }
-
-  if (creating) {
-    return (
-      <BinderEditor
-        binder={null}
-        onClose={() => setCreating(false)}
-        onSaved={(binder) => {
-          setCreating(false)
-          if (binder) void file(binder)
-        }}
-      />
-    )
-  }
+  const shown = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    return items
+      .filter((item) => item.qty > 0 && item.opened !== true)
+      .filter(
+        (item) =>
+          !needle ||
+          item.name.toLowerCase().includes(needle) ||
+          (item.setCode ?? item.card.setCode ?? '').toLowerCase().includes(needle),
+      )
+      .sort((a, b) => (itemUnitPrice(b) ?? 0) - (itemUnitPrice(a) ?? 0) || a.name.localeCompare(b.name))
+      .slice(0, 300)
+  }, [items, filter])
 
   return (
-    <Modal open onClose={onClose} title={`File ${ids.length} ${ids.length === 1 ? 'row' : 'rows'}`}>
-      <div className="binderlist binderlist--picker">
-        {(binders ?? []).map((binder) => (
-          <button key={binder.id} className="binderitem" onClick={() => void file(binder)}>
-            <span className="binderitem__icon">
-              <Icon name="binder" size={18} />
-            </span>
-            <span className="binderitem__body">
-              <strong>{binder.name}</strong>
-              {binder.note && <span className="binderitem__meta">{binder.note}</span>}
-            </span>
-          </button>
-        ))}
+    <div className="sheetbody">
+      <h2 className="sheettitle">Add cards</h2>
+      <div className="searchbox searchbox--slim">
+        <Icon name="search" size={16} />
+        <input
+          type="search"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filter your collection…"
+          aria-label="Filter your collection"
+        />
       </div>
-      <div className="modalactions">
-        <button className="btn btn--ghost" onClick={() => void file(null)}>
-          Take out of binder
-        </button>
-        <button className="btn btn--primary" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={15} /> New binder
-        </button>
+      {shown.length === 0 && <p className="deckpicker__empty">Nothing in your collection matches that.</p>}
+      <div className="social-list">
+        {shown.map((item) => {
+          const have = inBinder.get(item.id) ?? 0
+          return (
+            <button
+              key={item.id}
+              className="social-row social-row--static"
+              onClick={() => void addToBinder(binderId, item.id)}
+              disabled={have >= item.qty}
+            >
+              <span className="pickcell">
+                <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
+              </span>
+              <span className="social-row__body">
+                <span className="social-row__name">{item.name}</span>
+                <span className="social-row__meta">
+                  {[item.setCode ?? item.card.setCode, item.condition, `×${item.qty} owned`]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </span>
+              {have > 0 ? (
+                <span className="deckpicker__have">
+                  <Icon name="check" size={12} /> ×{have}
+                </span>
+              ) : (
+                <span className="deckpicker__add">
+                  <Icon name="plus" size={15} />
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
-    </Modal>
+    </div>
   )
 }

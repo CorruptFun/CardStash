@@ -11,6 +11,7 @@ Layered, each covering something the others structurally cannot.
 | Install banner | `npm run test:install` | headless Chromium, seconds | no |
 | Scan UI (upload + page review) | `npm run test:scanui` | headless Chromium, ~2 min | **yes** |
 | Batch add | `npm run test:batch` | headless Chromium, ~30s | no |
+| Invite links | `npm run test:invite` | headless Chromium, ~30s | no |
 
 ## The rule
 
@@ -222,6 +223,31 @@ console must stay clean. It catches wiring the type checker can't — JSX
 structure, store subscriptions, dead imports — in the artifact users actually
 get.
 
+## Invite links (`test:invite`)
+
+An invite is two halves that never run on the same device — `InvitePanel`
+writes the URL, `captureReferral()` reads it back on a stranger's phone at boot
+— and the second half is invisible to every other test: it is the first
+statement of `boot()`, it writes a settings key nothing displays, and it fires
+long before there is an account. A regression there is silent and permanent.
+
+So this harness copies the link off the real screen and then opens **that
+string** in a fresh browser context with no storage, which is as close to the
+actual journey as a local run can get. It also pins the rule that costs money
+to get wrong: a second link must not overwrite the first, because
+`claim_referral()` records one referrer per account for ever and the app must
+not credit someone the database does not.
+
+It cannot reach the server half — `befriend_referrer()` needs a real project
+and a real account. That is `tests/harness/social-rls.mjs` §6b, which needs
+`SUPABASE_SECRET`.
+
+Two things it deliberately fakes, both for the same reason (a real one hangs
+rather than fails in headless): `navigator.clipboard.writeText` is stubbed so
+the assertion is what the button hands over, and the signed-in account is stood
+in for by seeding `socialHandle` — the localStorage cache every "are they set
+up?" check already reads.
+
 ## The two review screens (`test:scanui`, `test:batch`)
 
 Both drive the real app to a Dexie write, and between them they cover every
@@ -232,7 +258,7 @@ the page-review screen shows what was found, and that confirming files exactly
 the ticked rows. It also drives a **second page** into the same review — the
 parked screen, the resume bar, the page headings, the ticks surviving the trip
 back to the camera — and names a binder on the way out, so the session's cards
-land with a `binderId` and a page. Its second page is the same photograph
+land in that binder with the page they were read from. Its second page is the same photograph
 deliberately: it pins the merge, where a card already filed keeps the page it
 was first seen on and becomes a second copy rather than a second row. It needs the matrix fixtures and a fake camera device. It also
 carries two traps worth knowing, because both once made it fail while the app
@@ -258,17 +284,14 @@ screen, **Print label**, the link that label carries, an unknown code, and the
 delete.
 
 Three invariants, all about a label outliving the session that made it:
-filing writes `binderId` onto the collection rows themselves; the printed code
+filing writes `binderCards` rows pointing at the collection rows; the printed code
 and the QR resolve back to *that* binder through the app's own router; and
 deleting a binder unfiles its cards and deletes none of them. `qr.test.mjs`
 proves the symbol decodes — this proves the screen around it is wired to the
 right binder.
 
-It has already earned itself once: `useLiveQuery(() => db.binders.get(id))`
-reports `undefined` both while loading and when the row does not exist, so a QR
-pointing at a binder this device never had rendered a permanently blank screen.
-Run it after touching `BindersView`, `BinderLabel`, `lib/binders.ts` or the
-binder columns in `db.ts`.
+Run it after touching `BindersView`, `BinderLabel`, `lib/qr.ts`, `lib/binders.ts`
+or the binder writes in `db.ts`.
 
 ## Live Supabase harnesses (`test:cloud`, `test:social`, `test:escrow`)
 
@@ -354,6 +377,7 @@ npm run test:capture        # only if camera.ts or the scan screen changed
 npm run test:camera         # ditto — camera on/off lifecycle, both platforms
 npm run test:install        # only if the install banner or its triggers changed
 npm run test:batch          # only if the scan tray, batch add or db.scans changed
+npm run test:invite         # only if invites, referrals or the Friends screen changed
 ```
 
 If the change touches `detectCardRegions` or anything multi-card, also run

@@ -13,10 +13,10 @@
  * The invariants worth a harness, all of which are about a label outliving the
  * session that made it:
  *
- *   - filing writes `binderId` onto the collection rows themselves;
+ *   - filing writes `binderCards` rows pointing at the collection rows;
  *   - the label carries a link that this app's own router resolves back to
  *     that binder — the thing that is glued to a shelf and cannot be reissued;
- *   - deleting a binder unfiles its cards and DELETES NONE of them.
+ *   - deleting a binder DELETES NO CARDS.
  *
  * `tests/unit/qr.test.mjs` proves the symbol decodes; this proves the screen
  * around it is wired to the right binder.
@@ -131,40 +131,45 @@ try {
   await page.click('.bulkbar .btn:has-text("Binder")')
   await page.waitForSelector('.modal', { timeout: 5000 })
   await shot('picker')
-  await page.click('.modal .btn:has-text("New binder")')
-  await page.fill('.modal input.input', 'Rares')
-  await page.click('.modal .btn--primary:has-text("Create binder")')
-  await page.waitForTimeout(600)
+  await page.fill('.modal .addfriend input.input', 'Rares')
+  await page.click('.modal .addfriend .btn')
+  await page.waitForTimeout(800)
 
   const binders = await readAll(page, 'binders')
   check(binders.length === 1, 'creating a binder writes one row', JSON.stringify(binders.map((b) => b.name)))
   const binder = binders[0]
-  const filed = (await readAll(page, 'collection')).filter((row) => row.binderId === binder?.id)
-  check(filed.length === 2, 'both selected rows carry the binder id', `${filed.length} filed`)
+  check(binder?.visibility === 'private', 'and it starts private, whatever made it', binder?.visibility)
+  const cards = await readAll(page, 'binderCards')
+  const items = new Set((await readAll(page, 'collection')).map((row) => row.id))
+  check(cards.length === 2, 'both selected rows are filed in it', `${cards.length} filed`)
+  check(
+    cards.every((row) => row.binderId === binder?.id && items.has(row.itemId)),
+    'and every binder row points at a collection row it owns',
+  )
 
   /* --- the binder screen --------------------------------------------------- */
 
   await page.goto(`http://127.0.0.1:${PORT}/index.html?welcome=0&nosw=1#/binders`)
-  await page.waitForSelector('.binderitem', { timeout: 10_000 })
-  const listText = await page.locator('.binderitem').first().innerText()
+  await page.waitForSelector('.social-row', { timeout: 10_000 })
+  const listText = await page.locator('.social-row').first().innerText()
   check(listText.includes('Rares'), 'the binder is listed by name', listText.replace(/\n/g, ' · '))
-  await page.click('.binderitem')
-  await page.waitForSelector('.binderpage', { timeout: 10_000 })
-  const shown = await page.locator('.binderpage .cardcell').count()
+  await page.click('.social-row')
+  await page.waitForSelector('.bindercell', { timeout: 10_000 })
+  const shown = await page.locator('.bindercell').count()
   check(shown === 2, 'the binder screen lists the cards filed in it', `${shown} on screen`)
   await shot('detail')
 
   /* --- the printed label --------------------------------------------------- */
 
-  await page.click('.colltools .btn:has-text("Print label")')
+  await page.click('.friendacts .btn:has-text("Print label")')
   await page.waitForSelector('.labelsheet', { timeout: 5000 })
   const pathLength = await page.locator('.labelsheet__qr path').getAttribute('d').then((d) => d?.length ?? 0)
   check(pathLength > 200, 'the label draws a real QR symbol', `${pathLength} chars of path`)
   const code = (await page.locator('.labelsheet__code').innerText()).trim()
-  check(/^[A-Z0-9]{5}-[A-Z0-9]{5}$/.test(code), 'the fallback code is printed under it', code)
+  check(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code), 'the fallback code is printed under it', code)
   check(
-    code.replace('-', '').toLowerCase() === binder.id,
-    'the printed code is this binder’s id',
+    binder.id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().startsWith(code.replace('-', '').toLowerCase()),
+    'and it fingerprints this binder’s id',
     `${code} vs ${binder.id}`,
   )
   await shot('label')
@@ -172,8 +177,8 @@ try {
   /* --- the link a scanned label opens -------------------------------------- */
 
   await page.goto(`http://127.0.0.1:${PORT}/index.html?welcome=0&nosw=1#/binders/${binder.id}`)
-  await page.waitForSelector('.binderhead h1', { timeout: 10_000 })
-  const title = await page.locator('.binderhead h1').innerText()
+  await page.waitForSelector('.friendhead h1', { timeout: 10_000 })
+  const title = await page.locator('.friendhead h1').innerText()
   check(title.trim() === 'Rares', 'the label’s own link opens that binder', title)
 
   // A code from another install — the case a stranger's sticker, or a binder
@@ -186,19 +191,16 @@ try {
   /* --- deleting the label keeps every card --------------------------------- */
 
   await page.goto(`http://127.0.0.1:${PORT}/index.html?welcome=0&nosw=1#/binders/${binder.id}`)
-  await page.waitForSelector('.binderpage', { timeout: 10_000 })
+  await page.waitForSelector('.bindercell', { timeout: 10_000 })
   const before = (await readAll(page, 'collection')).length
-  await page.click('.colltools .btn:has-text("Delete")')
+  await page.click('.friendacts .btn:has-text("Delete")')
   await page.waitForSelector('.modal', { timeout: 5000 })
   await page.click('.modal .btn--danger')
-  await page.waitForTimeout(700)
+  await page.waitForTimeout(900)
   const after = await readAll(page, 'collection')
   check(after.length === before, 'deleting a binder deletes no cards', `${before} → ${after.length}`)
-  check(
-    after.every((row) => row.binderId == null),
-    'and unfiles the ones that were in it',
-  )
-  check((await readAll(page, 'binders')).length === 0, 'the label itself is gone')
+  check((await readAll(page, 'binderCards')).length === 0, 'its rows go with it')
+  check((await readAll(page, 'binders')).length === 0, 'and so does the label')
 
   check(pageErrors.length === 0, 'no page errors', pageErrors.join(' | '))
 } catch (err) {

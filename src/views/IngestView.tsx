@@ -4,10 +4,10 @@ import { Empty } from '../components/basics'
 import { Icon } from '../components/Icon'
 import { TradeSides } from '../components/TradeSides'
 import { track } from '../lib/analytics'
-import { applyTradeReply, db, recordIncomingTrade, upsertFriendFromProfile } from '../lib/db'
+import { applyTradeReply, db, recordIncomingTrade, upsertFriendBinder, upsertFriendFromProfile } from '../lib/db'
 import { settings } from '../lib/settings'
 import { decodeBlob, sideQty, sideValue, tradeFromPayload } from '../lib/social'
-import type { ProfilePayload, SocialPayload, TradePayload } from '../lib/types'
+import type { BinderPayload, ProfilePayload, SocialPayload, TradePayload } from '../lib/types'
 import { money } from '../lib/util'
 import { guarded, useUi, type ToastKind } from '../store/ui'
 
@@ -137,7 +137,80 @@ export function IngestView({ blob }: { blob: string | null }) {
   const payload = state.payload
   if (payload.kind === 'profile') return <ProfilePreview payload={payload} />
   if (payload.kind === 'trade') return <TradePreview payload={payload} toast={toast} />
+  if (payload.kind === 'binder') return <BinderPreview payload={payload} />
   return null // replies resolve to the states above
+}
+
+/**
+ * One of somebody's custom binders, handed over on its own.
+ *
+ * Filed under the collector it came from and never merged into their card
+ * list — a binder is a subset, and importing "Rae's four Charizards" over
+ * "everything Rae owns" would look like a friend who had thrown their
+ * collection away. `upsertFriendBinder` creates a stub for an unfollowed
+ * sender rather than refusing the binder.
+ */
+function BinderPreview({ payload }: { payload: BinderPayload }) {
+  const existing = useLiveQuery(() => db.friends.get(payload.from.id), [payload.from.id])
+  const own = payload.from.id === settings().profileId
+  const count = sideQty(payload.cards)
+  const known = existing?.binders?.some((row) => row.id === payload.id)
+
+  const add = async () => {
+    const result = await guarded(() => upsertFriendBinder(payload), 'Save binder')
+    if (!result) return
+    track('friend_added', { method: 'link', cards: payload.cards.length, update: !result.created })
+    location.hash = `#/friends/${result.friend.id}/${result.binder.id}`
+  }
+
+  if (own) {
+    return (
+      <div className="screen safe-top">
+        <header className="screenhead">
+          <h1>Your binder</h1>
+        </header>
+        <Empty
+          icon="cards"
+          title="That’s your own binder link"
+          body="Send it to someone else — when they open it, this binder shows up under your name on their Friends tab."
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="screen safe-top">
+      <header className="screenhead">
+        <h1>Binder share</h1>
+      </header>
+      <div className="ingestcard">
+        <span className="social-row__avatar ingestcard__avatar" aria-hidden="true">
+          <Icon name="cards" size={18} />
+        </span>
+        <h2 className="ingestcard__name">{payload.name}</h2>
+        <p className="ingestcard__stats">
+          {payload.from.name} · {count} {count === 1 ? 'card' : 'cards'} · {money(sideValue(payload.cards))}
+        </p>
+        {payload.note && <p className="ingestcard__note">“{payload.note}”</p>}
+        <p className="setsec__note">
+          {payload.tradeable
+            ? 'They’re offering these for trade.'
+            : 'A binder they wanted to show you — not marked for trade.'}{' '}
+          {known
+            ? 'You already have this binder; saving updates your copy.'
+            : 'Saving keeps a copy on this device, under their name.'}
+        </p>
+        <div className="ingestcard__acts">
+          <button className="btn btn--primary" onClick={add}>
+            <Icon name="cards" size={16} /> {known ? 'Update this binder' : 'Save this binder'}
+          </button>
+          <a className="btn btn--ghost" href="#/friends">
+            Not now
+          </a>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ProfilePreview({ payload }: { payload: ProfilePayload }) {

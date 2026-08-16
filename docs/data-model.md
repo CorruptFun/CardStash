@@ -64,7 +64,7 @@ readers can filter those rows out instead of mislabelling them as dollars.
 One row = *N copies of one printing in one finish and one condition*.
 
 Row identity for merging is **cardId + finish + condition + setCode + number
-+ opened + grade + binderId**. `addToCollection` and `updateItem` both merge into an existing row
++ opened + grade**. `addToCollection` and `updateItem` both merge into an existing row
 on that identity; `updateItem` additionally merges when an edit collides with
 another row, summing quantities and quantity-weighting the cost basis.
 
@@ -76,8 +76,6 @@ another row, summing quantities and quantity-weighting the cost basis.
 | `marketValue` | Collector-set value per copy, USD. **Overrides every computed price** and is deliberately *not* scaled by the condition factor — they priced the copy in front of them. For sports it is the only figure there is (no price feed exists). |
 | `purchasePrice` | Per-copy cost basis, USD. Merges are quantity-weighted averages. |
 | `forTrade` | Copies offered for trade, `0 ≤ forTrade ≤ qty`. **Every write clamps through `tradeCount()`**; `0` stores as `undefined`. |
-| `binderId` | The physical binder this row is filed in (`Binder.id`). **Part of the merge key** (`sameBinder`), for the same reason `grade` is: the printing is identical, the holding is not, and one merged row of qty 2 cannot answer "what is in *this* binder". Rows with no binder merge exactly as they always did. Indexed (v9). |
-| `binderPage` | 1-based page within that binder, stamped by a page scan or typed in a CSV. Only meaningful with `binderId`; cleared with it. |
 | `card` | A denormalized snapshot of the `Card`, so the collection renders offline. `applyCardUpdate()` pushes fresh prices into every row that shows a card. |
 
 `applyCardUpdate` reshapes a freshly fetched card to the row's chosen printing
@@ -85,33 +83,29 @@ another row, summing quantities and quantity-weighting the cost basis.
 row re-picks its set variant so a refresh doesn't silently revert it to the
 default printing.
 
-### `Binder` — a label, not a container
+### Binders are also objects: pages and printed labels
 
-`{ id, name, note?, createdAt, updatedAt }`. A binder holds no cards: cards
-point at it. That one sentence decides the rest of the design.
+`CustomBinder` (above) is a named selection with an audience. Most of them are
+also a physical thing on a shelf, and two additions say so — without a second
+concept, and without a second table:
 
-- **Deleting a binder deletes no cards.** `deleteBinder` clears `binderId` and
-  `binderPage` off its rows and drops the label, returning how many rows it
-  unfiled so the UI can say "214 cards kept".
-- **The id is printed on paper.** `binderId()` mints 10 characters of lowercase
-  base32 with `i`, `l`, `o`, `0` and `1` left out — it rides a QR code and gets
-  typed back off a scuffed sticker, so it avoids the glyphs a person confuses.
-  Ids are never reissued and never edited.
-- **A label is a URL, not a lookup.** `binderUrl()` builds
-  `<origin><path>#/binders/<id>` from the app's own location, so a label
-  printed from the deployed site opens the deployed site and one printed from a
-  self-hosted copy opens that. It rides the FRAGMENT: a printed label must work
-  offline, and a fragment never reaches a server even where one is listening.
-- **No tombstones**, exactly as decks have none. A deleted binder resurrecting
-  from an unsynced device costs a stale label; mixing binder ids into the
-  tombstone table the collection merge reads would cost cards.
+- **`BinderCard.page`** — 1-based, stamped when the copy arrived from a binder
+  page scan, absent when it was added by hand. It lives on the BINDER row, not
+  the collection row, because the same copy can sit in two binders and "page 3"
+  is true of only one of them. `addToBinder(binderId, itemId, qty, page)` keeps
+  the page a copy was first seen on rather than overwriting it: re-reading a
+  page must not move a card the earlier pass already accounted for.
+- **A printed label** — `binderUrl()` builds `<origin><path>#/binders/<id>`
+  from the app's own location, so a label printed from the deployed site opens
+  the deployed site and one printed from a self-hosted copy opens that. It
+  rides the FRAGMENT (a printed label must work offline, and a fragment is
+  never sent to a server), it carries no cards, and `binderCode()` prints the
+  id underneath in groups of five for a sticker too scuffed to scan.
 
-`lib/binders.ts` is the pure half (naming, ids, links, page grouping,
-`sanitizeBinder`), `db.ts` owns the table and the CRUD, `views/BindersView.tsx`
-is the screen and `components/BinderLabel.tsx` the printed sheet.
-`lib/qr.ts` is a dependency-free QR encoder that exists solely for that sheet —
-you print a label in the room the binder is in, which is exactly where an image
-API would fail.
+`lib/qr.ts` is a dependency-free QR encoder that exists for that label alone —
+you print one in the room the binder is in, which is exactly where an image API
+would fail. `components/BinderLabel.tsx` is the sheet; the print stylesheet at
+the end of `styles.css` is what gets it onto paper without the app around it.
 
 ### `GradeInfo` — a grade is a property of the copy
 
@@ -226,8 +220,27 @@ factor themselves (`sharedRowValue`).
 `direction` says who proposed it. Statuses: `proposed · accepted · declined ·
 completed · canceled`.
 
-Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload`, all
-carrying `app: 'cardstock-social'`. In a trade payload the sender's side is
+`CustomBinder` / `BinderCard` are binders the user builds by hand: a named
+selection with its own `visibility` (`private | friends | public`) and its own
+`tradeable` flag. **`BinderCard.itemId` points at a `CollectionItem`, not at a
+card** — finish, condition, grade and price come off the copy owned, which is
+why a card patch does not need a fourth denormalized `Card` chased through this
+table. `SharedBinder` is the stored/wire form on a friend's record.
+
+`SocialLink` is one place a collector can be reached — `{ platform, value }`
+over a **closed** platform vocabulary, with the handle stored and the URL built
+from a table in `lib/profilelinks.ts`, so an icon can never point somewhere it
+does not claim to. It hangs off `ProfilePayload`/`Friend` rather than off the
+hosted `profiles` row, which is what makes it inherit the binder's audience —
+see [social.md](social.md) and decision 23.
+
+`ChatThread` / `ChatMessage` (`lib/messaging.ts`) are **server-only**: there is
+no Dexie table and no backup entry for them, deliberately (decision 24).
+
+Payloads on the wire: `ProfilePayload | TradePayload | ReplyPayload |
+BinderPayload`, all carrying `app: 'cardstock-social'`. A `BinderPayload` is a
+separate kind on purpose — importing one files it under its sender and never
+touches their card list. In a trade payload the sender's side is
 `offer` and what they want back is `want`; `tradeFromPayload` flips that into
 the receiver's `give`/`get`. See [social.md](social.md).
 
@@ -246,7 +259,7 @@ function.
 | 6 | `wants: 'key, game, addedAt'` |
 | 7 | `collection` gains `updatedAt`, `tombstones: 'id, at'`; **upgrade** backfills `updatedAt` from `addedAt` |
 | 8 | `patches: 'cardId, game, updatedAt'` — user-authored card images and fields. `custom` is deliberately **not** indexed: it is a boolean, IndexedDB has no boolean key type, and an index on one silently stores nothing |
-| 9 | `binders: 'id, name, updatedAt'`, and `collection` restated to index `binderId` — "show me this binder" is otherwise a full scan of the collection on every render of the screen whose whole job is that query |
+| 9 | `binders: 'id, updatedAt'`, `binderCards: 'id, binderId, itemId, cardId, [binderId+itemId]'` — binders the user builds by hand. Keyed on the **collection row**, not the card, so a binder holds the copy actually owned; the compound index makes "already in this binder?" one lookup. `visibility` is not indexed — three strings on a table of tens of rows |
 
 Adding a version: append a `this.version(n).stores({...})` block, never edit an
 existing one, and supply `.upgrade()` if stored rows need reshaping. See
@@ -259,8 +272,7 @@ collection rows must uphold them.
 
 1. `forTrade` is clamped to `[0, qty]` on **every** path — add, qty change,
    remove copies, edit, backup import, trade application.
-2. Sealed vs opened rows never merge (`sameOpened`), and rows in different
-   binders never merge (`sameBinder`).
+2. Sealed vs opened rows never merge (`sameOpened`).
 3. Cost bases combine as quantity-weighted averages (`averagePrice`).
 4. `applyTradeToCollection` decrements the *given* side preferring the exact
    printing, then rows already flagged for trade; copies the collection no
@@ -300,6 +312,8 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `pokemonKey` | pokemontcg.io key, from `VITE_POKEMON_KEY` at build time — **not user-editable**, and `merge()` always takes the build's value over a persisted one. `geminiKey`/`geminiModel` are gone: the deck builder runs on our key through `build-deck`. |
 | `diagShare` (on outside the EU/EEA/UK) / `diagConsentAt` (`0`) | Telemetry upload. The destination is not a setting (`lib/diagconfig.ts` → the app's own Supabase RPC). Uploads need the toggle **and** `diagConsentAt` — until the disclosure has been answered nothing is posted, and `noteDiagConsent()` buries the pre-consent backlog as it answers. An install predating the field is forced back to off by `merge()` rather than opted in by a new default. |
 | `profileId` / `profileName` / `profileNote` / `shareScope` (`'trade'`) | Social identity and what a share includes. |
+| `profileLinks` (`[]`) | Social accounts shown beside the binder. Re-sanitized on rehydrate as well as on the wire, because localStorage is editable and these become `<a href>`s in other people's apps. |
+| `messageUnread` (`0`) | Unread messages, cached so the nav badge is right on the first frame. A cache of a server fact, never the authority; cleared on sign-out. |
 | `referralFrom` (`''`) / `referralAt` (`0`) | The `@handle` whose link brought this install here, and when the server last gave a **final** answer about it. Written at boot from `?via=` and never overwritten — one referrer per account, for ever (`lib/referral.ts`). It is stored rather than read at the point of use because sign-in destroys the URL: the Google route returns to `origin + pathname` with query string and fragment both gone. `referralAt` is cleared on sign-out. |
 | `cardSourceLookup` (`true`) | May the app ask the shared card index about cards that have **no picture at all** (`lib/cardsource.ts`)? On by default: it sends a card id and gets a picture back, the same class of request already made to Scryfall on every search, aimed at our project instead of theirs — never the session token, never a background sweep, never for a card that already has art. |
 | `cardSourceShare` (`false`) | May the pictures and details this user fills in be contributed back? Off by default, and the switch that matters: a photo of a card is a photo the user took, and publishing it is a decision. The editor asks again per card on top of this. |
@@ -328,21 +342,20 @@ directly.
   "app": "cardstock", "version": 1, "exportedAt": "<ISO>",
   "collection": [...], "decks": [...], "deckCards": [...],
   "history": [...], "friends": [...], "trades": [...], "wants": [...],
-  "binders": [...], "patches": [...]
+  "patches": [...], "binders": [...], "binderCards": [...]
 }
 ```
-
-`binders` is optional on the way **in** (backups written before v9 lack it) and
-always written out: a restore that brought the cards back and left every one of
-them unfiled would silently undo an evening spent scanning a shelf into order.
-Rows go through `sanitizeBinder`, and a collection row's `binderId` is coerced
-explicitly rather than riding the row spread — it is a key another table is
-looked up by.
 
 `patches` is optional on the way **in** (every backup written before v8 lacks
 it) and always written on the way **out** — a photo the user took of their own
 card exists nowhere else in the world, so omitting it would make "restore"
 quietly lossy.
+
+`binders`/`binderCards` are optional on the way in for the same reason (nothing
+written before v9 has them) and always written out: the cards are already in
+`collection`, but the **grouping** exists nowhere else. `sanitizeBackup` forces
+any visibility it does not clearly recognise back to `private` — a restore must
+never be the thing that publishes a binder.
 
 `exportBackup({ imageBudget })` caps the imagery a backup carries, and **only
 the vault passes one** (`VAULT_IMAGE_BUDGET`, ~6 MB): it is a single text

@@ -4,7 +4,7 @@ import { Modal } from './basics'
 import { binderCode, binderUrl } from '../lib/binders'
 import { downloadFile } from '../lib/csv'
 import { encodeQr, qrPath } from '../lib/qr'
-import type { Binder } from '../lib/types'
+import type { CustomBinder } from '../lib/types'
 
 /**
  * The sticker that goes on the physical binder.
@@ -33,7 +33,15 @@ import type { Binder } from '../lib/types'
 const PNG_MODULE_PX = 12
 const PNG_QUIET = 4
 
-export function BinderLabel({ binder, count, onClose }: { binder: Binder; count: number; onClose: () => void }) {
+export function BinderLabel({
+  binder,
+  count,
+  onClose,
+}: {
+  binder: CustomBinder
+  count: number
+  onClose: () => void
+}) {
   const [copied, setCopied] = useState(false)
   const url = useMemo(() => binderUrl(binder.id), [binder.id])
   const qr = useMemo(() => {

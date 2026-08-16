@@ -48,7 +48,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `npm run test:social` — the hosted-social RLS harness against a real Supabase
   project (needs `SUPABASE_SECRET`; creates and deletes its own users). Run it
   after any migration touching `binders`, `friendships`, `trade_offers` or
-  `inbox`. `npm run test:cardsource` is the same shape for `card_data` — run it
+  `inbox`. `npm run test:messages` is its sibling for `messages` /
+  `message_threads` — run it after any migration touching either, and note it
+  is what proves a third party can neither read a conversation nor write into
+  one, which no schema read can show. `npm run test:cardsource` is the same shape for `card_data` — run it
   after applying `0013` and after any migration touching the card index; it is
   what proves the anon-read / authenticated-write asymmetry actually holds,
   which no schema read can show.
@@ -91,8 +94,11 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   portfolio math (`portfolio.ts`), deck math (`deckstats.ts`), CSV
   import/export (`importexport.ts`), local diagnostics (`analytics.ts`),
   serverless social (`social.ts` — profile/trade payload build+codec+sanitize;
-  the Dexie writes for friends/trades live in `db.ts`), hosted social
-  (`authsession.ts` + `socialcloud.ts` — see Hosted social below), opt-in backup to
+  the Dexie writes for friends/trades live in `db.ts`; `profilelinks.ts` — the
+  closed platform vocabulary behind a collector's Instagram/Discord/Whatnot
+  icons), hosted social
+  (`authsession.ts` + `socialcloud.ts` — see Hosted social below;
+  `messaging.ts` — collector-to-collector conversations, server-only), opt-in backup to
   the user's OWN Google Drive (`drive.ts` — `appDataFolder`, daily, last 5 kept;
   dormant without `VITE_GOOGLE_CLIENT_ID`, and the third-party Google script is
   injected on first use, NEVER at boot, so a user who never turns it on never
@@ -184,7 +190,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0013 — social is 0000–0004), not
+`supabase/migrations/` (0000–0020 — social is 0000–0004, messaging is 0019,
+custom binders are 0020), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
@@ -263,6 +270,81 @@ dismissed reflexively for the rest of the product's life.
   door on the Friends screen.
 - **`server/` and `lib/sync.ts` are deleted** (the app had no users, so no
   compatibility path was carried). Don't reintroduce a second live tier.
+
+## Where a collector can be found, and talking to them
+
+**Social profile links ride the BINDER, never `profiles`** (`profilelinks.ts`,
+`ProfilePayload.links`, `settings.profileLinks`, decision 23). Migration 0001's
+header is explicit that `profiles` is readable by every signed-in user and
+carries identity only; contact details live on the binder row so they inherit
+scope-driven visibility. Two things are load-bearing: the audience is the
+binder's audience (no second privacy toggle), and **the vocabulary is closed
+and the URL is built from a table, never stored** — a stored URL under a
+platform icon is a redirect a payload could point anywhere. `website` is the
+one URL-holding kind, `https:` only; Discord has no profile page and is
+copy-to-clipboard.
+
+**Messages are their own subsystem** (`supabase/migrations/0019`,
+`lib/messaging.ts`, `views/MessagesView.tsx`, decision 24). Read
+`docs/social.md` before touching any of it. Four things that are load-bearing:
+
+- **It is NOT the trade inbox and must not become it.** `inbox` is
+  recipient-read-only, drained-and-deleted and 30-day TTL — right for a trade
+  payload, wrong for a conversation. `orders` still has no free-text field.
+- **Nothing writes these tables directly.** No INSERT/UPDATE/DELETE policy and
+  only `select` granted; `send_message` / `list_threads` / `mark_thread_read` /
+  `set_thread_block` are the doors, because the denormalized preview, the read
+  watermarks and the block flags are all things a client could forge about the
+  *other* person's row.
+- **No local mirror.** Dexie rows ride `exportBackup`, the CSV export and the
+  Drive backup; a private conversation with somebody else does not belong in a
+  file the user hands around. Threads are fetched, like orders.
+- **Plaintext to us, and the composer says so** (15b's honesty rule). Bounded
+  instead: text plus one optional `SharedCard`, which goes through
+  `sanitizeSharedCard` — the same door a share link uses. No attachments, no
+  images, no addresses. Blocking is one-sided and silent, mirroring
+  `request_friend()`; the badge (`settings.messageUnread`) is a cache, never
+  the authority.
+
+**The handshake is free and the escrow is what you pay for** (decision 25) —
+this is the product's position, not a temporary state, and it constrains code.
+Two collectors may do the whole deal in a conversation and pay us nothing;
+escrow is the optional service the fee buys. Therefore: messaging is **never**
+gated on `VITE_MARKETPLACE` or entitlement (Ask sits on a wider gate than Buy
+in `CardSheet.tsx`, on purpose); we never scan message bodies, interstitial the
+way out, or nudge a quiet thread; escrow is sold on what it does, never on fear
+of the free path we are simultaneously offering. Read decision 25 before
+writing copy near this or adding anything that measures where a deal ended up.
+
+## Custom binders
+
+Binders the user builds by hand, each with **its own audience** — `lib/binders.ts`
+(pure), `views/BindersView.tsx`, Dexie v9 (`binders`, `binderCards`),
+`supabase/migrations/0020`. They sit BESIDE the whole-collection binder, never
+instead of it. Read decision 26 and `docs/social.md` first. Five load-bearing
+things:
+
+- **`public` means any signed-in collector, NOT the open web.** A binder
+  readable by `anon` is one anybody with the publishable key can enumerate,
+  which is what `trade_offers` refuses to be. Changing that is a decision, not
+  a policy edit.
+- **`tradeable` is a second switch.** Only `public AND tradeable` enters the
+  global want index (`isDiscoverable`), and `publish_custom_binder` computes
+  that itself rather than trusting the caller. Friends-only is never globally
+  matchable. Publishing one also makes you reachable (`can_message`,
+  `send_to_inbox`) — otherwise the offer exists and nobody may ask about it.
+- **`BinderCard.itemId` points at a COLLECTION ROW, not a card.** Finish,
+  condition, grade and price come off the copy owned; copying them would be a
+  fourth denormalized `Card` for `savePatch` to chase. Quantities clamp to the
+  collection in `addToBinder` *and* `resolveBinderRows`.
+- **A binder is its own payload kind** (`kind: 'binder'`). `upsertFriendBinder`
+  files it under its sender and never touches `Friend.cards`; `friendFromProfile`
+  returns the favour by keeping binders a profile refresh knows nothing about.
+- **`trade_offers.source`** is what stops the two publishers evicting each
+  other (`''` = main binder). `unpublish_binder` is narrowed to `source = ''`
+  for the same reason. A binder starts `private` whatever the caller passes,
+  and `sanitizeBackup` forces an unrecognised visibility back to private — a
+  restore must never be the thing that publishes a binder.
 
 ## Paid trades — buying a card from a friend (in progress)
 
@@ -347,6 +429,13 @@ it. Four things are load-bearing:
   held to the same standard as the connect nudges: a one-off payment, stated as
   one, with a seat count that is real. Nothing here may reach `track()` — a
   handle is identity.
+- **An invite ends in a friendship** (`0017`, `components/InvitePanel.tsx`).
+  `befriend_referrer()` takes **no argument** — the `referrals` row is the only
+  thing that authorises the accepted edge, which is why this does not breach
+  0002's consent gate: both sides acted, one by inviting and one by following.
+  A `blocked` row in either direction ends the call untouched; an invite must
+  never launder a refusal. `seedFriendRows()` gives an accepted friend a local
+  row before they publish, or the Friends screen contradicts the toast.
 
 ## Cards the catalogs got wrong, or never had
 
@@ -421,40 +510,37 @@ months and a 429 stands lookups down for hours. The real fix is a proxy holding
 the token server-side — point `VITE_PSA_ENDPOINT` at one and nothing else
 changes.
 
-## Binders — where the card physically is
+## Binders are also objects on a shelf
 
-A binder is a **label on a real object, not a second collection**. Cards point
-at it (`CollectionItem.binderId` + `binderPage`); it holds nothing itself.
-`lib/binders.ts` is the pure core (names, printable ids, the label URL, page
-grouping, `sanitizeBinder`), `db.ts` owns the `binders` table (Dexie v9) and the
-CRUD, `views/BindersView.tsx` is the screen, `components/BinderLabel.tsx` the
-printed sheet and `lib/qr.ts` the encoder behind it. Read decision 23 and
-`docs/data-model.md` before touching any of it.
+The section above is a binder's *audience*; this is its *body*. Most binders
+are a real thing you can hold, so two additions say so without inventing a
+second concept — read decision 27 before touching either:
 
-Four things are load-bearing:
+- **`BinderCard.page`** — 1-based, stamped by a binder page scan, absent when a
+  card was added by hand. It lives on the BINDER row rather than the collection
+  row because the same copy can sit in two binders and "page 3" is true of only
+  one of them. `addToBinder` keeps the page a copy was **first** seen on: a
+  re-scan of page 7 must not move a card page 3 already accounted for.
+- **A printed QR label** (`components/BinderLabel.tsx` + the dependency-free
+  `lib/qr.ts`) carrying `…#/binders/<id>`, built from the app's own `location`
+  and riding the FRAGMENT so a label works offline and the id never reaches a
+  server. Any phone camera opens it; it carries no cards, so a stranger who
+  scans it gets nothing — not even for a `public` binder. `#/binders/:id` is
+  **printed on paper**: it is the one route that can never be renamed.
 
-- **Deleting a binder deletes no cards.** `deleteBinder` unfiles its rows and
-  returns how many, so the UI can say "214 cards kept". Nothing in this feature
-  may ever become a way to lose a card.
-- **The printed QR is a plain URL to this deployment** — `…#/binders/<id>`,
-  built from the app's own `location`, riding the FRAGMENT so a label works
-  offline and the id never reaches a server. Any phone camera opens it; it
-  carries no collection, so a stranger who scans it gets nothing. `#/binders/:id`
-  is printed on paper: it is the one route that can never be renamed.
-- **The encoder is ours and stays ours.** You print a label in the room the
-  binder is in. `tests/unit/qr.test.mjs` decodes what it emits with a real
-  decoder — a subtly wrong encoder still renders a plausible square, and the
-  sticker is already glued down by the time anyone notices.
-- **Binder is part of a collection row's identity** (`sameBinder`, beside
-  `sameGrade`/`sameOpened`): the same card in two binders is two rows, because
-  one merged row of qty 2 cannot say what is in *this* binder. Unfiled rows
-  merge exactly as they always did.
+The encoder is ours and stays ours — you print a label in the room the binder
+is in. `tests/unit/qr.test.mjs` decodes what it emits with a real decoder,
+because a subtly wrong encoder still renders a plausible square and the sticker
+is glued down by the time anyone notices.
 
 A page scan is a **session**, not a screen: "Next page" parks the review behind
 the viewfinder and the next page's rows append under their own heading. The
 review is parked with `display:none`, never unmounted — remounting would throw
-away every tick already made and the binder already chosen. Run
-`npm run test:binder` (no camera, no fixtures) after touching any of it.
+away every tick already made and the binder already chosen. Filing writes the
+collection row first and the binder row second (`addToCollection` then
+`addToBinder`), so a failure between them leaves a card outside a binder rather
+than a binder pointing at nothing. Run `npm run test:binder` (no camera, no
+fixtures) after touching any of it.
 
 ## Planned paid tier — binder scanning and photo upload
 

@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Icon } from './Icon'
 import { Modal } from './basics'
-import { BINDER_NAME_MAX, byPage, cleanBinderName, pageLabel } from '../lib/binders'
-import { addToCollection, createBinder, db } from '../lib/db'
+import { BINDER_NAME_MAX, byPage, pageLabel } from '../lib/binders'
+import { addToBinder, addToCollection, createBinder, db } from '../lib/db'
 import { FINISH_LABEL, GAME_SHORT, finishOptions } from '../lib/games'
 import type { IdentifyOutcome } from '../lib/identify'
 import { rescanPageCard, type PageCard } from '../lib/multiscan'
 import { itemUnitPrice, scannedFinish } from '../lib/prices'
-import type { Binder, Card, Finish } from '../lib/types'
+import type { Card, CustomBinder, Finish } from '../lib/types'
 import { money } from '../lib/util'
 import { guarded, uiStore } from '../store/ui'
 
@@ -150,7 +150,7 @@ function BinderPicker({
   onPick,
   disabled,
 }: {
-  binders: Binder[]
+  binders: CustomBinder[]
   pick: BinderPick
   onPick: (pick: BinderPick) => void
   disabled: boolean
@@ -210,7 +210,7 @@ export function BinderReview({
   onClose: () => void
   onScanMore?: () => void
   onOpenCard: (card: Card, finish: Finish) => void
-  onAdded: (added: number, itemIds: string[], binder: Binder | null) => void
+  onAdded: (added: number, itemIds: string[], binder: CustomBinder | null) => void
 }) {
   const [rows, setRows] = useState<Row[]>(() => cards.map((c) => ({ ...c, include: preTicked(c.outcome) })))
   const [saving, setSaving] = useState(false)
@@ -251,7 +251,7 @@ export function BinderReview({
 
   const chosen = useMemo(() => rows.filter((r) => r.include && r.outcome.ok), [rows])
   const found = rows.filter((r) => r.outcome.ok).length
-  const pages = useMemo(() => byPage(rows.map((row) => ({ ...row, binderPage: row.page }))), [rows])
+  const pages = useMemo(() => byPage(rows, (row) => row.page), [rows])
   const value = chosen.reduce((sum, r) => {
     const hit = r.outcome as Extract<IdentifyOutcome, { ok: true }>
     return sum + (itemUnitPrice({ finish: rowFinish(hit), condition: 'NM', qty: 1, card: hit.card }) ?? 0)
@@ -289,10 +289,10 @@ export function BinderReview({
    * left it blank — filing 180 cards into "Untitled binder" is not what they
    * asked for, so nothing is written at all.
    */
-  const resolveBinder = useCallback(async (): Promise<Binder | null | undefined> => {
+  const resolveBinder = useCallback(async (): Promise<CustomBinder | null | undefined> => {
     if (pick.kind === 'none') return null
     if (pick.kind === 'existing') return binders?.find((binder) => binder.id === pick.id) ?? null
-    const name = cleanBinderName(pick.name)
+    const name = pick.name.trim().slice(0, BINDER_NAME_MAX)
     if (!name) {
       uiStore.getState().toast('Name the binder, or pick “No binder”', 'info')
       return undefined
@@ -316,21 +316,19 @@ export function BinderReview({
       // Every write goes through guarded() so a full quota surfaces as a toast
       // rather than an unhandled rejection — and a page of nine is exactly
       // when storage runs out.
-      const item = await guarded(
-        () =>
-          addToCollection(hit.card, {
-            finish: rowFinish(hit),
-            binderId: binder?.id,
-            // The page it was read from, so the card can be found in the
-            // physical binder and not just in the app.
-            binderPage: binder ? row.page : undefined,
-          }),
-        'Add',
-      )
+      // Two writes, in this order and never merged into one: the copy exists
+      // whether or not it is in a binder, and a binder row points AT a
+      // collection row (`BinderCard.itemId`). A failure between them leaves a
+      // filed card outside a binder, which the user can fix; the other order
+      // would leave a binder pointing at nothing.
+      const item = await guarded(() => addToCollection(hit.card, { finish: rowFinish(hit) }), 'Add')
       if (!item) {
         stopped = true
         break
       }
+      // The page it was read from, so the card can be found in the physical
+      // binder and not just in the app.
+      if (binder) await guarded(() => addToBinder(binder.id, item.id, 1, row.page), 'Binder')
       filed.add(row.id)
       written.push(item.id)
     }
