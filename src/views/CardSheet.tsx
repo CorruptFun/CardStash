@@ -28,6 +28,7 @@ import { addedToBoardToast, boardForCard } from '../lib/deckstats'
 import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, isFoilFinish, SOURCE_LABEL } from '../lib/games'
 import { gradeShort } from '../lib/slab'
 import { SPORT_LABEL } from '../lib/sports'
+import { clearEstimateCorpus } from '../lib/estimate'
 import { cardTrend } from '../lib/portfolio'
 import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
@@ -880,6 +881,10 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
     )
     setSaving(false)
     if (result !== undefined) {
+      // A value just saved is evidence for the NEXT card's estimate, and the
+      // flow is usually "price this one, open the next" — well inside the
+      // corpus memo's life. Drop it so the estimate does not lag a card behind.
+      clearEstimateCorpus()
       setEditing(false)
       if (result === null) {
         toast('That copy is no longer in your collection', 'info')

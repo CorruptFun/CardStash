@@ -1308,3 +1308,64 @@ meanwhile is the obvious one: someone deciding the median is good enough to
 write onto the card, or to fill in automatically, or to total a collection
 with. Each of those is one small edit and each turns an honest reading into the
 invented number decision 17 was written to prevent.
+
+---
+
+### 17b. A soft estimate is a summary of the collector's own numbers, never a guess about the card
+
+**Context.** 17a gave sports a comp, but it needs an eBay keyset, a network,
+and a card with enough printed facts to search on. Offline, on a regional promo
+nobody lists, or in a build with no credentials, the answer is still "type a
+number in". The obvious next idea is an *estimate* — a soft figure the app
+offers when it has no comp — and the obvious way to build one is a model of
+card attributes: rookie, auto, serial run, brand tier, year.
+
+**Decision.** Ship the estimate, and build it out of the collector's own priced
+cards rather than out of attributes. `lib/estimate.ts` finds comparables among
+their valued (or failing that, purchased) copies, summarizes them into a range,
+and shows the comparables it used.
+
+**Why this way.** An attribute model produces a confident dollar figure for a
+card nobody has ever priced. That is exactly the failure decision 17 was
+written around, moved from identity to money: not the wrong *real* answer, but
+an invented one, with nothing on screen that could let the user tell. And the
+numbers it would need — how much a rookie stamp is worth, what a /25 multiplies
+by — do not exist anywhere in this app. We would be making all of them up.
+
+The collector's own history, by contrast, is real, is specific to the corner of
+the hobby they actually collect, works offline with no key and no account, and
+every dollar in it traces back to something they typed. It is also a smaller
+claim, honestly stated: not "this card is worth $30" but "cards like it, that
+you priced, run $20–$40".
+
+**Consequences.**
+
+- **Three tiers, strongest only, never blended.** Same player + year; then the
+  set; then brand + year. Three comparables minimum, outliers dropped by the
+  same five-fold band as the comps, slabs compared only with slabs (18).
+  Averaging three same-player cards in with twenty commons would bury the good
+  evidence in the weak.
+- **Nothing is adjusted.** No rookie multiplier, no parallel premium, no
+  condition curve. One invented factor is enough to make the output
+  untraceable, and traceability is the entire defence.
+- **It says "estimate" three ways** — the word, a range instead of a figure,
+  and the basis sentence naming the comparables. That is not belt-and-braces
+  copy: a number this soft gets read by whichever cue the reader notices first.
+  `describeBasis` is unit-tested for the same reason the figures are; the
+  sentence IS the disclosure.
+- **Figures round to a widening step.** `$34.17` claims a precision four
+  comparables cannot support.
+- **It compounds, and its cold start is honest.** Accepting an estimate or a
+  comp writes `marketValue`, which becomes corpus for the next card. A new
+  collector with nothing priced sees nothing at all, and that is correct — the
+  alternative is inventing the first number, which is where this started.
+- **Still never automatic.** `card.prices` stays empty, bulk refresh still
+  skips sports, portfolio totals are still exactly what the collector entered.
+  An estimate reaches `marketValue` only on a tap, like a comp.
+
+**What would make this wrong.** Enough real sold data to price a card directly
+— at which point the estimate becomes a fallback for cards the feed misses
+rather than the main answer. Short of that, the failure mode to watch is the
+tempting one: adding "just one" attribute adjustment, or widening the tiers
+until a comparable is anything vaguely similar. Both convert a traceable
+summary into a guess wearing its clothes.

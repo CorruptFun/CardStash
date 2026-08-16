@@ -137,6 +137,49 @@ shows the link alone, exactly as before. Optional: `EBAY_MARKETPLACE`
 (`EBAY_US`), `EBAY_CATEGORY` (`261328`, "Sports Trading Card Singles" — the
 scoping that keeps a player name from returning jerseys and posters).
 
+### The soft estimate (`estimate.ts`)
+
+The comp lookup needs credentials, a network and a card with enough printed
+facts to search on. None of that is true offline, on a promo nobody lists, or
+in a build with no eBay keyset — so beside it there is an estimate that needs
+none of them, and it is the answer to "what do we *think* this goes for?"
+(decision 17b).
+
+**Where the numbers come from.** Cards the collector has already priced —
+`CollectionItem.marketValue`, falling back to `purchasePrice`. That is real
+evidence, specific to the corner of the hobby they actually collect, and every
+dollar in it traces back to something they typed. What it is emphatically NOT
+is a model of card attributes: "rookie + auto + /25 ≈ $200" would produce a
+confident figure for a card nobody has ever priced, which is the exact thing
+decision 17 refuses.
+
+**Three tiers, strongest only, never blended:**
+
+| Tier | Comparables | Why not wider |
+| ---- | ----------- | ------------- |
+| `player` | same player, same year | Different years are different markets — a 1989 rookie against a 1994 base is the comparison that produces an invisible error |
+| `set` | same year + brand + product | The set's own price band |
+| `brand` | same year + brand | Last resort, and it says so |
+
+Three comparables minimum (the comps floor again), outliers dropped by the same
+five-fold band, slabs compared only with slabs (decision 18). The strongest
+tier that clears the floor wins outright — averaging three same-player cards in
+with twenty commons from the set buries the good evidence in the weak.
+
+**Three ways it says "estimate", on purpose.** The word, the range instead of a
+figure, and the basis line naming the comparables ("Rough guess from 4 Ken
+Griffey Jr cards from 1989 you've priced"). A number this soft gets read by
+whichever cue the user notices first, so it carries all three. Figures round to
+a step that widens with size — `$34.17` claims a precision this cannot have.
+
+**Nothing is adjusted.** No rookie multiplier, no parallel premium, no
+condition curve. Each would be a number we invented, and one is enough to make
+the output untraceable to anything the user said.
+
+**It compounds.** Accepting an estimate or a comp writes `marketValue`, which
+is corpus for the next card — so a collection gets easier to price the more of
+it is priced. A new collector sees nothing, which is the honest cold start.
+
 **The quota.** eBay's default Browse allowance is a few thousand calls a day
 for the *application*, shared across all users — the same arithmetic as the PSA
 token. Two caches answer it: an hour in the function's isolate, a day on the

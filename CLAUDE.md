@@ -509,6 +509,19 @@ and under three surviving listings the answer is "too few", not a number. The
 call is anonymous (publishable key, `verify_jwt = false`) because the free path
 is signed out. Dormant without `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`.
 
+Beside the comp is a **soft estimate** (`estimate.ts`, decision 17b) for when
+there is no comp — offline, no keyset, or a promo nobody lists. It is a summary
+of the collector's OWN priced cards (`marketValue`, falling back to
+`purchasePrice`), never a model of card attributes: a rookie/auto/serial
+multiplier would produce a confident figure for a card nobody has ever priced,
+which is decision 17's failure mode moved from identity to money. Three tiers
+(player+year, set, brand+year), strongest only and never blended, three
+comparables minimum, slabs compared only with slabs, and **nothing adjusted** —
+one invented factor makes the output untraceable, and traceability is the whole
+defence. It says "estimate" three ways (the word, a range not a figure, and the
+basis sentence naming the comparables) because a number this soft is read by
+whichever cue lands first; `describeBasis` is unit-tested for that reason.
+
 Grades live on `CollectionItem`, never on `Card`, for every game — see decision
 18. `slab.ts` owns `sanitizeGrade`, reused by the backup and social paths.
 
