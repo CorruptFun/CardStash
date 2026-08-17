@@ -8,6 +8,7 @@
  *   … --sets=12                                                               # cap Pokémon sets (politeness / smoke)
  *   … --dry-run                                                               # map and count, write nothing
  *   … --hash --limit=500                                                      # fingerprint pass (resumable)
+ *   … --stats                                                                 # rows + hash coverage + one anon lookup
  *
  * Node on purpose, not Python: the repo is all Node, the fixtures fetcher
  * already speaks these APIs politely, and — the part that actually matters —
@@ -288,6 +289,58 @@ async function hashPass(limit) {
   console.log(`hash: ${done} rows fingerprinted`)
 }
 
+/* ------------------------------------------------------------------ stats */
+
+/**
+ * The post-sync sanity report: rows and artwork coverage per game, plus one
+ * anonymous lookup through the same RPC the app calls — because "the table
+ * has rows" and "an anon client gets answers" are different claims, and the
+ * second is the one the app depends on.
+ */
+async function stats() {
+  const count = async (filter) => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/catalog_printings?select=id&${filter}`, {
+      headers: { ...serviceHeaders(), Prefer: 'count=exact', Range: '0-0' },
+    })
+    if (!res.ok) return NaN
+    return Number((res.headers.get('content-range') ?? '/0').split('/')[1])
+  }
+  console.log('game      rows      with art_hash')
+  let sampleGame = null
+  let sampleName = null
+  for (const game of ['mtg', 'pokemon', 'yugioh']) {
+    const total = await count(`game=eq.${game}`)
+    const hashed = await count(`game=eq.${game}&art_hash=not.is.null`)
+    const pct = total > 0 ? ` (${Math.round((hashed / total) * 100)}%)` : ''
+    console.log(`${game.padEnd(9)} ${String(total).padEnd(9)} ${hashed}${pct}`)
+    if (!sampleGame && total > 0) {
+      const row = await (
+        await fetch(`${SUPABASE_URL}/rest/v1/catalog_printings?select=name&game=eq.${game}&limit=1`, {
+          headers: serviceHeaders(),
+        })
+      ).json()
+      sampleGame = game
+      sampleName = row?.[0]?.name ?? null
+    }
+  }
+  if (sampleGame && sampleName) {
+    // The app's own door, with the app's own credentials: anon key, no JWT.
+    const anonKey = process.env.SUPABASE_KEY ?? 'sb_publishable_G3bgfYDZWuFYzEufHf793A_i4Po9Y3E'
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/catalog_by_name`, {
+      method: 'POST',
+      headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_game: sampleGame, p_query: sampleName.slice(0, 40) }),
+    })
+    const hits = res.ok ? await res.json() : []
+    console.log(
+      res.ok && Array.isArray(hits) && hits.length
+        ? `anon lookup: "${sampleName}" answers through catalog_by_name ✓`
+        : `anon lookup FAILED (HTTP ${res.status}) — has 0021 been applied? has test:mirror been run?`,
+    )
+    if (!res.ok) process.exitCode = 1
+  }
+}
+
 /* ------------------------------------------------------------------- main */
 
 async function main() {
@@ -300,6 +353,11 @@ async function main() {
   if (!SECRET && !dryRun) {
     console.error('SUPABASE_SECRET is required (service key) — or pass --dry-run to map without writing.')
     process.exit(2)
+  }
+
+  if (flag('stats')) {
+    await stats()
+    return
   }
 
   if (flag('hash')) {

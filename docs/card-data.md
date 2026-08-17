@@ -508,10 +508,37 @@ worker's `--hash` pass through the same bundled code the client executes);
 `pickPrintingByArt` uses it in identify's printing tie-break seam to tell
 alternate arts of an already-named card apart, under measured thresholds and
 the rule that art may never propose a different card. Wiring:
-`searchByCodeWithMirror` / the empty-or-failed branches of `searchGame` and
-`matchGame` in cardsearch.ts, and the `tiebreak-art` arm in identify.ts. RLS
-proof: `npm run test:mirror` (tests/harness/catalog-rls.mjs) — run it after
-applying 0021 and after any migration touching `catalog_printings`.
+`searchByCodeWithMirror` / the empty-or-failed branches of `searchGame`,
+`matchGame` and `printingVariants` in cardsearch.ts, and the `tiebreak-art`
+arm in identify.ts. RLS proof: `npm run test:mirror`
+(tests/harness/catalog-rls.mjs) — run it after applying 0021 and after any
+migration touching `catalog_printings`.
+
+**Turning it on** (operator, in this order — every client is dormant until
+the first two steps land, at the cost of two stood-down requests per
+session):
+
+1. `supabase db push` applies 0021. If every project-scoped call answers
+   "does not have the necessary privileges", the CLI is signed in as the
+   wrong account — see the hosted-social notes in CLAUDE.md before touching
+   anything else.
+2. `SUPABASE_SECRET=sb_secret_… npm run test:mirror` — proves anon can read,
+   no user role can write, and the code normalization holds. Do not skip it:
+   a schema read cannot show any of that.
+3. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs` — fills the table from
+   all three sources (re-runnable; re-running IS the update story).
+4. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --hash --limit=2000` —
+   fingerprints artwork newest-first; resumable, so repeat until it reports
+   "nothing to do". The art tie-break only covers rows this pass has reached.
+5. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --stats` — per-game rows,
+   hash coverage, and one lookup through the anonymous RPC the app itself
+   calls, which is the claim that actually matters.
+
+The recurring half can ride CI: `.github/workflows/sync-catalog.yml`
+dry-runs the mappers against the live bulk APIs on any push touching the
+worker (catching upstream shape drift with no secret at all), and once the
+repo has a `SUPABASE_SECRET` Actions secret, the same workflow runs the real
+sync plus a 2000-row hash slice every Monday and reports coverage.
 
 ## Pricing (`lib/prices.ts`)
 
