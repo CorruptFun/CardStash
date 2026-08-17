@@ -1221,3 +1221,55 @@ the camera (`BarcodeDetector`), which is deliberately not in the scan pipeline
 today: any phone camera already opens the link, and a per-frame barcode pass is
 exactly the kind of change the scan harness exists to gate.
 
+
+### 28. The catalog mirror is a fallback with our name on it, never the first answer
+
+The app now keeps its own copy of the big three catalogs — `catalog_printings`
+(migration 0021), filled by `scripts/sync-catalog.mjs` from Scryfall, TCGdex
+and YGOPRODeck, read through three anonymous RPCs by `lib/catalog.ts`. Two
+things forced it: pokemontcg.io failing by degrees taught the app what an API
+outage does to a search box and a scanner, and no upstream API can answer
+"which printing is in the frame" at all. Each mirror row may carry `art_hash`,
+a 256-bit gradient fingerprint of the artwork window, computed by the sync
+worker with the SAME `cardArtHash` the capture side runs — that shared code
+path is the entire reason two fingerprints are comparable.
+
+- **Fallback means fallback.** Every consultation sits BEHIND the live API:
+  `searchGame`, `matchGame` and the code lookup ask the mirror only after the
+  game's own source failed or answered empty, so a healthy API's answer —
+  fresher, priced, canonical — always wins untouched. The mirror stores each
+  game's own api-id namespace verbatim (Scryfall uuid, `dex-…`, passcode), so
+  a mirror answer dedupes with, and later refreshes through, the real source.
+- **Art may choose between printings, never a card.** `pickPrintingByArt`
+  drops any candidate whose name is not the identified card's own before
+  distances are computed, mirrors the cloud read's treatment rule, and runs
+  only under identify's `!refined?.read.number` gate — a read collector line
+  always outranks it. Thresholds (accept ≤ 80 of 256 bits, margin ≥ 16) were
+  measured on the harness fixture scans, where different cards never came
+  closer than 95; re-measure before moving them.
+- **Reading is anonymous, and there is no user door.** Lookups follow decision
+  20 (publishable key, never the session JWT) under the existing
+  `cardSourceLookup` switch. Unlike `card_data` there is no authenticated
+  write path at all — catalog facts are not community contributions, and a
+  defaced mirror would poison every scanner's fallback. The sync worker with
+  the service key is the only writer; `tests/harness/catalog-rls.mjs` proves
+  the asymmetry against the live project.
+- **Mirror cards carry no prices.** The rows store `price_usd` for operators
+  and for a future "price when everything failed", but `cardFromCatalog`
+  deliberately synthesizes without prices: a day-stale number presented as
+  live is wrong in the one place people check value, and `refreshCard` fills
+  real ones because the api id is real.
+
+**The cost.** A mirror is a second copy, and second copies drift: rows are as
+fresh as the last operator run, and the artwork tie-break only covers rows the
+hash pass has reached. The capture-side noise band (phone lighting and
+perspective against a flat scan) could not be measured in the sandbox this
+shipped from — the thresholds absorb resampling plus a wide margin, and the
+tie-break's blast radius is bounded to printings of an already-named card, but
+a live-capture measurement round is owed before the thresholds are trusted
+with anything more.
+
+**What would reopen it.** The mirror answering FIRST for anything (it must
+not, while the live APIs are the source of truth); prices flowing out of it;
+or a fourth game joining, which belongs here only once its bulk source proves
+as durable as the first three.

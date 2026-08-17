@@ -1,4 +1,5 @@
 import { parseCardCode, type CardCode } from './cardcode'
+import { mirrorByCode, mirrorByName } from './catalog'
 import { lorcanaBySetNumber, lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
 import { matchMtg, mtgById, mtgBySetNumber, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
 import { matchPokemon, pokemonById, pokemonByCollector, pokemonBySetNumber, pokemonPrintings, searchPokemon } from './pokemon'
@@ -71,6 +72,27 @@ async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, signal?: 
   }
 }
 
+/**
+ * The catalog mirror stands BEHIND the real code lookup, never beside it: it
+ * is consulted only when the game's own API failed or had nothing, so a
+ * healthy API's answer — fresher, priced, canonical — always wins untouched.
+ * Same posture as every mirror use below (see catalog.ts).
+ */
+async function searchByCodeWithMirror(game: Game, code: CardCode, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
+  let primary: Card[] = []
+  try {
+    primary = await searchByCode(game, code, keys, signal)
+  } catch (err) {
+    if (isAbort(err) || signal?.aborted) throw err
+    // The API's failure is the mirror's cue, not an answer.
+  }
+  if (primary.length || !code.setCode) return primary
+  return mirrorByCode(game, code.setCode, code.number ?? code.digits ?? null, signal).catch((err) => {
+    if (isAbort(err) || signal?.aborted) throw err
+    return [] as Card[]
+  })
+}
+
 function searchSource(game: Game, query: string, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
   switch (game) {
     case 'mtg':
@@ -113,7 +135,7 @@ export async function searchGame(game: Game, query: string, keys: ApiKeys = {}, 
   // the parse safe to keep loose: a card name that merely LOOKS like a code
   // ("Mew 25", which is also a real printing) loses nothing either way.
   const code = parseCardCode(query)
-  const coded = code ? searchByCode(game, code, keys, signal).catch(() => [] as Card[]) : null
+  const coded = code ? searchByCodeWithMirror(game, code, keys, signal).catch(() => [] as Card[]) : null
   const source = searchSource(game, query, keys, signal)
   // Claim the rejection now: it may be swallowed below, and an unhandled one
   // in the meantime is a console error users would see for a handled case.
@@ -122,18 +144,61 @@ export async function searchGame(game: Game, query: string, keys: ApiKeys = {}, 
   const mine = await local
   const byCode = coded ? await coded : []
   let found: Card[] = []
+  let sourceError: unknown = null
   try {
     found = await source
   } catch (err) {
+    if (isAbort(err) || signal?.aborted) throw err
+    sourceError = err
+  }
+  // The mirror answers an outage or an empty page, never a healthy result —
+  // and a mirror answer settles the question, so it clears the error the way
+  // a local hit does.
+  if (!found.length) {
+    // An abort during the mirror ask still cancels the search — a cancelled
+    // search must not resolve as a result set (see the docstring above).
+    const rescue = await mirrorByName(game, query, signal).catch((err) => {
+      if (isAbort(err) || signal?.aborted) throw err
+      return [] as Card[]
+    })
+    if (rescue.length) {
+      found = rescue
+      sourceError = null
+    }
+  }
+  if (sourceError) {
     // A code hit answers the question as well as a name hit does, so it
     // suppresses the source error for the same reason a local card does.
-    if ((!mine.length && !byCode.length) || isAbort(err) || signal?.aborted) throw err
+    if (!mine.length && !byCode.length) throw sourceError
   }
   // `seen` grows as it filters: a code hit and a name hit can be the same
   // card (every Yu-Gi-Oh printing shares one id), and the code's own answer is
   // the one to keep.
   const seen = new Set(mine.map((card) => card.id))
   return [...mine, ...patchedAll([...byCode, ...found]).filter((card) => !seen.has(card.id) && seen.add(card.id))]
+}
+
+/** A mirror candidate must clear this before it may stand in for a matcher. */
+const CATALOG_MATCH_FLOOR = 0.8
+
+/**
+ * The mirror as a stand-in matcher: best name among its candidates, held to a
+ * floor the game's own fuzzy matchers would clear. Callers re-score whatever
+ * this returns with the same `nameScore` gates as every other source, so the
+ * floor here only keeps junk out of that race, it does not replace it.
+ */
+async function catalogMatch(game: Game, name: string, signal?: AbortSignal): Promise<Card | null> {
+  const candidates = await mirrorByName(game, name, signal)
+  let best: Card | null = null
+  let bestScore = 0
+  for (const card of candidates) {
+    const score = nameScore(name, card.name)
+    if (score > bestScore) {
+      best = card
+      bestScore = score
+    }
+  }
+  return bestScore >= CATALOG_MATCH_FLOOR ? best : null
 }
 
 export async function matchGame(
@@ -143,7 +208,24 @@ export async function matchGame(
   number?: string | null,
   keys: ApiKeys = {},
 ): Promise<Card | null> {
-  const found = await matchSource(game, name, setCode, number, keys)
+  let found: Card | null = null
+  let sourceError: unknown = null
+  try {
+    found = await matchSource(game, name, setCode, number, keys)
+  } catch (err) {
+    if (isAbort(err) || keys.signal?.aborted) throw err
+    sourceError = err
+  }
+  if (!found) {
+    // Behind the matcher, same as everywhere: only a matcher that failed or
+    // came back empty lets the mirror speak, and a mirror answer clears the
+    // error because it IS an answer to what was asked.
+    found = await catalogMatch(game, name, keys.signal).catch((err) => {
+      if (isAbort(err) || keys.signal?.aborted) throw err
+      return null
+    })
+    if (!found && sourceError) throw sourceError
+  }
   return found ? patched(found) : found
 }
 

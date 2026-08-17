@@ -490,6 +490,29 @@ stat, since TCGplayer lists young sets sparsely and backfills later), falling
 back to a packaging-name regex; `NOT_SEALED` keeps sleeves, playmats and binders
 out of "sealed products".
 
+### The catalog mirror — `catalog.ts`, `catalogmatch.ts` (migration 0021)
+
+Our own copy of the big three catalogs, consulted only AFTER a game's own API
+failed or answered empty — read decision 28 before touching it. One table,
+`catalog_printings`, filled by the operator-run `scripts/sync-catalog.mjs`
+(service key, the table's only writer) from Scryfall bulk data, TCGdex en sets
+(TCG Pocket filtered out) and YGOPRODeck; read anonymously through three RPCs
+(`catalog_by_code`, `catalog_by_name`, `catalog_printings_of`) with the
+publishable key and never the session JWT (decision 20), under the existing
+`cardSourceLookup` switch. The mirror stores each game's own api-id namespace
+(Scryfall uuid, `dex-…`, YGO passcode) so its answers dedupe with the live
+APIs'; `cardFromCatalog` synthesizes cards WITHOUT prices — `refreshCard`
+fills real ones because the api id is real. Rows may carry `art_hash`, the
+256-bit artwork fingerprint (`cardArtHash` in vision.ts, run by the sync
+worker's `--hash` pass through the same bundled code the client executes);
+`pickPrintingByArt` uses it in identify's printing tie-break seam to tell
+alternate arts of an already-named card apart, under measured thresholds and
+the rule that art may never propose a different card. Wiring:
+`searchByCodeWithMirror` / the empty-or-failed branches of `searchGame` and
+`matchGame` in cardsearch.ts, and the `tiebreak-art` arm in identify.ts. RLS
+proof: `npm run test:mirror` (tests/harness/catalog-rls.mjs) — run it after
+applying 0021 and after any migration touching `catalog_printings`.
+
 ## Pricing (`lib/prices.ts`)
 
 **USD only.** `usdOnly()` filters every read; a legacy €-value must never

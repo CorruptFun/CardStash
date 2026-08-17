@@ -54,7 +54,10 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
   one, which no schema read can show. `npm run test:cardsource` is the same shape for `card_data` — run it
   after applying `0013` and after any migration touching the card index; it is
   what proves the anon-read / authenticated-write asymmetry actually holds,
-  which no schema read can show.
+  which no schema read can show. `npm run test:mirror` is the same shape for
+  `catalog_printings` (0021) — run it after applying `0021` and after any
+  migration touching the mirror; it proves anon can read, no user role can
+  write at all, and the code-normalization the client leans on actually holds.
 - `npm run test:binder` — the binder screens end to end (filing, the label, the
   link a printed QR carries, and the delete that must keep every card). No
   camera, no fixtures.
@@ -190,8 +193,8 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 
 Accounts, `@handle`s, mutual friends, a trade inbox and global want-matching,
 on the same Supabase project as the cloud vault. **The database is defined by
-`supabase/migrations/` (0000–0020 — social is 0000–0004, messaging is 0019,
-custom binders are 0020), not
+`supabase/migrations/` (0000–0021 — social is 0000–0004, messaging is 0019,
+custom binders are 0020, the catalog mirror is 0021), not
 `supabase/schema.sql`** — that file is a pointer, and the migration history is
 baselined on the live project so a `db push` cannot replay from zero. Read
 `docs/social.md` and decision 16 before touching any of it.
@@ -486,6 +489,20 @@ needs `auth.uid()`, is rate limited, and allows one row per person per card.
 Everything the server returns goes through `sanitizePatch`, and **a local patch
 always beats a fetched one**. Two switches: `cardSourceLookup` (on) and
 `cardSourceShare` (off) — don't collapse them.
+
+**The catalog mirror is the other half of being a source** (`catalog.ts` +
+`catalogmatch.ts`, migration `0021`, decision 28): our own copy of Scryfall /
+TCGdex / YGOPRODeck rows, consulted only AFTER a game's own API failed or
+answered empty — never first — under the same `cardSourceLookup` switch and
+the same anon-key rule. It stores each game's own api-id namespace so mirror
+answers dedupe with live ones, synthesizes cards **without prices**
+(`refreshCard` fills real ones), and may carry `art_hash` — the 256-bit
+artwork fingerprint (`cardArtHash` in `vision.ts`) the sync worker
+(`scripts/sync-catalog.mjs`, service key, the table's only writer) computes
+with the same bundled code the client runs. `pickPrintingByArt` uses it in
+identify's tie-break seam to tell alternate arts of an already-named card
+apart; art may never propose a different card, and a read collector line
+always outranks it. `npm run test:mirror` proves the grants.
 
 ## Sports cards have no catalog
 
