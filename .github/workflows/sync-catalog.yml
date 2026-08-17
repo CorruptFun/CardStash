@@ -9,7 +9,7 @@
 #     live table: any branch can push, and the day SUPABASE_SECRET lands in
 #     Actions must not be the day every claude/** branch starts syncing prod.
 #   * The real sync — upsert all three sources, then print per-game coverage
-#     — runs only on the weekly schedule or a manual workflow_dispatch, only
+#     — runs only on the daily schedule or a manual workflow_dispatch, only
 #     from the default branch, and only once the secret exists. Without the
 #     secret those events fall back to the same dry-run.
 #
@@ -27,7 +27,7 @@ on:
         description: 'Sources to ingest (comma-separated: mtg,pokemon,yugioh)'
         default: 'mtg,pokemon,yugioh'
   schedule:
-    - cron: '23 9 * * 1' # Mondays 09:23 UTC
+    - cron: '23 9 * * *' # daily 09:23 UTC — the owner wants the mirror current, not weekly-stale
   push:
     branches: ['claude/**']
     paths:

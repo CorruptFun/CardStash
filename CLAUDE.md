@@ -357,9 +357,10 @@ the seller ships, and it is released on confirmation. `supabase/migrations/0006`
 whole server side. **Read decision 19 before touching any of it.** Server half
 is built and tested; there is no UI yet, so nothing is user-reachable.
 
-**Stripe runs BOTH now (2026-08-15).** The subscription moved off Square to
-`stripe-billing` → `entitlements`; `square-billing` stays deployed but dormant
-until existing subscribers are migrated, then goes. **They are still two
+**Stripe runs BOTH now (2026-08-15), and Square is fully retired
+(2026-08-17).** The subscription moved off Square to `stripe-billing` →
+`entitlements`; `square-billing` had no subscribers to migrate and its
+function and source are deleted. **They are still two
 separate integrations**: Stripe *Billing* (recurring) and Stripe *Connect*
 (escrow) share an account and a secret key but have their own webhook endpoints
 and their own signing secrets — never reuse `STRIPE_WEBHOOK_SECRET` for
