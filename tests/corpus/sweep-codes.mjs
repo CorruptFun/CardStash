@@ -61,6 +61,40 @@ export function numberClass(number) {
     .slice(0, 24)
 }
 
+/**
+ * Which half of the printed code did the parser refuse?
+ *
+ * "12% of MTG printings do not parse" is a number nobody can act on. "5,261 of
+ * them are sets whose code starts with a digit — 10E, 4ED, 2X2, 40K — because
+ * `PREFIX` is `[A-Z][A-Z0-9]{1,5}`" is a one-character fix with a measured
+ * size. The classifier reproduces cardcode.ts's own two shapes rather than
+ * guessing, so a refusal is always attributed to the rule that made it.
+ */
+const PREFIX_SHAPE = /^[A-Z][A-Z0-9]{1,5}$/
+const SUFFIX_SHAPE = /^(?:[A-Z]{2})?\d{1,4}[A-Z]?$/
+
+function refusalCause(game, query) {
+  const raw = query.toUpperCase()
+  const at = game === 'yugioh' ? raw.indexOf('-') : raw.indexOf(' ')
+  if (at < 0) return 'no-separator'
+  const setHalf = raw.slice(0, at)
+  const numberHalf = raw.slice(at + 1)
+  if (!PREFIX_SHAPE.test(setHalf)) {
+    if (/^\d/.test(setHalf)) return 'set-code-starts-with-a-digit'
+    if (setHalf.length > 6) return 'set-code-longer-than-6'
+    if (setHalf.length < 2) return 'set-code-shorter-than-2'
+    return 'set-code-not-alphanumeric'
+  }
+  if (!SUFFIX_SHAPE.test(numberHalf)) {
+    if (/^[A-Z]{3,}/.test(numberHalf)) return 'number-carries-a-3+-letter-prefix'
+    if (/^[A-Z]\d/.test(numberHalf)) return 'number-carries-a-1-letter-prefix'
+    if (/[^A-Z0-9]/.test(numberHalf)) return 'number-not-alphanumeric'
+    if (/[A-Z]{2}\d+[A-Z]{2,}/.test(numberHalf)) return 'number-has-a-trailing-letter-run'
+    return 'number-shape-otherwise'
+  }
+  return 'parsed-shape-but-refused-anyway'
+}
+
 /** The printed query a collector would type, per game's printed convention. */
 function printedQuery(game, print) {
   if (game === 'yugioh') return print.printed // "BLMR-EN085", already joined
@@ -131,6 +165,7 @@ async function sweepGame(app, corpus, game, log) {
   const buckets = new Buckets(EXEMPLAR_CAP)
   const formats = new Map()
   const refusedFormats = new Map()
+  const refusalCauses = new Buckets(EXEMPLAR_CAP)
   const wrongPrintings = []
 
   let done = 0
@@ -139,14 +174,17 @@ async function sweepGame(app, corpus, game, log) {
     const query = printedQuery(game, print)
     const cls = numberClass(print.number)
     let slot = formats.get(cls)
-    if (!slot) formats.set(cls, (slot = { count: 0, exemplars: [], parsed: 0, hit: 0 }))
+    if (!slot) formats.set(cls, (slot = { count: 0, exemplars: [], refusedExemplars: [], parsed: 0, hit: 0 }))
     slot.count++
     if (slot.exemplars.length < 3) slot.exemplars.push({ query, apiId: print.apiId })
 
     const code = app.parseCardCode(query)
     if (!code) {
-      buckets.add('parse-refused', { apiId: print.apiId, query, class: cls })
+      const cause = refusalCause(game, query)
+      buckets.add('parse-refused', { apiId: print.apiId, query, class: cls, cause })
+      refusalCauses.add(cause, { query, apiId: print.apiId })
       refusedFormats.set(cls, (refusedFormats.get(cls) ?? 0) + 1)
+      if (slot.refusedExemplars.length < 3) slot.refusedExemplars.push({ query, cause })
       done++
       continue
     }
@@ -196,12 +234,20 @@ async function sweepGame(app, corpus, game, log) {
     ofTotal: all.length,
     seconds: Number(((Date.now() - started) / 1000).toFixed(1)),
     buckets: buckets.toJSON(),
+    refusalCauses: refusalCauses.toJSON(),
     formats: Object.fromEntries(
       [...formats.entries()]
         .sort((a, b) => b[1].count - a[1].count)
         .map(([cls, v]) => [
           cls,
-          { count: v.count, parsed: v.parsed, landedExactly: v.hit, refused: refusedFormats.get(cls) ?? 0, exemplars: v.exemplars },
+          {
+            count: v.count,
+            parsed: v.parsed,
+            landedExactly: v.hit,
+            refused: refusedFormats.get(cls) ?? 0,
+            exemplars: v.exemplars,
+            refusedExemplars: v.refusedExemplars,
+          },
         ]),
     ),
     wrongPrintings,
@@ -227,6 +273,19 @@ function markdown(payload) {
         Object.entries(run.buckets).map(([k, v]) => [k, v.count, pct(v.count, run.printings)]),
       ),
     )
+    lines.push('', '### Why a printed code was refused', '')
+    lines.push(
+      Object.keys(run.refusalCauses).length
+        ? mdTable(
+            ['cause', 'count', 'exemplars'],
+            Object.entries(run.refusalCauses).map(([cause, v]) => [
+              cause,
+              v.count,
+              v.exemplars.map((e) => `\`${e.query}\``).join(' '),
+            ]),
+          )
+        : '_nothing refused_',
+    )
     lines.push('', '### Collector-number formats encountered', '')
     lines.push(
       mdTable(
@@ -239,7 +298,7 @@ function markdown(payload) {
             `${v.parsed} (${pct(v.parsed, v.count)})`,
             `${v.landedExactly} (${pct(v.landedExactly, v.count)})`,
             v.refused,
-            v.exemplars.map((e) => `\`${e.query}\``).join(' '),
+            (v.refused ? v.refusedExemplars.map((e) => `\`${e.query}\`✗`) : v.exemplars.map((e) => `\`${e.query}\``)).join(' '),
           ]),
       ),
     )
@@ -300,10 +359,15 @@ const written = writeReport(args.out ?? 'codes', payload, markdown(payload))
 log(`\nwrote ${written.json}\n      ${written.md}`)
 for (const run of runs) {
   const b = run.buckets
+  // Buckets carry their mechanism (`wrong-card:number-truncated`), so the
+  // console line sums the family rather than looking for a bare name that no
+  // longer exists — the quiet way a summary starts reporting zero.
+  const family = (prefix) =>
+    Object.entries(b).reduce((n, [k, v]) => n + (k === prefix || k.startsWith(`${prefix}:`) ? v.count : 0), 0)
   log(
-    `  ${run.game}: exact ${b.exact?.count ?? 0}/${run.printings}, ` +
-      `parse-refused ${b['parse-refused']?.count ?? 0}, empty ${b['lookup-empty']?.count ?? 0}, ` +
-      `wrong-card ${b['wrong-card']?.count ?? 0}, wrong-printing ${b['right-card-wrong-printing']?.count ?? 0}`,
+    `  ${run.game}: exact ${family('exact')}/${run.printings}, ` +
+      `parse-refused ${family('parse-refused')}, empty ${family('lookup-empty')}, ` +
+      `wrong-card ${family('wrong-card')}, wrong-printing ${family('right-card-wrong-printing')}`,
   )
 }
 

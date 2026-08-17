@@ -117,13 +117,10 @@ function scryfallFuzzy(query, setCode) {
 
   const words = q.split(' ').filter(Boolean)
   if (!words.length) return null
-  const prefixed = []
-  for (const entry of mtg.names.list) {
-    if (!scoped(entry)) continue
-    const target = entry.norm.split(' ')
-    if (words.every((w) => target.some((t) => t.startsWith(w)))) prefixed.push(entry)
-    if (prefixed.length > 1) return null
-  }
+  const prefixed = mtg.names.prefixes
+    .coveringAll(words, setCode ? 200 : 2)
+    .map((i) => mtg.names.list[i])
+    .filter(scoped)
   return prefixed.length === 1 ? prefixed[0] : null
 }
 
@@ -252,9 +249,7 @@ function pokemonPrimarySearch(url, u) {
     let hit
     if (wildcard) {
       hit = []
-      for (const entry of pokemon.names.list) {
-        if (entry.norm.split(' ').some((w) => w.startsWith(q))) hit.push(...entry.rows)
-      }
+      for (const at of pokemon.names.prefixes.coveringAll([q], Infinity)) hit.push(...pokemon.names.list[at].rows)
     } else {
       hit = pokemon.names.byNorm.get(q)?.rows ?? []
     }

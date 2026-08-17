@@ -65,7 +65,7 @@ function armsFor(game) {
  * not a copy — because "wrong card" and "wrong card the user was shown" are
  * different claims and only the second one costs anybody money.
  */
-function classify(app, printedName, query, answer) {
+function classify(app, names, printedName, query, answer) {
   if (!answer) return { bucket: 'refused', mechanism: 'refused', score: 0 }
   const same = app.normalizeName(answer.name) === app.normalizeName(printedName)
   if (same) return { bucket: 'self', mechanism: 'self', score: 1 }
@@ -75,7 +75,28 @@ function classify(app, printedName, query, answer) {
   const confident = score >= bar
 
   const mechanism = wrongMechanism(app, printedName, query, answer)
-  return { bucket: `${confident ? 'confident' : 'weak'}-${mechanism}`, mechanism, score, bar, confident }
+  // Did the CORRUPTION land on another real card's name?
+  //
+  // This is the distinction that decides whether a finding is a defect. "Bind"
+  // glyph-shaped into "Bird" is a Magic card, and answering Bird is correct for
+  // the input — the ladder manufactured the ambiguity, the matcher did nothing
+  // wrong, and no ranking change could help. "Aerodactyl V" read as
+  // "Aerodactyl \/" normalises to "Aerodactyl", which is ALSO another real
+  // card — same shape, but reached by a two-character OCR slip that happens
+  // constantly, between two cards at very different prices.
+  //
+  // So both are reported, and neither is reported as the other: the matcher
+  // cannot separate them from a name, and the report says which population is
+  // which so the fix is aimed at the right layer.
+  const collides = names.byNorm.has(app.normalizeName(query))
+  return {
+    bucket: `${confident ? 'confident' : 'weak'}-${mechanism}${collides ? '/query-is-a-real-name' : ''}`,
+    mechanism,
+    collides,
+    score,
+    bar,
+    confident,
+  }
 }
 
 /**
@@ -122,7 +143,7 @@ async function sweepGame(app, corpus, game, arm, log) {
       const slot = rungs.get(rung)
       slot.applicable++
       const answer = await app.matchGame(game, query, null, null, {}).catch(() => null)
-      const verdict = classify(app, entry.name, query, answer)
+      const verdict = classify(app, corpus[game].names, entry.name, query, answer)
 
       if (rung === 'suffix-drop') {
         suffixDrop.population++
@@ -151,6 +172,7 @@ async function sweepGame(app, corpus, game, arm, log) {
           arm,
           rung,
           mechanism: verdict.mechanism,
+          queryIsARealName: verdict.collides,
           apiId,
           printed: entry.name,
           query,
@@ -179,6 +201,28 @@ async function sweepGame(app, corpus, game, arm, log) {
 }
 
 /* ----------------------------------------------------------------- reports */
+
+/**
+ * The headline table, capped per family.
+ *
+ * Sorted by score alone it fills with forty rows of the same finding — the
+ * "V" → "\/" family alone is 130 rows at a flat 1.0 — and a table that shows
+ * one thing forty times has hidden everything else it found. Score still
+ * orders it; the cap only stops one family owning the page.
+ */
+function diverseTop(findings, limit, perFamily) {
+  const seen = new Map()
+  const out = []
+  for (const f of [...findings].sort((a, b) => b.score - a.score || a.printed.localeCompare(b.printed))) {
+    const family = `${f.game}/${f.arm}/${f.rung}/${f.mechanism}/${f.queryIsARealName}`
+    const n = seen.get(family) ?? 0
+    if (n >= perFamily) continue
+    seen.set(family, n + 1)
+    out.push(f)
+    if (out.length >= limit) break
+  }
+  return out
+}
 
 function markdown(payload) {
   const lines = []
@@ -258,16 +302,33 @@ function markdown(payload) {
     )
   }
 
+  lines.push('', '## Confident-wrong, split by whether the matcher had a chance', '')
+  lines.push(
+    'A corrupted read that IS another card\'s printed name cannot be separated from that card by any name matcher —',
+    'the fix, if there is one, lives in evidence off the card (the rules box, the collector line), not in ranking.',
+    'A corrupted read that names NO card and still got a confident answer is a ranking or threshold failure.',
+    '',
+  )
+  lines.push(
+    mdTable(
+      ['population', 'count'],
+      [
+        ['the corrupted read is another card\'s exact name', payload.confidentWrongCollisions],
+        ['the corrupted read names no card at all', payload.confidentWrongTotal - payload.confidentWrongCollisions],
+      ],
+    ),
+  )
   lines.push('', '## Top confident-wrong findings', '')
   const top = payload.topConfidentWrong
   lines.push(
     top.length
       ? mdTable(
-          ['game/arm', 'rung', 'mechanism', 'printed', 'read as', 'answered', 'score/bar', 'api id'],
+          ['game/arm', 'rung', 'mechanism', 'read is a real name?', 'printed', 'read as', 'answered', 'score/bar', 'api id'],
           top.map((f) => [
             `${f.game}/${f.arm}`,
             f.rung,
             f.mechanism,
+            f.queryIsARealName ? 'yes' : 'no',
             f.printed,
             f.query,
             f.got,
@@ -318,9 +379,10 @@ const payload = {
   liveNetworkAttempts: [...new Set(liveNetworkAttempts)].slice(0, 20),
   runs: runs.map((r) => ({ ...r, confidentWrong: r.confidentWrong.length })),
   confidentWrongTotal: allConfident.length,
+  confidentWrongCollisions: allConfident.filter((f) => f.queryIsARealName).length,
   // Most interesting = highest score first: a wrong card at 1.0 cleared every
   // bar the pipeline owns, where one at 0.67 squeaked past the lowest.
-  topConfidentWrong: [...allConfident].sort((a, b) => b.score - a.score || a.printed.localeCompare(b.printed)).slice(0, 40),
+  topConfidentWrong: diverseTop(allConfident, 40, 2),
   allConfidentWrong: allConfident,
 }
 

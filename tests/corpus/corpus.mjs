@@ -234,6 +234,68 @@ class SubstringIndex {
   }
 }
 
+/**
+ * A word-prefix index: every WORD of every name, sorted, so "all of the
+ * query's words prefix some word of the target" can be answered without
+ * walking the name list.
+ *
+ * This is Scryfall's fuzzy resolver's shape, and it is the sweep's hottest
+ * path by an order of magnitude — a corrupted name misses the exact and
+ * substring tiers and lands here every single time. Walking 37k names per
+ * query turned the MTG sweep into an overnight job; picking the query word
+ * with the SMALLEST prefix range and checking only those candidates turns it
+ * back into minutes.
+ */
+class WordPrefixIndex {
+  constructor(entries) {
+    this.entries = entries
+    this.words = []
+    for (let i = 0; i < entries.length; i++) for (const w of entries[i].words) this.words.push([w, i])
+    this.words.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]))
+  }
+
+  /** [lo, hi) over `words` whose word starts with `prefix`. */
+  range(prefix) {
+    const lower = (target) => {
+      let lo = 0
+      let hi = this.words.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (this.words[mid][0] < target) lo = mid + 1
+        else hi = mid
+      }
+      return lo
+    }
+    // The prefix's successor bounds the range: everything between them starts
+    // with it. `￿` is above any character a normalized name can hold.
+    return [lower(prefix), lower(`${prefix}￿`)]
+  }
+
+  /** Entry indexes whose words prefix-cover every query word; caps at `max`. */
+  coveringAll(queryWords, max = 2) {
+    if (!queryWords.length) return []
+    let narrowest = null
+    for (const word of queryWords) {
+      const [lo, hi] = this.range(word)
+      if (hi === lo) return []
+      if (!narrowest || hi - lo < narrowest[1] - narrowest[0]) narrowest = [lo, hi]
+    }
+    const seen = new Set()
+    const out = []
+    for (let i = narrowest[0]; i < narrowest[1]; i++) {
+      const at = this.words[i][1]
+      if (seen.has(at)) continue
+      seen.add(at)
+      const target = this.entries[at].words
+      if (queryWords.every((w) => target.some((t) => t.startsWith(w)))) {
+        out.push(at)
+        if (out.length > max) return out
+      }
+    }
+    return out
+  }
+}
+
 /** The app's own normalizer, replicated here ONLY for indexing (util.ts). */
 function norm(name) {
   return String(name ?? '')
@@ -262,12 +324,12 @@ function nameSpace(prints, nameOf = (p) => p.name) {
     // Each entry keeps its own printings. The API stub answers name queries
     // out of these lists rather than re-filtering the whole game every time —
     // a linear scan per query turns a 100k-name sweep into an O(n²) one.
-    if (!entry) byNorm.set(key, (entry = { name, norm: key, sample: print, prints: 0, rows: [] }))
+    if (!entry) byNorm.set(key, (entry = { name, norm: key, sample: print, prints: 0, rows: [], words: key.split(' ') }))
     entry.prints++
     entry.rows.push(print)
   }
   const list = [...byNorm.values()].sort((a, b) => (a.norm < b.norm ? -1 : a.norm > b.norm ? 1 : 0))
-  return { byNorm, list, index: new SubstringIndex(list.map((e) => e.norm)) }
+  return { byNorm, list, index: new SubstringIndex(list.map((e) => e.norm)), prefixes: new WordPrefixIndex(list) }
 }
 
 /* ------------------------------------------------------------------ indexes */
