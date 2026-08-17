@@ -133,7 +133,8 @@ export function SettingsView() {
             <span>Cloud rescue</span>
             <em>
               Send a card this device can’t settle — or can’t tell which printing of — to be read in the cloud. One
-              photo, only for that card; scans this device settles on its own never leave. Off by default.
+              photo, only for that card; scans this device settles on its own never leave. In our 282-photo test set it
+              took identification from about 7 in 10 cards to about 9 in 10. Off by default.
             </em>
           </div>
           <Toggle
@@ -147,7 +148,7 @@ export function SettingsView() {
           edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
           engine downloads ~12 MB once and is cached for offline use.
           {config.cloudScanRescue
-            ? ' Cloud rescue is on, so the cards this device can’t read — and the few it reads in a way known to be unreliable, including a card whose collector line never came through and whose set prints it in more than one frame — are sent as a single photo to be identified. It needs an account and a subscription; without one, scanning simply carries on locally.'
+            ? ' Cloud rescue is on, so the cards this device can’t read — and the few it reads in a way known to be unreliable, including a card whose collector line never came through and whose set prints it in more than one frame — are sent as a single photo to be identified. It needs an account — a free one includes 50 rescues a month, a subscription raises that to 1,000 — and without one, or past the month’s allowance, scanning simply carries on locally.'
             : ' With cloud rescue off, no image ever leaves this device.'}
         </p>
       </section>
