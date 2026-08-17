@@ -239,9 +239,11 @@ function sameExactYgoCode(a: string | undefined, b: string | undefined): boolean
 }
 
 /**
- * The card as the asked-for printing: rarity and set price move Yu-Gi-Oh
- * values by orders of magnitude, so answering a code with the card's FIRST
- * printing would put a common's price on a secret rare.
+ * The variant of `card` whose printed code is `code`, or null when no
+ * printing matches even across languages. This is the scan pipeline's door
+ * to the same selection `printingByCode` makes for search — with "no match"
+ * left visible, because a collector line that confirms no printing of the
+ * card is a refused refinement, not a shrug back to the default row.
  *
  * Selection is two-pass, and the order is the whole of the fix. `sameYgoCode`
  * folds the region infix away on purpose — LOB-EN001 ≡ LOB-001 — because a
@@ -259,13 +261,24 @@ function sameExactYgoCode(a: string | undefined, b: string | undefined): boolean
  * different rarities (PSV-EN089 is both Common and Short Print) — nothing in
  * the printed code chooses between those, so feed order does, deterministically.
  */
-function printingByCode(card: Card, code: string): Card {
+export function ygoVariantByCode(card: Card, code: string | undefined): Card | null {
   const variants = ygoPrintingVariants(card)
   return (
     variants.find((variant) => sameExactYgoCode(variant.number, code)) ??
     variants.find((variant) => sameYgoCode(variant.number, code)) ??
-    card
+    null
   )
+}
+
+/**
+ * The card as the asked-for printing: rarity and set price move Yu-Gi-Oh
+ * values by orders of magnitude, so answering a code with the card's FIRST
+ * printing would put a common's price on a secret rare. Search keeps the
+ * card even when the code names no row it has — a typed code should still
+ * show the card — where the scan path (`ygoVariantByCode`) needs the null.
+ */
+function printingByCode(card: Card, code: string): Card {
+  return ygoVariantByCode(card, code) ?? card
 }
 
 export async function ygoById(id: string): Promise<Card | null> {

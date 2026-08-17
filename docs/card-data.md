@@ -565,6 +565,15 @@ key is also a `sameYgoCode` match, so the first pass can only narrow the
 second. Measured on the corpus sweep: yugioh codes exact 39,313 → 40,661,
 wrong-printing 1,348 → 0, with mtg and pokemon unmoved.
 
+The scan pipeline selects through the same door. `ygoVariantByCode` is the
+exported two-pass core `printingByCode` wraps — it answers null where search
+falls back to the card itself — and it is what `identify.ts` asks both when a
+passcode has named the card and the mid-card code read off the face picks the
+printing, and when its refine checks a printed code against a name match. One
+rule, one implementation, so search and scan cannot drift back apart; the
+cross-language fallback is also what keeps a French card's Latin digits
+confirming a region-less catalog row.
+
 The residual is a card listing the **same** code twice at different rarities
 (PSV-EN089 is both Common and Short Print — 9,442 of the 40,670 codes the sweep
 asks are in that shape). No printed code can choose between those rows, so feed
