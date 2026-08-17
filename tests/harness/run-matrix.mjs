@@ -57,7 +57,7 @@ const args = Object.fromEntries(
  * default and the run prints what it spent.
  */
 const cloudKey = args.gemini ? (process.env.GEMINI_API_KEY ?? '').trim() : ''
-/** Empty = whatever the app pins as CLOUD_SCAN_MODEL; set it to A/B a model. */
+/** Empty = the harness's own pinned CLOUD_SCAN_MODEL below; set it to A/B a model. */
 const cloudModel = typeof args['gemini-model'] === 'string' ? args['gemini-model'] : ''
 /** Why a bridged cloud call produced nothing — surfaced so a run of zero
  * useful answers cannot be mistaken for "the model had no opinion". */
@@ -66,10 +66,12 @@ const cloudErrors = []
 /**
  * The server half of the hosted rescue, mirrored for the bridge above.
  *
- * Kept WORD FOR WORD in step with `supabase/functions/scan-card/index.ts`,
- * which is itself kept in step with `CARD_PROMPT` in `src/lib/gemini.ts`. A
- * prompt that drifts here measures a different question from the one the app
- * asks, which is worse than not measuring at all.
+ * CLOUD_SCAN_MODEL mirrors the `GEMINI_SCAN_MODEL` default pinned in
+ * `supabase/functions/scan-card/index.ts`, and SCAN_PROMPT is kept WORD FOR
+ * WORD in step with `PROMPT` there — the prompt's only real copy now that the
+ * BYO-key client in `gemini.ts` is gone. A prompt that drifts here measures a
+ * different question from the one the app asks, which is worse than not
+ * measuring at all.
  */
 const CLOUD_SCAN_MODEL = 'gemini-3.1-flash-lite'
 const SCAN_PROMPT =
@@ -593,7 +595,6 @@ async function main() {
                 degradation: cell.degradation,
                 hint: cell.hint,
                 cloudKey,
-                cloudModel,
                 game: cell.fixture.game,
                 photo: cell.photo ?? false,
                 stack: Number(args.stack) || 1,
@@ -653,7 +654,6 @@ async function main() {
             imageUrls: urls,
             hint: clip.game,
             cloudKey,
-            cloudModel,
           })
         } catch (err) {
           return { outcome: { ok: false, reason: 'exception', message: String(err).slice(0, 200) }, ms: 0 }
@@ -851,11 +851,11 @@ async function main() {
         'gemini-3.6-flash': [0.75, 3.75],
         'gemini-3.5-flash': [1.5, 9.0],
       }
-      // Empty cloudModel means the app's pinned CLOUD_SCAN_MODEL (gemini.ts).
-      const [inUsd, outUsd] = PRICE[cloudModel || 'gemini-3.1-flash-lite'] ?? [0.25, 1.5]
+      // Empty cloudModel means the harness's own pinned CLOUD_SCAN_MODEL.
+      const [inUsd, outUsd] = PRICE[cloudModel || CLOUD_SCAN_MODEL] ?? [0.25, 1.5]
       const each = (1115 / 1e6) * inUsd + (53 / 1e6) * outUsd
       console.log(
-        `\n=== cloud rescue: ${cloudCalls} call(s) to ${cloudModel || '(app default)'}` +
+        `\n=== cloud rescue: ${cloudCalls} call(s) to ${cloudModel || CLOUD_SCAN_MODEL}` +
           ` · ~$${(cloudCalls * each).toFixed(4)} ($${each.toFixed(5)}/call) ===`,
       )
       // Zero calls means the cloud path was never REACHED, which reads exactly

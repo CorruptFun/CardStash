@@ -96,13 +96,6 @@ export interface Settings {
    */
   cloudScanRescue: boolean
   /**
-   * Override the scan rescue's model. Empty = the pinned `CLOUD_SCAN_MODEL`.
-   * No UI writes this; it survives as a local escape hatch for debugging a bad
-   * model, and the hosted route pins its own model server-side regardless —
-   * a client-chosen model is a client-chosen bill.
-   */
-  cloudScanModel: string
-  /**
    * pokemontcg.io key. NOT user-editable any more — there is no field, and the
    * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
    * does. It stays on this object rather than becoming a bare import because
@@ -246,7 +239,6 @@ export const useSettings = create<Settings>()(
       cloudSyncedAt: 0,
       cloudAuto: true,
       cloudScanRescue: false,
-      cloudScanModel: '',
       pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK
