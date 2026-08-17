@@ -968,3 +968,32 @@ result seems absurd, check this list before writing code.
     before running a measurement (lessons 82–83 are both stories of
     "expected" numbers drifting across snapshots; a pre-registered
     target written down first cannot be rationalised afterwards).
+85. **The cloud tie-break is a scalpel, and the rescue is the sledgehammer
+    nobody was measuring.** First live-keyed run of the harness bridge
+    (frozen 2026-08-15 snapshot, pre-registered targets, both cloud passes
+    reproduced, calls 136/132 with zero errors — the criterion is
+    cloudCalls > 0 AND cloudErrors near-empty, per lesson 82's family of
+    disguises): the printing tie-break fixed 11 of 34 eligible cells,
+    ALL of them mtg/borderless-any, landing PW26 #5 — the exact printing
+    eafe682 documented as unreachable by the closed-question shortlist.
+    mtg printing 23/46 → 34/47, claimed-wrong flat at 5, zero cards lost.
+    But it is not a general fix: counterspell-retro (11 unpinned wrongs)
+    and the pokemon wrong-printing cells did not move. The mechanism
+    answers "which frame/treatment am I looking at," which settles a
+    printing only when the treatment IS the distinguishing feature —
+    borderless is; a retro-frame reprint is not. Meanwhile the same runs
+    exposed the number that dwarfs every printing effort to date: the
+    ALREADY-SHIPPED subscriber rescue took pokemon identification
+    49/117 → 100/117 and 99/117 (offline fails there are ocr-misread ×57;
+    the rescue reads them), overall 196/282 → 250/249. Every offline
+    matrix ever run understates the paying user's experience by that
+    margin, because the rescue never fires offline. Strategy implication,
+    stated so it is not re-derived: before spending another round on
+    offline printing accuracy, remember the live path already carries a
+    fix for half the offline failure mass, gated only on entitlement.
+    Cost/latency of the cloud arm as measured: ~$0.05 per full matrix
+    (~$0.00036/call), +29–46s over 282 cells, per-fire bounded by
+    PRINTING_TIEBREAK_TIMEOUT_MS. Scope honestly bounded: this measures
+    the harness BRIDGE (prompt/model/schema verified byte-identical to
+    the edge function); auth, entitlement and the monthly meter are the
+    parts being stood in for and remain unexercised.
