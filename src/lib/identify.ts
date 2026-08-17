@@ -38,7 +38,7 @@ import {
   readSportsLines,
   type OcrRect,
 } from './ocr'
-import { matchPokemon, pokemonByCollector } from './pokemon'
+import { matchPokemon, pokemonByCollector, searchPokemon } from './pokemon'
 import { beginScanTrace, endScanTrace, traceEvent } from './scandebug'
 import {
   mtgBySetNumber,
@@ -1015,6 +1015,39 @@ async function identifyViaOcr(
     return mtgCardFromRaw(picked)
   }
 
+  /**
+   * Is the cloud rescue actually able to run right now? Mirrors the gates at
+   * the top of `cloudIdentify` — the consent switch, then the signed-in
+   * session that is the rescue's only remaining route — and exists to be asked
+   * BEFORE spending anything: the suspect-answer path below would otherwise
+   * pay a catalog lookup on every bare-species hit for every user, to reach a
+   * rescue that is off by default. Sync and allocation-free on purpose —
+   * `isSignedIn()` only reads localStorage.
+   */
+  const cloudRescueArmed = (): boolean => !!config.cloudScanRescue && isSignedIn()
+
+  /**
+   * The suffixed siblings a bare species has in the catalog — the "Krookodile
+   * ex" behind a match on "Krookodile".
+   *
+   * One lookup, not one per suffix: the species query is prefix-tolerant, so
+   * the siblings come back in the same page the species does. A row counts only
+   * when it is EXACTLY the species plus one variant word, which is what keeps
+   * the possessive families out — "Iono's Bellibolt ex" is a different card
+   * from "Bellibolt" rather than a printing of it, and treating it as a sibling
+   * would fire this path on cards it cannot help (lesson 31's third case).
+   */
+  const suffixedSiblings = async (species: string): Promise<string[]> => {
+    const rows = await searchPokemon(species, config.pokemonKey, signal).catch(() => [])
+    const lead = normalizeName(species)
+    const found = new Set<string>()
+    for (const row of rows) {
+      const suffix = pokemonNameSuffix(row.name)
+      if (suffix && normalizeName(row.name) === `${lead} ${suffix}`) found.add(row.name)
+    }
+    return [...found]
+  }
+
   /** Look the candidates up; a confident hit is refined to the exact edition. */
   const tryCandidates = async (fresh: string[], reading: Reading): Promise<IdentifyOutcome | null> => {
     if (!fresh.length) return null
@@ -1133,6 +1166,66 @@ async function identifyViaOcr(
           })
           if (!variant) continue
           best = { ...best, card: variant }
+        } else if (!suffix && cloudRescueArmed()) {
+          // SUSPECT ANSWER — the case the guard above cannot reach.
+          //
+          // The rules box declared nothing (unread, or corrupted: Tesseract
+          // renders "Pokémon ex rule" as "Pokémon €X rule"), so the only thing
+          // left saying this is a plain species is the species name itself —
+          // and a dropped two-letter suffix leaves a name that matches a real,
+          // different, usually far cheaper card EXACTLY at score 1.0. No
+          // threshold can see that (lesson 29), which is why the local path
+          // returns it, and why the miss-triggered cloud rescue never fired on
+          // the wrong-card class it was built for: these frames are not misses.
+          // Measured on the clips, this shape is the WHOLE of the stable
+          // wrong-card population.
+          //
+          // So: when the catalog holds a suffixed sibling of this species, the
+          // answer is not wrong but it is UNSAFE ALONE, and the cloud read is
+          // the second opinion. Deliberately narrow, in four ways at once —
+          // this must not become cloud scanning by default (guard invariant
+          // 12):
+          //   * Pokémon only, and only a name carrying NO suffix (`!suffix`
+          //     here — the enclosing `if` no longer filters that). A band that
+          //     read "Krookodile ex" is left alone, and pays nothing.
+          //   * only when the rules box declared nothing — the `else` of the
+          //     declaration guard above, which now also covers a declared
+          //     Mega. A declaration is better evidence than any network call,
+          //     and it is free.
+          //   * only when a suffixed sibling actually EXISTS. A species with no
+          //     ex/GX/V printing cannot be this kind of wrong, so it never pays.
+          //   * only when the rescue is armed — checked FIRST, and sync, so a
+          //     user who never opted in pays not even the sibling lookup. With
+          //     the rescue off this whole branch is unreachable and the free
+          //     path is byte-for-byte what it was.
+          //
+          // The cloud only ever REPLACES this answer, never withdraws it: a
+          // refusal (off, unreachable, throttled, or rejected by the 0.9
+          // whole-name bar in cloudIdentify) falls through to the local card,
+          // so the worst case is exactly today's behaviour. Turning a correct
+          // hit into a miss would trade one failure class for another.
+          const siblings = await suffixedSiblings(best.card.name)
+          if (siblings.length) {
+            traceEvent('suspect-species', { read: name, card: best.card.name, siblings })
+            // One upload per attempt, whoever asks first (`cloudSpent` — the
+            // same budget the race, the tie-break and the last resort share).
+            // When the head-start race is already in flight, its answer IS the
+            // second opinion: await it rather than buying another. Otherwise
+            // spend the attempt's call here and now — the race's own
+            // `cloudSpent` check then keeps the timer from double-firing.
+            // (`cloudRace`, `cloudCtl` and `cloudIdentify` are consts defined
+            // below in this same scope, but only ever CALLED from here after
+            // identifyViaOcr has finished initialising all of them.)
+            let second: IdentifyOutcome | null = null
+            if (cloudSpent) {
+              second = cloudRace ? await cloudRace : null
+            } else {
+              cloudSpent = true
+              lastRacedCloudAt = Date.now()
+              second = await cloudIdentify(reading, cloudCtl.signal).catch(() => null)
+            }
+            if (second) return second
+          }
         }
       }
       // Name pinned the card; now read the printed collector line to pin
@@ -1461,12 +1554,16 @@ async function identifyViaOcr(
     // else. The image left the device to achieve exactly nothing. Sending a
     // camera frame anywhere has to be something the user switched on, and
     // paying for a tier is not the same act as consenting to the upload.
-    if (!config.cloudScanRescue) return null
     // One route now. The bring-your-own-key path is gone with the Settings
     // field that fed it: nobody supplies a key any more, the rescue is part of
     // what a subscription buys, and the model that costs money is pinned
     // server-side because a client-chosen model is a client-chosen bill.
-    if (!isSignedIn()) return null
+    //
+    // Both checks live in `cloudRescueArmed()` — the same question the
+    // suspect-answer path asks before spending, and deliberately the same
+    // function: two copies of this gate would drift, and the copy that drifts
+    // open is an upload nobody consented to.
+    if (!cloudRescueArmed()) return null
     bail()
     // Dynamic import, but be honest about what it buys: gemini.ts is ALREADY in
     // the main bundle (BuilderView and SettingsView import it statically), so
