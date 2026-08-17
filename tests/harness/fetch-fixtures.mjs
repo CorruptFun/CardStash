@@ -666,11 +666,47 @@ async function mtg() {
     cardNames: await save('api/scryfall-card-names.json', { data: names?.data ?? [] }),
   }
   console.log(`  card-names catalog: ${names?.data?.length ?? 0} names`)
+
+  // Candidate-print imagery for the art-hash printing re-pick: when nothing
+  // printed pinned the edition, the pipeline fetches candidates'
+  // `image_uris.small` (grouped by illustration_id — kept in the trim below
+  // for exactly that) and compares art regions. The matrix sandbox has no
+  // egress, so the snapshot must CARRY those images; stub-apis.mjs serves
+  // them back from images/prints/<scryfall-id>.jpg. Sequential on purpose —
+  // ~180 files of ~15KB is not worth a fetch storm at the CDN. A miss is
+  // recorded but must never fail the mtg STEP: the workflow refuses to
+  // publish on whole-game failure, and one absent art image is not that — at
+  // run time the stub answers 404 for it and the pipeline declines, the
+  // honest replay of the same miss live. A dead CDN is bounded the same way:
+  // after 8 straight misses the loop records one summary failure and stops
+  // instead of retrying its way through every remaining print.
+  const allPrints = dedupeBy(Object.values(printsByName).flat(), (p) => p.id)
+  let printImages = 0
+  let missStreak = 0
+  for (const p of allPrints) {
+    const small = p.image_uris?.small
+    if (!small) continue // double-faced layouts carry imagery per face; nothing to fetch
+    if (missStreak >= 8) {
+      fail('mtg-print-images', `stopped after ${missStreak} consecutive image failures`)
+      break
+    }
+    try {
+      await saveImage(`images/prints/${p.id}.jpg`, small)
+      printImages++
+      missStreak = 0
+      await new Promise((r) => setTimeout(r, 60))
+    } catch (err) {
+      missStreak++
+      fail(`mtg-print-image/${p.id}`, err)
+    }
+  }
+  manifest.datasets.mtg.printImages = printImages
+  console.log(`  print images: ${printImages}/${allPrints.length}`)
 }
 
 function trimScryfall(raw) {
-  const pick = ({ id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
-    id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
+  const pick = ({ id, name, flavor_name, set, set_name, collector_number, illustration_id, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
+    id, name, flavor_name, set, set_name, collector_number, illustration_id, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
   })
   const out = pick(raw)
   if (Array.isArray(raw.card_faces)) {

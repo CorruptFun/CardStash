@@ -10,6 +10,8 @@
  *                               (served dead if the real API was dead at capture time)
  *  - api.scryfall.com         → exact/fuzzy named + prints search over captured prints,
  *                               fuzzy resolved against the real card-names catalog
+ *  - cards.scryfall.io        → captured small print images (images/prints/) for the
+ *                               art-hash printing re-pick; an uncaptured id answers 404
  *  - db.ygoprodeck.com        → fname contains / name exact over captured rows
  *  - api.lorcast.com          → 404 (how Lorcast reports "no cards")
  *
@@ -265,6 +267,33 @@ export function createStubs(fixturesDir) {
     return json({ object: 'error', code: 'not_found', details: 'Not stubbed.' }, 404)
   }
 
+  /* ---------------------------------------------------- scryfall imagery - */
+  // cards.scryfall.io is the CDN behind `image_uris` — the art-hash printing
+  // re-pick (arthash.ts) fetches candidate prints' `small` images and compares
+  // art regions against the captured frame. The harness runs with NO egress,
+  // so unless the snapshot's images are served here the art hash measures
+  // nothing: every fetch would abort, every candidate would decline, and the
+  // printing column would grade a mechanism that never got to run.
+  // fetch-fixtures downloads each captured print's small image to
+  // images/prints/<scryfall-id>.jpg; this serves exactly those bytes (the
+  // cache-buster query the real URLs carry is ignored, as the CDN ignores it).
+  // An id NOT in the store answers a clean 404 — a resolved, not-ok Response,
+  // which is what the real CDN says about a missing image — because the
+  // pipeline treats a failed image as "decline, keep the current answer" and
+  // that path must be exercised honestly, not short-circuited by a simulated
+  // network outage. Other sizes and faces (/normal/, /large/, /small/back/)
+  // are NOT served from the small file: misstating resolution would quietly
+  // skew the hash, and a pipeline drifting onto URLs the fetcher never
+  // captured should surface in stats.unknown like any unstubbed traffic, not
+  // be flattered — the dispatch lets them fall through to the abort path.
+  function scryfallImage(url) {
+    const m = url.pathname.match(/^\/small\/front\/[0-9a-f]\/[0-9a-f]\/([0-9a-f-]{36})\.jpg$/)
+    if (!m) return null
+    const path = join(fixturesDir, 'images', 'prints', `${m[1]}.jpg`)
+    if (!existsSync(path)) return { status: 404, contentType: 'text/plain', body: 'Not found' }
+    return { status: 200, contentType: 'image/jpeg', body: readFileSync(path) }
+  }
+
   /* ---------------------------------------------------------- ygoprodeck - */
   function ygoprodeck(url) {
     if (!url.pathname.endsWith('/cardinfo.php')) return json({ error: 'not stubbed' }, 400)
@@ -290,6 +319,10 @@ export function createStubs(fixturesDir) {
   function handle(urlString, request) {
     const url = new URL(urlString)
     count(url.hostname)
+    const unknown = () => {
+      stats.unknown.push(urlString.slice(0, 140))
+      return null // caller aborts the request
+    }
     switch (url.hostname) {
       case 'tcgcsv.com':
         return tcgcsv(url)
@@ -299,6 +332,10 @@ export function createStubs(fixturesDir) {
         return pokemontcgio(url)
       case 'api.scryfall.com':
         return scryfall(url, request)
+      case 'cards.scryfall.io':
+        // Only the small-front image shape is stubbed (see scryfallImage);
+        // anything else on the host is unstubbed traffic and aborts loudly.
+        return scryfallImage(url) ?? unknown()
       case 'db.ygoprodeck.com':
         return ygoprodeck(url)
       case 'api.lorcast.com':
@@ -306,8 +343,7 @@ export function createStubs(fixturesDir) {
         // clean empty result, which is right: we capture no Lorcana fixtures.
         return json({ error: 'not found' }, 404)
       default:
-        stats.unknown.push(urlString.slice(0, 140))
-        return null // caller aborts the request
+        return unknown()
     }
   }
 
