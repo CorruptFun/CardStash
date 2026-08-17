@@ -22,9 +22,10 @@
  * network says nothing about the UI.
  *
  * The three passes are three different users, because the offer's whole design
- * is that they see different things: signed out (never asked for money at
- * all), signed in with cloud rescue off (offered the FREE switch, never the
- * subscription), and signed in with it on (offered the discounted year).
+ * is that they see different things: signed out (never asked for money — the
+ * folded rescue-value-prop line names the free path instead: an account, 50
+ * free reads), signed in with cloud rescue off (offered the FREE switch, never
+ * the subscription), and signed in with it on (offered the discounted year).
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -190,6 +191,9 @@ try {
     const { ctx, page } = await open({ session: null, settings: baseSettings })
     await missOnce(page)
 
+    // The chip lives ~1.6s before the retry replaces it — wait for it rather
+    // than racing it, or this check samples an empty slot and calls it a bug.
+    await page.waitForSelector('.chip__misshint', { timeout: 15_000 }).catch(() => {})
     const chipButtons = await page.locator('.chip--nomatch button').count()
     check(chipButtons === 0, 'the miss chip carries no buttons', `${chipButtons} found`)
     const hint = (await page.locator('.chip__misshint').first().textContent().catch(() => ''))?.trim() ?? ''
@@ -207,7 +211,11 @@ try {
     const labels = (await page.locator('.scan__misshelp .scan__tipbtns button').allTextContents()).map((t) => t.trim())
     check(labels.some((t) => /try again/i.test(t)), 'the panel offers a retry', labels.join(' · '))
     check(labels.some((t) => /add it myself/i.test(t)), 'the panel keeps "add it myself"')
-    check(await page.locator('.scan__offer').count() === 0, 'a signed-out user is never asked to subscribe')
+    // The folded rescue-value-prop line: signed out, the panel NAMES the free
+    // path (an account, 50 free reads) — and still never asks for money.
+    const offerText = ((await page.locator('.scan__offer').first().textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ')
+    check(!/\$|a year|get it|subscribe/i.test(offerText), 'a signed-out user is never asked for money', offerText)
+    check(/50 a month free/i.test(offerText) && /sign in/i.test(offerText), 'the free path is named, with the way in', offerText)
 
     // THE REGRESSION. Retrying flips the scanner's status underneath the panel
     // — which is what used to take the buttons away mid-reach.
