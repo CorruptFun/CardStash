@@ -632,6 +632,12 @@ const CLOUD_MATCH_THRESHOLD = 0.9
  * twice on a frame the user is still holding in view.
  */
 const CLOUD_CONFIDENCE = 0.85
+// The cloud's COLLECTOR-LINE door (see `byCollectorLine`), below the name
+// door's 0.85 because nothing corroborates the printed line — there is no
+// readable name to agree with it — and above the 0.75 cache-write gate for the
+// reason the name door is: it is the same paid API call on the same frame, and
+// re-deriving it would buy the identical answer twice.
+const CLOUD_COLLECTOR_CONFIDENCE = 0.8
 
 /**
  * How long the printing tie-break may hold a scan that already has an answer.
@@ -1479,6 +1485,87 @@ async function identifyViaOcr(
       total: read.printedTotal ?? null,
       setCode: read.setCode ?? null,
     })
+    // The COLLECTOR-LINE door — a second door, taking different evidence.
+    //
+    // Everything in the name path below asks "does the transcribed name match a
+    // catalog name?", which a Japanese, Korean or Chinese print can never
+    // answer: the catalogs are English. Measured on the `ja-collector`
+    // fixtures, all 18 cells (9 MTG, 9 Pokémon, every one WITH the game hint):
+    // the model transcribed 耐え抜くもの、母聖樹 / NEO 266/302 and アマージョex /
+    // sv4K 020/066 — both collector lines exactly right — and every cell was
+    // thrown away here with `card: null`, the printed line never consulted.
+    // `read.number` could not save them because it is only ever a REFINEMENT of
+    // a match the name already found (see the pin below); it cannot rescue a
+    // name that found nothing. That is the bug: the number was in hand and the
+    // code had no door to walk it through.
+    //
+    // So when the name finds NOTHING, ask the printed line instead — through
+    // the same resolvers `cornerIdentify` uses. Reusing them is the guard
+    // rather than a convenience: `pokemonByCollector` demands set code + size +
+    // membership agree, `mtgBySetNumber` wants an exact set code, and the
+    // evidence requirement travels with the resolver instead of being
+    // re-derived (and re-weakened) here.
+    //
+    // Two limits make this strictly additive:
+    //   - It runs ONLY where this function already returned null, so no cell
+    //     that identifies today can change. It converts misses, or nothing.
+    //   - Single-game only, exactly as the OCR corner rescue is. Auto mode has
+    //     no collector rescue by design: a bare number resolved against four
+    //     catalogs is precisely how a confident wrong card gets manufactured.
+    //     All 18 measured failures carry a hint, so this costs them nothing.
+    const byCollectorLine = async (): Promise<IdentifyOutcome | null> => {
+      if (games.length !== 1 || !read.number) return null
+      const game = games[0]
+      const total = read.printedTotal ?? null
+      let card: Card | null = null
+      try {
+        if (game === 'pokemon' && total) {
+          // `fused: false` — the model returns a structured number, never a
+          // slash reconstructed out of an italic glyph, so the fused-mode
+          // corroboration that guards a reconstructed OCR fraction does not
+          // apply. The set code still travels when the model read one.
+          card = await pokemonByCollector(read.number, total, config.pokemonKey, read.setCode, false)
+        } else if (isCatalogGame(game) && total) {
+          card = await catalogByCollector(game, read.number, total)
+        } else if (game === 'mtg' && read.setCode) {
+          card = await mtgBySetNumber(read.setCode, read.number, total)
+        }
+      } catch {
+        return null
+      }
+      if (!card) return null
+      traceEvent('cloud-collector', {
+        card: card.name,
+        game: card.game,
+        setCode: read.setCode ?? null,
+        number: read.number,
+        total,
+      })
+      return {
+        ok: true,
+        card,
+        identification: {
+          game: card.game,
+          // The card's own name, not the model's transcription: this door was
+          // opened by the printed line, and the catalog name is the identity
+          // the rest of the app keys on. `cornerIdentify` reports the same way
+          // for the same reason — the printed name was never the evidence.
+          name: card.name,
+          setCode: read.setCode ?? card.setCode,
+          number: read.number ?? card.number,
+          confidence: CLOUD_COLLECTOR_CONFIDENCE,
+          via: 'cloud',
+          foil: detectFoil(reading.canvas) ? true : undefined,
+          // False for the same reason the name door's is, and here the
+          // circularity is total: the card was SELECTED by this number, so it
+          // can never corroborate it. Keeping it false also means this door
+          // cannot enlarge the "wrong printing while claiming the code was
+          // read" class, which needs `pinned === true` to count at all.
+          pinned: false,
+        },
+      }
+    }
+
     const best = await bestMatchAcrossGames(read.name, games, {
       pokemonKey: config.pokemonKey,
       timeoutMs,
@@ -1489,7 +1576,7 @@ async function identifyViaOcr(
         card: best?.card.name ?? null,
         score: best ? Number(best.score.toFixed(3)) : null,
       })
-      return null
+      return await byCollectorLine()
     }
     // Pin the printing with the model's OWN collector line before judging the
     // name. This ordering is load-bearing, not tidiness: measured, the name
