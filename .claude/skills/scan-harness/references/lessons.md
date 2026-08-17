@@ -827,3 +827,23 @@ result seems absurd, check this list before writing code.
     headers; no client-side cleverness revives a tainting host, by design.
     Remember `crossOrigin='anonymous'` on the img/fetch: without it the
     browser never sends Origin and the canvas taints even on a `*` host.
+78. **"No collector evidence" measures the PARSER, not the OCR — read the
+    raws before spending anything on read rate.** Lesson 74 counted
+    `riftbound/short-name-1` among the cells with `number: null, total:
+    null`, and the read-rate framing filed it under "the line doesn't
+    read." The trace raws said otherwise: the line read `VEN « R04 « EN`,
+    clean, on cell after cell — Riftbound RUNES print set · letter-number ·
+    language and no fraction at all, and `parseCornerInfo`'s riftbound
+    branch knew only fractions, so a perfect read parsed to nothing and the
+    `refine` event reported null evidence. One strictly-additive parser row
+    (anchored on all three tokens in order, language tail last, set slot
+    refusing language marks; runs only when no fraction parsed) moved
+    printing 118/169 → 125/169 and riftbound 42/50 → 49/50, identical over
+    two runs, no other cell moving. Validated lesson-29 style before the
+    matrix: over every captured OCR text, ten fires, all on the rune
+    fixture, all yielding exactly the printed set and number. The
+    transferable rule: a null in the refine event is the END of a pipeline
+    — attribute it to the read only after the raws show no line, because a
+    vocabulary gap in the parser produces the same null at zero OCR cost to
+    fix. matchCatalog needed no change: +0.2 digits / +0.1 set already
+    ranked the right printing first once evidence existed.

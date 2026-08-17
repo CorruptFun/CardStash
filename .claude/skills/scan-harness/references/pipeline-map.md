@@ -221,9 +221,12 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    `--min-printing-rate` floor. It is deliberately not folded into the pass
    rate — see lesson 62. The `borderless-any` MTG fixture that "could not
    fail this way" registers `printing: 'wrong'` on all 12 of its cells.
-   Standing baseline on main: **205/282 identified (73%), printing 118/169,
-   4 wrong while claiming the code was read** — per-game printing onepiece
-   18/18, riftbound 42/50, pokemon 35/55, mtg 23/46.
+   Standing baseline on the exact-printing branch: **205/282 identified
+   (73%), printing 125/169, 4 wrong while claiming the code was read** —
+   per-game printing onepiece 18/18, riftbound 49/50, pokemon 35/55, mtg
+   23/46. (Riftbound was 42/50 until the rune-line row in `parseCornerInfo`
+   — see lesson 78; re-measure on the current fixture snapshot before
+   trusting any absolute number.)
    What the column still does NOT cover: treatment/frame, finish and
    language are recorded nowhere and graded not at all, and clips and binder
    pages carry no printing ground truth in their manifests, so printing is
