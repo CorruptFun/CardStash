@@ -892,3 +892,28 @@ result seems absurd, check this list before writing code.
     treatment AND that a parse would resolve — a ladder pointed at type
     below its resolution floor spends latency to mint confident wrong
     answers, which is strictly worse than the fuzzy default it replaces.
+81. **The art hash shipped, and the spike's numbers held in the real
+    pipeline.** `arthash.ts` + the `!pinned && mtg` wiring ahead of the cloud
+    tie-break: printing 128/169 → 135/169 (mtg 23/46 → 30/46), identical
+    over two runs, zero cells moving anywhere else. Every one of the seven
+    swaps landed the truth printing at distances 15–26 and margins 11–24 —
+    inside the spike's predicted bands (lesson 77: true-art ≤26, wrong-art
+    ≥36) — and every decline landed on a hash-hostile degradation
+    (soft-focus, glare, perspective, worst), which is the guards refusing
+    rather than guessing: zero wrong swaps. Three things to know before
+    extending it. The measurement needed the SNAPSHOT to carry candidate
+    images (`images/prints/`, served by the stub at the captured URL shape;
+    `illustration_id` kept in the trim because `artGroups` keys on it) — an
+    art hash without stub-served candidates measures as a no-op and looks
+    like a fix that does not work, lesson 55's trap in new clothes. The
+    counterspell-retro asymmetry (small-offset swapped, clean declined)
+    is art-BOX geometry: the 1997 frame's art sits differently than the 2015
+    rect models, so `MTG_ART_RECT` samples frame furniture on retro cards
+    and the margin thins — a per-frame-era art rect is the obvious next
+    refinement, worth a probe before believing it. And the CI round that
+    builds the snapshot taught its own lessons the hard way: a finished
+    node script that never calls `process.exit` waits on whatever half-open
+    sockets upstream servers left behind (two hour-long silent stalls —
+    cancel unconsumed error bodies, exit explicitly), and Scryfall's CDN
+    throttles per connection (~12.7s/image sequential; a pool of six is a
+    browser's politeness and divides the wait).

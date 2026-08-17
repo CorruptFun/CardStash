@@ -222,12 +222,14 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    rate — see lesson 62. The `borderless-any` MTG fixture that "could not
    fail this way" registers `printing: 'wrong'` on all 12 of its cells.
    Standing baseline on the exact-printing branch: **205/282 identified
-   (73%), printing 128/168** — per-game printing onepiece 18/18, riftbound
-   49/50, pokemon 38/55, mtg 23/45. (Riftbound was 42/50 until the
-   rune-line row in `parseCornerInfo` — lesson 78 — and pokemon 35/55 until
-   `RAW_LINE_SLIVER` — lesson 79; the identified denominator moves ±1 with
-   the counterspell glare flapper. Re-measure on the current fixture
-   snapshot before trusting any absolute number.)
+   (73%), printing 135/169 (80%)** — per-game printing onepiece 18/18,
+   riftbound 49/50, pokemon 38/55, mtg 30/46. (Riftbound was 42/50 until
+   the rune-line row in `parseCornerInfo` — lesson 78; pokemon 35/55 until
+   `RAW_LINE_SLIVER` — lesson 79; mtg 23/46 until the art-hash re-pick —
+   lesson 81; the identified denominator moves ±1 with the counterspell
+   glare flapper. Re-measure on the current fixture snapshot before
+   trusting any absolute number, and note the matrix can only measure the
+   art hash on a snapshot carrying `images/prints/`.)
    What the column still does NOT cover: treatment/frame, finish and
    language are recorded nowhere and graded not at all, and clips and binder
    pages carry no printing ground truth in their manifests, so printing is
