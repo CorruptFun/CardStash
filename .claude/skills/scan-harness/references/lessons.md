@@ -954,3 +954,17 @@ result seems absurd, check this list before writing code.
     underneath, concentrated in `worst` and `soft-focus` — so
     reproduce-twice is not ceremony, and identical totals are not proof
     that nothing moved.
+84. **`outcome.number` is the answer, not the evidence.** It carries the
+    ANSWERED card's catalog number and is always populated, so testing
+    "did the pipeline actually read a collector line" with
+    `!outcome.number` reports zero cells lacking evidence — exactly
+    backwards, and it reads as a reassuring audit. The read's actual
+    markers are `outcome.pinned === false` and
+    `outcome.editionNumber == null`. The error was caught only because
+    "0 of 23 lack evidence" contradicted 1711aee's own rationale — when
+    an audit agrees with everything, audit the audit. Same session's
+    practice worth keeping alongside: PRE-REGISTER the eligible-cell
+    ceiling and the must-not-grow number from the CURRENT snapshot
+    before running a measurement (lessons 82–83 are both stories of
+    "expected" numbers drifting across snapshots; a pre-registered
+    target written down first cannot be rationalised afterwards).
