@@ -87,16 +87,20 @@ function scryfallRaw(print) {
  * about it: a fuzzy name resolves to a single card, and an ambiguous one is a
  * 404 rather than a guess.
  *
- * The approximation, deliberately CONSERVATIVE so this file cannot manufacture
- * the wrong-card findings the sweep exists to count:
+ * The approximation, and its VERIFIED boundary (2026-08-17, 24 live probes):
  *   1. exact normalized name  → that card
  *   2. exactly one name containing the query as a normalized substring → it
  *   3. exactly one name whose words the query's words all prefix-match → it
  *   4. anything else → 404
- * Real Scryfall is more forgiving than steps 2–3 (it tolerates typos this
- * refuses), so MTG "refused" counts here are an UPPER bound on the real
- * refusal rate and MTG confident-wrong counts are a LOWER bound. Stated in
- * the report; never quietly assumed.
+ * Live Scryfall diverges BOTH ways: it resolves most single-glyph typos this
+ * model refuses (word-set matching, no substring tier), and it 404s some
+ * prefixes step 2 resolves ("Jace, the Mind" → 404 ambiguous live). So the
+ * MTG glyph-rung name results MEASURE THIS STUB, NOT THE MATCHER — do not
+ * act on them; true MTG confident-wrong exposure is bounded by the ~187
+ * corruptions (~0.2%) within one edit of a different real name. Pokemon/YGO
+ * arms ride documented exact/prefix filters and carry no such caveat.
+ * Rebuild this model against live word-set semantics, or mark the MTG glyph
+ * rungs unfed, before quoting those rungs again.
  */
 function scryfallFuzzy(query, setCode) {
   const mtg = corpus().mtg
