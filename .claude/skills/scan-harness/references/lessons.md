@@ -872,3 +872,23 @@ result seems absurd, check this list before writing code.
     auto cell). When a cell flips the same way twice, diff its TRACES, not
     its verdicts, before accepting blame — same-direction flips can still
     be timing, and the trace is what says so.
+80. **The MTG deep tier is measured-negative — do not extend
+    `PRINTING_RIDES_ON_THE_LINE` to MTG for these fixtures.** The obvious
+    next move after the Pokémon deep tier recovered rayquaza was the same
+    ladder for MTG's worst printing column, and the probe refused it on all
+    three counts before a matrix run was spent. `counterspell-retro`'s
+    collector block resolves under NO treatment — every rect × variant ×
+    5-6× zoom returns fragments — and the one fragment that parses ("Rt 6
+    2" → number 6, truth 5) would sail through the refine's `collectorEq`
+    against a catalog with that many Counterspell printings and pin a wrong
+    edition as claimed-read: the deep tier there would not merely read
+    nothing, it would manufacture the one class the gate forbids growing.
+    And `borderless-any`, where the line DOES read at the narrow-sliver
+    treatment ("P 0002 Promo / PRM · EN"), is resolve-blocked rather than
+    read-blocked — printed promo numbering against Scryfall's set
+    vocabulary — which reading harder cannot fix and the cloud tie-break
+    already covers. The general rule the pair teaches: before extending a
+    read ladder to a new game, probe BOTH that its target parses under some
+    treatment AND that a parse would resolve — a ladder pointed at type
+    below its resolution floor spends latency to mint confident wrong
+    answers, which is strictly worse than the fuzzy default it replaces.

@@ -281,12 +281,15 @@ pays ~9–10 — that asymmetry is deliberate (a slow miss beats a failure).
    as pinned — so the scan reported an unconfirmed edition and declined the
    one mechanism that could confirm it. After a tie-break swap `pinned` stays
    false, because the model chose that printing and the printed line did not.
-   Two collaborators, both still missing: nothing on-device detects a
-   borderless frame (`pickByTraits` has taken a `treatment` since v0.7 and had
-   no producer until the cloud read became one), and `looksLikeCollectorLine`
-   still recognises no modern MTG line at all — a fraction, a set-dash code or
-   an 8-digit passcode only — so MTG sideways frames can never settle
-   orientation from the line. Both are free wins for whoever picks this up.
+   One collaborator still missing: nothing on-device detects a borderless
+   frame (`pickByTraits` has taken a `treatment` since v0.7 and has no
+   producer but the cloud read). `looksLikeCollectorLine` learned the modern
+   MTG line in the wrong-edition round, so orientation now settles from it.
+   Extending the deep refine tier to MTG is NOT the free win it looks like —
+   measured-negative, see lesson 80: the retro-frame block sits below the
+   resolution floor and its one parseable fragment would pin a wrong edition
+   as claimed-read. The offline lever for MTG printings, if one exists, is
+   the art hash (lesson 77), not more OCR.
 
 ## Scanner loop (hooks/useScanner.ts)
 
