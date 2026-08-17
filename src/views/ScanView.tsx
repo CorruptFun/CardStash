@@ -17,11 +17,14 @@ import {
   endParkedCamera,
   IS_STANDALONE,
 } from '../lib/camera'
+import { isSignedIn } from '../lib/authsession'
+import { CLOUD_AVAILABLE } from '../lib/cloudconfig'
 import { addToCollection, clearScans, db, markScansAdded, recordScan, removeCopies, removeScan, restoreScans } from '../lib/db'
 import { gradeShort } from '../lib/slab'
 import { clearSportsRecall } from '../lib/sports'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
 import { isEntitled } from '../lib/entitlement'
+import { rescueHintQuiet, rescueMomentText } from '../lib/rescuemeter'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { MAX_PAGE_CARDS, PAGE_MAX_EDGE, scanPage, type PageCard, type PageScanProgress } from '../lib/multiscan'
 import { warmOcr } from '../lib/ocr'
@@ -321,10 +324,16 @@ export function ScanView({ active }: { active: boolean }) {
       // one just scanned should be findable now rather than when the memo
       // happens to expire.
       if (hit.card.game === 'sports') clearSportsRecall()
+      // THE MOMENT the rescue earns its keep, said out loud — this card was a
+      // local miss, the cloud read it, and the month's meter moved. Passive
+      // (no action, info kind) and state-driven off `via`, never a status
+      // code; the number is the `remaining` the same 200 just cached into
+      // settings.rescueMeter (readCardHosted), so no second request is made.
+      if (hit.identification.via === 'cloud') toast(rescueMomentText(settings().rescueMeter), 'info')
       haptic(config.haptics ? [14, 60, 14] : 0)
       if (config.collectMode) collectRef.current!.hit(hit.card, finish, grade, scanId)
     },
-    [config.collectMode, config.haptics],
+    [config.collectMode, config.haptics, toast],
   )
   const scanner = useScanner(onHit, scanMode)
   /**
@@ -779,6 +788,25 @@ export function ScanView({ active }: { active: boolean }) {
     !uploadTipOff &&
     missRun >= MISSES_BEFORE_UPLOAD_TIP &&
     isEntitled('photo-upload')
+  /* THE GAP, felt honestly: this miss is one the cloud rescue was not allowed
+   * to try — signed out, or the switch is off. One quiet line under the miss
+   * chip offers the path, and only where the offer is true: card mode (the
+   * rescue never runs for slabs, sealed or sports), a build with a cloud at
+   * all, and never over a network-failure message, which the rescue shares.
+   * State-driven by design — scan-card's contract keeps status codes out of
+   * the viewfinder — and a dismissal quiets it for a fortnight. When the
+   * rescue ran and ALSO failed, nothing new is said. */
+  const signedIn = isSignedIn()
+  const hintedGame =
+    config.gameFilter !== 'auto' ? config.gameFilter : config.enabledGames.length === 1 ? config.enabledGames[0] : null
+  const rescueOffer =
+    scanner.status === 'nomatch' &&
+    scanner.miss?.reason !== 'api' &&
+    CLOUD_AVAILABLE &&
+    scanMode === 'card' &&
+    hintedGame !== 'sports' &&
+    (!signedIn || !config.cloudScanRescue) &&
+    !rescueHintQuiet(config.rescueHintDismissedAt)
 
   return (
     <div className="scan">
@@ -1002,6 +1030,27 @@ export function ScanView({ active }: { active: boolean }) {
                 onRetry={tapRescan}
                 onDetails={() => setDebugOpen(true)}
               />
+              {rescueOffer && (
+                <div className="chip__cloudoffer" role="status">
+                  <button
+                    className="chip__offerlink"
+                    onClick={() => {
+                      location.hash = '#/settings'
+                    }}
+                  >
+                    {signedIn
+                      ? 'Cloud rescue could try this card — switch it on in Settings'
+                      : 'Cloud rescue reads cards like this — 50 a month free with an account'}
+                  </button>
+                  <button
+                    className="chip__offerx"
+                    aria-label="Not now"
+                    onClick={() => config.set({ rescueHintDismissedAt: Date.now() })}
+                  >
+                    <Icon name="x" size={10} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {uploadTip && (

@@ -1,5 +1,7 @@
 import { linkAbort } from './fetchJson'
+import { noteRemaining } from './rescuemeter'
 import { asTreatment, type Treatment } from './scryfall'
+import { settings } from './settings'
 import type { Card, Game } from './types'
 
 export class GeminiError extends Error {}
@@ -22,6 +24,14 @@ export interface CloudCardRead {
   treatment?: Treatment
   /** The model saw holographic shine. Corroborates the on-device detector. */
   foil?: boolean
+  /**
+   * Rescues left this month AFTER this one, from the server's own metering —
+   * the one field here that is about the account rather than the card. Every
+   * 200 carries it (see scan-card's contract), and `readCardHosted` also
+   * caches it into `settings.rescueMeter` so the scan screen's "37 of 50 left"
+   * toast and the Settings meter can say it without a second request.
+   */
+  remaining?: number
 }
 
 /** Scanning is interactive — a rescue that outlives the user's patience is a miss. */
@@ -49,6 +59,7 @@ function cloudRead(parsed: any): CloudCardRead | null {
     game: text(parsed?.game),
     treatment: asTreatment(parsed?.treatment),
     foil: typeof parsed?.foil === 'boolean' ? parsed.foil : undefined,
+    remaining: typeof parsed?.remaining === 'number' && Number.isFinite(parsed.remaining) ? parsed.remaining : undefined,
   }
 }
 
@@ -86,6 +97,13 @@ export async function readCardHosted(canvas: HTMLCanvasElement, signal?: AbortSi
     // Our own server, but the answer inside it is a language model's — coerce
     // it to the contract rather than casting, exactly as a pasted link would be.
     const parsed = await res.json()
+    // A 200 spent a metered credit whatever the read turns out to be worth, so
+    // the meter notes `remaining` HERE — the one place every successful rescue
+    // passes, tiebreak and page-scan calls included — before the name check
+    // can turn the rest of the answer into a null.
+    const config = settings()
+    const meter = noteRemaining(config.rescueMeter, parsed?.remaining)
+    if (meter) config.set({ rescueMeter: meter })
     return parsed?.name ? cloudRead(parsed) : null
   } catch {
     return null

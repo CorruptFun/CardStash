@@ -153,3 +153,63 @@ test('no row, a server error, offline, signed out: nothing flips and nothing lea
   assert.equal(sent.length, 0, 'signed out asks nothing')
   assert.equal(globalThis.__settings.cloudScanRescue, false)
 })
+
+// ------------------------------------------------ the rescue meter's cap
+// The same funnel also settles which allowance `rescueMeter.remaining`
+// counts down from — 1,000 for a subscriber, 50 free. Only a REAL answer
+// may write it; offline and errors say nothing, exactly as above.
+
+test('an active row notes the subscriber cap on the rescue meter', async () => {
+  reset()
+  fakeFetch({ body: [{ expires_at: inDays(30), source: 'stripe' }] })
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter.cap, 1000)
+})
+
+test('an expired row and a definitive no-row both note the free cap', async () => {
+  reset()
+  fakeFetch({ body: [{ expires_at: inDays(-1), source: 'stripe' }] })
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter.cap, 50, 'expired is a real answer')
+
+  reset()
+  fakeFetch({ body: [] })
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter.cap, 50, 'never granted is a real answer')
+})
+
+test('a cap that changes drops the sample; one that agrees leaves the meter alone', async () => {
+  // 49 left of the free 50, then a subscription lands: the 49 was the other
+  // pool's number, so it must go rather than read as "used 951 of 1,000".
+  const seeded = { month: '2026-08', remaining: 49, cap: 50 }
+  reset({ rescueMeter: seeded })
+  fakeFetch({ body: [{ expires_at: inDays(30), source: 'stripe' }] })
+  await subscriptionState()
+  assert.deepEqual(globalThis.__settings.rescueMeter, { month: '', remaining: 0, cap: 1000 })
+
+  // The same answer again: cap already agrees, and the object is untouched.
+  const kept = globalThis.__settings.rescueMeter
+  fakeFetch({ body: [{ expires_at: inDays(30), source: 'stripe' }] })
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter, kept, 'an agreeing answer writes nothing')
+})
+
+test('a server error, offline, and signed out never touch the meter', async () => {
+  const seeded = { month: '2026-08', remaining: 37, cap: 50 }
+
+  reset({ rescueMeter: seeded })
+  fakeFetch({ ok: false })
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter, seeded, 'a 500 says nothing about the allowance')
+
+  reset({ rescueMeter: seeded })
+  fakeFetch(new Error('offline'))
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter, seeded, 'offline says nothing about the allowance')
+
+  reset({ rescueMeter: seeded })
+  globalThis.__signedIn = false
+  fakeFetch()
+  await subscriptionState()
+  assert.equal(globalThis.__settings.rescueMeter, seeded)
+})

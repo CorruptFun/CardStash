@@ -332,6 +332,44 @@ Entitlement is not checked here and shouldn't be: the hosted route is the
 server's call (decision 2a), and a client-side check only adds a way to be
 locally wrong about what someone paid for.
 
+### Seeing the rescue work — the meter and the offer
+
+The rescue used to be invisible: a card the cloud read looked exactly like a
+card the device read, and the 50-a-month free allowance never appeared
+anywhere. Three surfaces fix that, and all three are **state-driven, never
+status-code-driven** — `scan-card`'s contract stands: every non-200 is a plain
+local miss, and the viewfinder never explains billing to someone holding a
+card.
+
+- **The moment** (`ScanView.onHit`): a hit whose `identification.via` is
+  `'cloud'` gets a passive info toast — "Read in the cloud — 37 of 50 left
+  this month". The number is the `remaining` every successful `scan-card` 200
+  carries (now mapped onto `CloudCardRead`), cached by `readCardHosted` into
+  `settings.rescueMeter` before the name check can null the read — a 200 spent
+  a credit whatever the read was worth, tiebreak and page-scan calls included.
+- **The meter** (`lib/rescuemeter.ts`, pure and node-tested): month-keyed to
+  the server's own UTC bucket, so a rolled-over month reads as *no sample* and
+  every surface shows nothing rather than last month's figure. The cap is
+  derived, never guessed — a `remaining` ≥ 50 can only be the subscriber pool
+  (the free pool consumes before it counts, so it answers 49 at most);
+  below that it comes from a real entitlement answer
+  (`subscriptionState()` → `noteCap`), and a cap that CHANGES drops the sample
+  with it, because "49 left" measured under the free 50 must not render as
+  "used 951 of 1,000" the moment someone subscribes. Shown beside the rescue
+  toggle in Settings and as a used-of line on the subscription panel (the free
+  panel names the subscriber 1,000 only when ≤ 10 are left). Exhaustion talk
+  lives on those two screens and nowhere else.
+- **The offer** (the quiet line under the no-match chip): when a scan misses
+  and the rescue was *not allowed to try* — signed out, or the switch off —
+  one line names the path ("Cloud rescue reads cards like this — 50 a month
+  free with an account" / "Cloud rescue could try this card — switch it on in
+  Settings", both leading to Settings). It renders only where it is true: card
+  mode (never slabs, sealed or sports, which the rescue never runs for), a
+  build with a cloud configured, never over a network-failure message, and a
+  dismissal (`rescueHintDismissedAt`) quiets it for a fortnight. When the
+  rescue ran and ALSO failed, nothing new is said — that miss looks exactly as
+  it always did.
+
 ### Sideways cards
 
 People photograph cards lying flat on a desk, so the card arrives quarter

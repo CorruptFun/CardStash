@@ -24,6 +24,10 @@ export const SETTINGS_DEFAULTS = {
   shareScope: 'trade',
   cloudScanRescue: false,
   rescueAutoOnAt: 0,
+  // Never mutated in place — noteCap/noteRemaining always mint a new object —
+  // so the shared reference across {...SETTINGS_DEFAULTS} resets is safe.
+  rescueMeter: { month: '', remaining: 0, cap: 0 },
+  rescueHintDismissedAt: 0,
 }
 
 export function settings() {

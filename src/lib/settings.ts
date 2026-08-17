@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { GAMES } from './games'
 import { sanitizeSocialLinks } from './profilelinks'
+import { sanitizeRescueMeter, type RescueMeter } from './rescuemeter'
 import type { Game, ShareScope, SocialLink } from './types'
 
 /**
@@ -117,6 +118,26 @@ export interface Settings {
    * flip, whoever caused it.
    */
   rescueAutoOnAt: number
+  /**
+   * What the server last said was left of the month's cloud rescues — a CACHE
+   * of `scan-card`'s `remaining`, written by `readCardHosted` on every
+   * successful rescue and never counted locally (another device draws on the
+   * same allowance). Month-keyed to the server's own UTC bucket; a rolled-over
+   * month reads as "no sample" and the meter surfaces show nothing rather than
+   * last month's number. `cap` is 50, 1000, or 0 = unknown — derived from a
+   * real entitlement answer or from a `remaining` only the subscriber pool
+   * could return, never assumed (see lib/rescuemeter.ts).
+   */
+  rescueMeter: RescueMeter
+  /**
+   * When the miss-screen's cloud-rescue offer was last waved off, 0 = never.
+   * The offer is the quiet line under a failed scan for people the rescue was
+   * NOT available to (signed out, or switched off) — state-driven, never a
+   * status code, per scan-card's contract — and a dismissal keeps it away for
+   * a fortnight (`RESCUE_HINT_QUIET_MS`) rather than for one miss: the free
+   * path is promised no nagging.
+   */
+  rescueHintDismissedAt: number
   /**
    * pokemontcg.io key. NOT user-editable any more — there is no field, and the
    * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
@@ -263,6 +284,8 @@ export const useSettings = create<Settings>()(
       cloudScanRescue: false,
       cloudScanModel: '',
       rescueAutoOnAt: 0,
+      rescueMeter: { month: '', remaining: 0, cap: 0 },
+      rescueHintDismissedAt: 0,
       pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK
@@ -323,6 +346,9 @@ export const useSettings = create<Settings>()(
         // up as `<a href>`s in other people's apps. Rehydration is the door,
         // so it gets the same sanitizer a pasted link does.
         merged.profileLinks = sanitizeSocialLinks(merged.profileLinks) ?? []
+        // Same door, smaller stakes: the meter's digits render as UI text, so
+        // junk collapses to "no sample" and the cap to a value that exists.
+        merged.rescueMeter = sanitizeRescueMeter(merged.rescueMeter)
         if (persisted && typeof (persisted as Partial<Settings>).diagConsentAt !== 'number') {
           merged.diagShare = false
           merged.diagConsentAt = 0

@@ -22,6 +22,7 @@
 
 import { CloudError, freshToken, isSignedIn } from './authsession'
 import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
+import { noteCap } from './rescuemeter'
 import { settings } from './settings'
 
 /** Features one subscription buys. Mirrors FEATURES in `stripe-billing`. */
@@ -79,6 +80,20 @@ export function noteEntitlementSeen(state: SubscriptionState): void {
 }
 
 /**
+ * The other fact an entitlement answer settles: which allowance the rescue
+ * meter's `remaining` counts down from — 1,000 for a subscriber, 50 free.
+ * Only a REAL answer lands here (a row, or a definitive no-row); offline and
+ * server errors say nothing, for the same reason `subscriptionState()`
+ * returns `none` without concluding anything from them. `noteCap` hands back
+ * the same object when the cap already agrees, so this writes only on change.
+ */
+function noteRescueAllowance(active: boolean): void {
+  const config = settings()
+  const next = noteCap(config.rescueMeter, active)
+  if (next !== config.rescueMeter) config.set({ rescueMeter: next })
+}
+
+/**
  * What this account has. Read straight from `entitlements`, which users may
  * SELECT for themselves and nobody may write through PostgREST (migration
  * 0005) — so this is honest without being authoritative.
@@ -95,7 +110,11 @@ export async function subscriptionState(): Promise<SubscriptionState> {
     if (!res.ok) return none
     const rows = (await res.json()) as { expires_at: string | null; source: string }[]
     const row = Array.isArray(rows) ? rows[0] : undefined
-    if (!row) return none
+    if (!row) {
+      // A definitive "never granted" — the free allowance is this account's.
+      noteRescueAllowance(false)
+      return none
+    }
     // A null expiry is a comped grant with no end — see 0005.
     const expiresAt = row.expires_at ? Date.parse(row.expires_at) : Number.POSITIVE_INFINITY
     if (!Number.isFinite(expiresAt) && row.expires_at) return none
@@ -105,6 +124,7 @@ export async function subscriptionState(): Promise<SubscriptionState> {
       source: typeof row.source === 'string' ? row.source : '',
     }
     noteEntitlementSeen(state)
+    noteRescueAllowance(state.active)
     return state
   } catch {
     // Offline is not "unsubscribed" — say nothing rather than the wrong thing.
