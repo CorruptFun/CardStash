@@ -30,6 +30,7 @@
  */
 
 import { pathToFileURL } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? 'https://xvfuyvaehtdxroyzixak.supabase.co').replace(/\/+$/, '')
 const SECRET = process.env.SUPABASE_SECRET
@@ -74,6 +75,35 @@ function row(game, apiId, name, rest = {}) {
     image_url: rest.imageUrl ?? null,
     price_usd: rest.priceUsd ?? null,
   }
+}
+
+/**
+ * A bulk payload as objects, whatever its era's format: a JSON array (the
+ * download_uri shape), or JSON Lines (the jsonl_download_uri shape Scryfall
+ * moved to — one object per line, where a truncated tail line is the
+ * download's problem and not a reason to lose the rest).
+ */
+export function parseBulkText(text) {
+  const t = String(text ?? '').trimStart()
+  if (t.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(t)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+  const out = []
+  for (const line of t.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      out.push(JSON.parse(trimmed))
+    } catch {
+      /* a cut-off final line */
+    }
+  }
+  return out
 }
 
 /** Scryfall default_cards: paper English printings with a picture. */
@@ -187,21 +217,31 @@ async function upsert(rows, dryRun) {
 
 async function ingestMtg(dryRun) {
   const bulk = await getJson(SCRYFALL_BULK, 'scryfall bulk index')
-  // The index is documented as {data:[{type,download_uri,…}]} but the exact
-  // vocabulary is the server's to change — so match generously and, when
-  // nothing matches, FAIL NAMING WHAT WAS THERE: this script's errors are
-  // read in CI logs where the live response cannot be poked at by hand.
+  // The index is documented as {data:[{type,…}]} but the exact vocabulary is
+  // the server's to change — so match generously and, when nothing matches,
+  // FAIL NAMING WHAT WAS THERE: this script's errors are read in CI logs
+  // where the live response cannot be poked at by hand. (That diagnostic is
+  // how the first runs found the User-Agent rule and the move from
+  // download_uri to jsonl_download_uri.)
   const list = Array.isArray(bulk?.data) ? bulk.data : Array.isArray(bulk) ? bulk : []
   const entry =
     list.find((b) => b?.type === 'default_cards') ??
     list.find((b) => /default/i.test(String(b?.type ?? b?.name ?? '')))
-  if (!entry?.download_uri)
+  const uri = entry?.download_uri ?? entry?.jsonl_download_uri
+  if (!uri)
     throw new Error(
       `scryfall: no default_cards bulk entry among [${list.map((b) => b?.type ?? b?.name).join(', ') || 'nothing'}]` +
         (entry ? ` (entry keys: ${Object.keys(entry).join(',')})` : ` (index keys: ${Object.keys(bulk ?? {}).join(',')})`),
     )
-  console.log(`mtg: downloading ${entry.download_uri} (~${Math.round((entry.size ?? 0) / 1e6)} MB)…`)
-  const rows = scryfallToRows(await getJson(entry.download_uri, 'scryfall default_cards'))
+  const size = entry.size ?? entry.compressed_size ?? 0
+  console.log(`mtg: downloading ${uri} (~${Math.round(size / 1e6)} MB)…`)
+  const res = await fetch(uri, { headers: { 'User-Agent': UA } })
+  if (!res.ok) throw new Error(`scryfall default_cards: HTTP ${res.status}`)
+  // The JSONL file may itself be gzip BYTES (transfer decompression only
+  // covers Content-Encoding); sniff the magic rather than trusting a name.
+  let buf = Buffer.from(await res.arrayBuffer())
+  if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf)
+  const rows = scryfallToRows(parseBulkText(buf.toString('utf8')))
   console.log(`mtg: ${rows.length} printings`)
   await upsert(rows, dryRun)
   return rows.length

@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { bundleImport } from './bundle.mjs'
-import { scryfallToRows, dexSetToRows, ygoToRows, isPaperDexSet } from '../../scripts/sync-catalog.mjs'
+import { scryfallToRows, dexSetToRows, ygoToRows, isPaperDexSet, parseBulkText } from '../../scripts/sync-catalog.mjs'
 
 const { artHashFromGray, artHashDistance, ART_HASH_BITS } = await bundleImport('src/lib/vision.ts')
 const {
@@ -123,6 +123,15 @@ test('pickPrintingByArt: only a decisive winner among the SAME card moves the pi
   const searched = pickPrintingByArt(['f'.repeat(64), zeros], 'Pikachu', [near, far])
   assert.equal(searched.hit.apiId, 'a')
   assert.equal(searched.distance, 40)
+})
+
+test('parseBulkText: a JSON array or JSON Lines, and a cut-off tail loses one row, not all', () => {
+  assert.deepEqual(parseBulkText('[{"a":1},{"a":2}]'), [{ a: 1 }, { a: 2 }])
+  assert.deepEqual(parseBulkText('{"a":1}\n{"a":2}\n'), [{ a: 1 }, { a: 2 }])
+  // A truncated final line is the download's problem, not the file's.
+  assert.deepEqual(parseBulkText('{"a":1}\n{"a":2}\n{"a":'), [{ a: 1 }, { a: 2 }])
+  assert.deepEqual(parseBulkText(''), [])
+  assert.deepEqual(parseBulkText('not json at all'), [])
 })
 
 test('scryfallToRows: en paper printings with the Scryfall uuid as api_id', () => {
