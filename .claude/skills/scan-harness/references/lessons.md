@@ -917,3 +917,35 @@ result seems absurd, check this list before writing code.
     cancel unconsumed error bodies, exit explicitly), and Scryfall's CDN
     throttles per connection (~12.7s/image sequential; a pool of six is a
     browser's politeness and divides the wait).
+82. **A gate can measure a feature as absent when its snapshot cannot feed
+    it — and the 7a829a1 merge gate did exactly that.** The gate that
+    landed the art-hash round ran on the 2026-08-15 snapshot, which
+    carries no `images/prints/`; per lesson 81 the art path without
+    stub-served candidates is a measured no-op, so "mtg 23/46, unchanged
+    in all four runs" — written into the merge message as "the MTG
+    problem remains open" — is a statement about the SNAPSHOT, not the
+    pipeline. Lesson 81 measured the same code at mtg 23→30 on the
+    print-bearing snapshot, and production fetches candidate images live,
+    so the shipped app exercises the path the gate could not see. The
+    riftbound +6 showed because the rune-line parser needs no images.
+    Two halves to keep straight: a snapshot is only qualified to gate a
+    change if it can FEED that change — for the art path that means
+    `images/prints/` present (the 2026-08-17 snapshot 3b60035 carries
+    179; check before trusting an unchanged column) — but the regression
+    halves of that same gate (identify, claimed-wrong) were still valid:
+    a no-op snapshot invalidates the improvement claim, never the
+    no-drop claim.
+83. **Compare runners before comparing runs.** a05f528 changed
+    run-matrix.mjs (printing serialised into byGame) on the branch side
+    of the 7a829a1 gate, so baseline and candidate consoles were produced
+    by DIFFERENT code — the baseline's own summary simply lacked
+    printing. The rule that earned its keep: before trusting any
+    before/after, diff the two sides' run-matrix.mjs; if they differ at
+    all, recompute both sides from the raw `cells` array with one
+    function (graded = pass and printing in ok|wrong; claimed = pass and
+    printing wrong and pinned) rather than reading either runner's
+    self-report. From the same session's calibration: two identical runs
+    of one commit produced identical summaries while four cells moved
+    underneath, concentrated in `worst` and `soft-focus` — so
+    reproduce-twice is not ceremony, and identical totals are not proof
+    that nothing moved.
