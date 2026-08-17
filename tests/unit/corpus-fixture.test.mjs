@@ -137,29 +137,25 @@ test('an MTG code resolves whether or not the number is zero-padded', async () =
   }
 })
 
-test('CHARACTERISATION: a zero-padded Pokémon code resolves only unpadded', async () => {
-  // Current behaviour, pinned so a fix is loud rather than silent.
-  //
-  // `searchByCode` hands Pokémon `code.digits` — already stripped of padding —
-  // where it hands MTG both `code.number` and `code.digits`. `pokemonBySetNumber`
-  // then queries "21" and "21" instead of "021" and "21", so a card printed
-  // "021" is unreachable by the code printed on it. 2,953 of the corpus's
-  // 20,964 Pokémon printings (14.1%) carry a padded number.
-  //
-  // When this is fixed, the second assertion flips: delete it and keep the first.
+test('a zero-padded Pokémon code resolves by its printed form', async () => {
+  // Fixed 2026-08-17: `searchByCode` now hands Pokémon the printed form
+  // (`code.number`), and `pokemonBySetNumber` tries its padded and unpadded
+  // spellings — so a card printed "021" is reachable by the code on it.
+  // Corpus gate for the fix: exact 14,696 → 17,611, empty 2,802 → 0,
+  // wrong-card 180 → 83, wrong-printing 16 → 0, zero regressions.
   const padded = await app.searchByCode('pokemon', app.parseCardCode('ME01 021'), {})
   const unpadded = await app.searchByCode('pokemon', app.parseCardCode('ME01 21'), {})
   assert.equal(unpadded.length, 0, 'the card prints "021"; "21" is not its number either')
-  assert.equal(padded.length, 0, 'TODAY: the padded form is never queried, so the card cannot be found by its printed code')
+  assert.ok(padded.length > 0, 'the padded form is queried and the card is reachable by its printed code')
 })
 
-test('CHARACTERISATION: a lettered collector number loses its letters', async () => {
-  // "COL1 SL5" parses to digits "5", and card 5 of that set is a different
-  // card. The lookup answers it — a wrong card, not a miss. Pinned for the
-  // same reason as above.
+test('a lettered collector number keeps its letters', async () => {
+  // "COL1 SL5" once collapsed to digits "5" and answered Forretress — a
+  // wrong card, not a miss. The printed form now travels whole, and the
+  // live catalog confirms col1-SL5 is Ho-Oh (verified 2026-08-17).
   const hits = await app.searchByCode('pokemon', app.parseCardCode('COL1 SL5'), {})
-  assert.equal(hits[0]?.name, 'Forretress', 'TODAY: the alphabetic half of the collector number is dropped')
-  assert.notEqual(hits[0]?.name, 'Ho-Oh')
+  assert.equal(hits[0]?.name, 'Ho-Oh')
+  assert.notEqual(hits[0]?.name, 'Forretress')
 })
 
 test('the ladder drives the real matcher end to end', async () => {

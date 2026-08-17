@@ -48,7 +48,10 @@ export async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, si
     }
     case 'pokemon': {
       if (code.setCode && code.digits) {
-        const hits = await pokemonBySetNumber(code.setCode, code.digits, keys.pokemonKey, signal)
+        // The form as printed, never pre-stripped: pokemonBySetNumber tries
+        // padded and unpadded spellings of what it is handed, and "SL5" must
+        // keep its letters -- digits-only answered a DIFFERENT card there.
+        const hits = await pokemonBySetNumber(code.setCode, code.number ?? code.digits, keys.pokemonKey, signal)
         if (hits.length) return hits
       }
       // "123/198" with no set code: the denominator is the set size, which is
