@@ -74,19 +74,48 @@ for a canned-network stub) and `external` to keep a heavy lazy dependency out
 
 | Test | Covers |
 | ---- | ------ |
+| `analytics.test.mjs` | The analytics contract: events carry counts, never content — the redactor every `track()` call passes through, the hash that groups failing cards without naming them, and the aggregators the diagnostics screen and the ingest read. |
+| `arthash.test.mjs` | The art-hash re-pick's **decision** layer (the pixels are measured in the harness): which arts get compared, and when a win is decisive enough to move an answer. The refusals are the load-bearing cases — a false swap is a manufactured wrong printing at full confidence. |
+| `authsession.test.mjs` | The session surviving its own app being busy: refresh tokens rotate, so the concurrent refreshes one screen-load fires must coalesce — the losers' 400s used to `signOut()` a real returning user. |
+| `binders.test.mjs` | Custom binders as pure rules: quantities clamp to what is still owned, `isDiscoverable` needs both halves (public **and** tradeable), a binder payload is its own `kind`, an opened sealed product never travels, page grouping, and the label URL a printed QR carries. |
+| `card-regions.test.mjs` | `detectCardRegions` — the 2D, explicitly rectangular detector behind page scanning *and* single cards on cluttered backgrounds — pinned on synthetic frames where the truth is known exactly; the real binder photo lives in `tests/harness/photos`. |
 | `cardcode.test.mjs` | `parseCardCode` — reading a printed set/batch number ("BLMR-EN085") out of a search query. The **refusals** are the point: an ordinary card name must never be mistaken for a code. |
 | `cardcode-search.test.mjs` | `ygoBySetCode` against a stubbed YGOPRODeck (exact-match set-code endpoint, region/padding spellings, the printing's own price) and `catalogByCode` over a stubbed catalog. |
+| `cardimage.test.mjs` | The compression contract's pure arithmetic: how an encoded size is reported, and which patches a size-bounded backup carries — the rule that protects a photo from a merge (over-budget rows are omitted **whole**, never gutted). |
+| `cardpatch.test.mjs` | User-supplied card data: the sanitizers between an untrusted document and an `<img src>`, the overlay rules for what a patch may and may not change, and the slug that IS a custom card's identity — changing it renames every custom card anyone owns. |
+| `catalog.test.mjs` | The catalog mirror's pure layer: the row sanitizer a server answer must pass, the `Card` it becomes, and the sync worker's source mappers. The guards get tested harder than the happy path. |
+| `champion-lead.test.mjs` | Riftbound siblings sharing a champion lead ("Ambessa - Respected and Feared" vs "Ambessa - The Wolf"): a lead-only read parks at exactly 0.95 by design, so these pin the evidence that separates one epithet from another. |
+| `chroma-sat.test.mjs` | Foil printed on the NAME itself (Yu-Gi-Oh Ultra/Secret Rares): metal glyphs straddle the bar's own luma, so these pin the chroma-range preprocessing that keeps such names readable. |
+| `cloudsync.test.mjs` | The two pure halves of cloud sync: the AES-GCM envelope (encrypt/decrypt round trip, wrong-passphrase detection) and the device merge — network-free and clock-free, because a merge bug silently eats a user's cards. |
 | `corner.test.mjs` | `parseCornerInfo` per game, `parsePasscode`, `sameYgoCode` — the collector-line parsers, including the fused-fraction reconstruction and its bounds. |
+| `crossgame.test.mjs` | The two guards that stop a Pokémon card coming back as a Yu-Gi-Oh one when the auto sweep compares games at once: the printed collector line as a veto (`collectorLineAllows`) and name-candidate quality. |
+| `crossgame-sweep.test.mjs` | The auto sweep's cross-game failure end to end, against stubbed networks: a game whose API fails to answer must not cede its card to whatever other catalog fuzzy-matched the read. |
+| `ebaycomps.test.mjs` | What counts as an eBay comparable — mostly what gets **thrown away** (a lot of thirty cards, a repack, one seller asking $9,999 for a common), because those make a median wrong invisibly — plus `asSummary` as the door on our own server's answer. |
+| `estimate.test.mjs` | The soft sports estimate: provenance over arithmetic — what is NOT allowed to influence the number (a different year, a slab against a raw copy, the card counting itself) — and the basis sentence as a disclosure, tested beside the figures. |
+| `fetch-retry.test.mjs` | The transport rules behind "it's not in the database… but it is if I come back later": Scryfall's 429 blocks, request spacing, retries, and telling a throttle apart from a genuine miss. |
+| `marketplace.test.mjs` | The marketplace is OFF — written to fail loudly if anyone deletes the flag — plus the sanitizers between the server and anything describing money. (The server's own `MARKETPLACE_ENABLED` switch is only observable by asking the deployed function.) |
+| `messaging.test.mjs` | What a server's message row may become on screen: a bounded body, malformed rows dropped rather than half-rendered, the attached card through `sanitizeSharedCard` — the same door a `#/x?d=…` link uses — and no analytics event that says who was messaged. |
+| `mirror-transport.test.mjs` | The catalog mirror's transport end to end with fetch stubbed at the boundary: the switch respected before any request, server rows sanitized on the way to Cards, a 404 standing the mirror down at once, and flipping the switch clearing the stand-down. |
+| `mtg-treatment.test.mjs` | The frame-treatment vocabulary the printing tie-break trades in: `treatmentOf`, `asTreatment`, `pickByTraits` — and the guard that a re-pick only happens when a print with the SEEN frame exists. |
 | `names.test.mjs` | `nameCandidates` ranking, `nameScore`/`similarity`/`normalizeName` — including split champion names and the lead-segment tolerance. |
 | `orientation.test.mjs` | `looksSideways` and `latinWordCount` — the two pure decisions behind sideways handling. |
 | `pokemon-lang.test.mjs` | `matchPokemon` / `pokemonByCollector` / `pokemonById` against a stubbed network: dead primary, multi-language TCGdex, and the real Japanese size collision (sv4K/sv4M both 66) that must **refuse**. |
+| `pokemon-printing.test.mjs` | "Right card, wrong version," which the matrix cannot see because it grades the name: pokemontcg.io answers stale printings, and these pin printing selection against a deliberately stale stub. |
+| `pokemon-variant.test.mjs` | Pokémon suffix variants ("Tauros" vs "Tauros GX") — a perfect-score match to the wrong card that no threshold can see, arbitrated by the rules-box declaration the pipeline was already reading and throwing away. |
+| `profilelinks.test.mjs` | Social profile links: a stored link can never point somewhere its icon does not claim — handles are stored and URLs rebuilt from a table — plus the forgiving input half (`@rae` and a pasted profile URL mean the same collector). |
+| `psa.test.mjs` | The PSA response normalizer: keys read case-insensitively, missing halves tolerated, so a renamed or absent field degrades to a blank rather than to a wrong card. |
+| `qr.test.mjs` | The QR encoder, held to the only bar that matters: a **real decoder** (`jsqr`) reads back exactly what went in, at every version this app emits. A wrong generator polynomial or a mis-numbered format bit still renders a plausible square, and the artefact is a sticker glued to a binder — the failure would surface weeks later. |
+| `referral.test.mjs` | Referrals: a collector with no handle keeps getting byte-identical share links, a payload is never mistaken for a referral (or vice versa), the first link wins, the server is asked once, and offline is a retry rather than an answer. |
 | `scryfall-corner.test.mjs` | `mtgBySetNumber` — the MTG sole-evidence path. Its *refusals* matter as much as its hits. |
 | `sealed.test.mjs` | `identifySealedText` end to end over a stubbed two-set catalog — the Japanese-pack scenario where only the brand word and the printed set code survive OCR. |
 | `sealedmatch.test.mjs` | The pure scoring rules: code-prefix stripping, set-code qualification, score ordering against sealed.ts's 0.72 threshold. |
-| `tcgcsv-groups.test.mjs` | The group-index merge (primary + "Pokemon Japan" categories) with the network stubbed. |
-| `qr.test.mjs` | The QR encoder, held to the only bar that matters: a **real decoder** (`jsqr`) reads back exactly what went in, at every version this app emits. A wrong generator polynomial or a mis-numbered format bit still renders a plausible square, and the artefact is a sticker glued to a binder — the failure would surface weeks later. |
-| `binders.test.mjs` | Binder names (whatever gets pasted into the field ends up printable), ids (no glyph a person mistypes off paper), the label URL (a base carrying `?via=` or a stale route must not end up in it), `sanitizeBinder`, page grouping, and the **vault merge** — a rename on a phone must survive a laptop that has not synced. |
+| `slab.test.mjs` | The slab label parser, mostly refusals: missing a slab costs a scan, but inventing one puts a grade on a raw card and misprices it by an order of magnitude. |
+| `sportsparse.test.mjs` | The sports parser, whose risk no TCG matcher has: with no catalog, a bad read invents a card rather than picking a wrong one — so as much about what it REFUSES to claim (a stat fraction is not a serial, a team is not a player) as about what it reads. |
+| `square-billing.test.mjs` | **Orphaned by the Square retirement (2026-08-17):** it imports `supabase/functions/square-billing/logic.ts`, which commit `603e2b8` deleted, so it now fails to load. Its live sibling is `stripe-billing.test.mjs`; this file is pending removal. |
+| `stripe-billing.test.mjs` | The Stripe billing webhook's pure decisions: only Stripe can grant an entitlement, and a grant lasts exactly as long as was paid for — signature vectors computed with node's own HMAC, never with the function under test. |
+| `stripe-escrow.test.mjs` | The escrow function's pure decisions: only Stripe can move an order, and the money splits the way we say. Which state transitions are LEGAL lives in migration 0006, proven by `tests/harness/escrow-rls.mjs` — deliberately no second copy here. |
 | `stubs.test.mjs` | That the **harness's** stub APIs honour each real service's query semantics. Skips when the fixture snapshot isn't present. A stub that answers wrong would grade the pipeline against fiction. |
+| `tcgcsv-groups.test.mjs` | The group-index merge (primary + "Pokemon Japan" categories) with the network stubbed. |
 
 Stub modules live in `tests/unit/stubs/`.
 
@@ -138,7 +167,7 @@ git fetch origin harness-fixtures
 mkdir -p tests/harness/fixtures
 git archive origin/harness-fixtures | tar -x -C tests/harness/fixtures
 
-npm run test:scan                     # everything (~5 min, ~228 cells)
+npm run test:scan                     # everything (~5 min, 282 cells)
 npm run test:lowlight                 # harsh low light + 3-frame stack
 
 node tests/harness/run-matrix.mjs \
@@ -192,9 +221,12 @@ force-pushes `harness-fixtures`, and a photograph cannot be regenerated.
 
 Two results worth carrying in your head before you quote a number:
 
-1. The standard matrix reports **zero** wrong cards across 282 cells. Two
-   ordinary clips produced **10 wrong in 40 identifications**. A battery of
-   stills cannot bound the wrong-card rate of a live scanner.
+1. In the round that produced the clips numbers, the standard matrix reported
+   **zero** wrong cards across its 282 cells while two ordinary clips produced
+   **10 wrong in 40 identifications**. A battery of stills cannot bound the
+   wrong-card rate of a live scanner. (The current baseline of record and the
+   rescue-assisted numbers live in [scanning.md](scanning.md) and the
+   scan-harness skill's lessons.)
 2. Consecutive frames disagree. In one burst, frames 0 and 1 read "Krookodile
    ex" and identified correctly; frame 2, 33ms later, read "Krookodile" and
    matched a real, different, far cheaper card at score 1.0. The scanner commits

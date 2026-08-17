@@ -551,10 +551,12 @@ card-not-present, shorter than posting a card and inspecting it; the Payouts API
 is read-only *reporting* about money reaching your **own** bank, not a way to
 pay a third party; and `app_fee_money`, its only marketplace primitive, requires
 the seller to already be a Square merchant and pays them **instantly**, which is
-the opposite of escrow. Square keeps the subscription (`square-billing` →
-`entitlements`). The two providers share no code and no table, which is the same
-separation `square-billing` already argues for — a provider belongs in exactly
-one file, and the table is the interface.
+the opposite of escrow. At decision time Square kept the subscription
+(`square-billing` → `entitlements`); the subscription moved to `stripe-billing`
+on 2026-08-15, and Square was retired outright on 2026-08-17 — no subscribers
+to migrate, function and source deleted. The swap cost nothing in `src/`
+because the two providers shared no code and no table — a provider belongs in
+exactly one file, and the table (`entitlements`) is the interface.
 
 **Why Stripe specifically, and not us.** Holding a buyer's funds and later
 disbursing them to a seller is money transmission in most US states unless a
