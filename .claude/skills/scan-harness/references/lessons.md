@@ -1037,3 +1037,26 @@ result seems absurd, check this list before writing code.
     snapshot fingerprint (stubCalls per host) when in doubt about WHICH
     snapshot an anchor was measured on: 499 scryfall stub calls = the
     print-less set, 444 = print-bearing.
+88. **The matcher layer now has its own corpus-scale harness — and a stub's
+    model is itself a measurement subject.** tests/corpus/ drives every
+    printing's name and printed code through the real matching code
+    (~170k printings, ~10s, zero network while grading; adversarially
+    verified bit-for-bit reproducible). First full run: identity
+    self-match 100% everywhere; the hand-fixed classes hold at scale;
+    and it found in one evening what field reports had surfaced one card
+    at a time — the Pokémon printed-number fix (2,802 unreachable codes
+    → 0, wrong cards 180 → 83, landed 9411899 with the corpus as its
+    gate), the GX↔ex variant-sibling hole (identify.ts's variant check
+    is gated OFF when the answer already carries a suffix; 75 cards at
+    0.875–0.947 with no downstream rescue — needs the camera matrix),
+    MTG's digit-leading set codes (10E/4ED, 6,753 printings,
+    PREFIX=[A-Z]…), and YGO's rarity-blind code comparator (1,348
+    printings; product decision before code). The boundary that must not
+    be forgotten: the Scryfall fuzzy stub was PROVEN divergent from live
+    in both directions (live is word-set based — resolves most
+    single-glyph typos, has no substring tier), so the MTG glyph-rung
+    name numbers measure the stub, not the matcher; the stub's docstring
+    now carries the verified boundary instead of the refuted
+    "conservative" claim. When a sweep needs a model of an upstream
+    resolver, the model's fidelity is a finding to verify with live
+    probes, never an assumption to write in a comment.
