@@ -88,8 +88,32 @@ const CACHE_PREFIX = 'ebay-comps-'
 
 const REQUEST_TIMEOUT_MS = 12_000
 
+/**
+ * Two switches, and the second is the reason this one exists.
+ *
+ * `CLOUD_AVAILABLE` is true in every deployed build — the project URL and
+ * publishable key are compiled in — so it alone would render "Check eBay
+ * prices" on a build whose `ebay-comps` function is not deployed, or is
+ * deployed without an eBay keyset. That is a button that can only ever fail,
+ * which is worse than no button: it reads as a broken app rather than an
+ * absent feature.
+ *
+ * So the client half is off until a build says otherwise, exactly as
+ * `VITE_MARKETPLACE` gates the purchase UI (decision 2a). The FUNCTION is the
+ * real switch — it answers 503 with no credentials whatever the client
+ * believes — and this one only stops us offering something the server would
+ * refuse. Turn them on server first: deploy the function with
+ * `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`, then build with
+ * `VITE_EBAY_COMPS=on`.
+ *
+ * The soft estimate is NOT gated by any of this. It is local arithmetic over
+ * the user's own rows, it needs no server, and it is the whole answer in a
+ * build like today's.
+ */
+const COMPS_ON = ((import.meta.env ?? {}) as Record<string, string | undefined>).VITE_EBAY_COMPS === 'on'
+
 /** Can this build price a sports card at all? */
-export const COMPS_AVAILABLE = CLOUD_AVAILABLE
+export const COMPS_AVAILABLE = COMPS_ON && CLOUD_AVAILABLE
 
 interface CachedComp {
   summary: CompSummary | null

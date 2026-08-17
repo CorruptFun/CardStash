@@ -130,12 +130,23 @@ Five properties are load-bearing:
 | It is called anonymously | Publishable key, `verify_jwt = false`, no session token. The free path is signed out, and what card someone is pricing should not be tied to a user id (decision 20's rule). |
 | A thin sample is refused | `MIN_COMPARABLES` is 3, after lots/repacks/reprints are dropped by title and outliers by a five-fold band around the median. Below that the answer is "too few listings", not a number. |
 
-**Turning it on.** Set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` on the
-function (an eBay developer account, production keyset — the Browse API needs
-no special approval). With either missing, the function answers 503 and the app
-shows the link alone, exactly as before. Optional: `EBAY_MARKETPLACE`
-(`EBAY_US`), `EBAY_CATEGORY` (`261328`, "Sports Trading Card Singles" — the
-scoping that keeps a player name from returning jerseys and posters).
+**Turning it on — two switches, server first**, the same shape as the
+marketplace (decision 2a):
+
+1. Deploy `ebay-comps` with `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` (an eBay
+   developer account, production keyset — the Browse API needs no special
+   approval). Missing either, it answers 503. **This is the real switch.**
+2. Build with `VITE_EBAY_COMPS=on`. This only hides the button, which is all a
+   client can do — but without it a deployed build would offer a price check
+   against a function that is not there, and a button that can only fail reads
+   as a broken app rather than an absent feature.
+
+Optional: `EBAY_MARKETPLACE` (`EBAY_US`), `EBAY_CATEGORY` (`261328`, "Sports
+Trading Card Singles" — the scoping that keeps a player name from returning
+jerseys and posters).
+
+**It ships off**, so today the estimate below is the whole sports answer and
+the eBay *link* is the manual check, exactly as before 17a.
 
 ### The soft estimate (`estimate.ts`)
 

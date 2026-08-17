@@ -536,7 +536,8 @@ function CardSheet() {
           {card.game === 'sports' && (
             <>
               <p className="printpick__hint">
-                No catalog prices sports cards. Check what copies are listed for, then set what yours is worth.
+                No catalog prices sports cards, so what a copy is worth is yours to set. The eBay link below is what
+                the hobby actually prices on.
               </p>
               <PriceCheck card={card} />
             </>

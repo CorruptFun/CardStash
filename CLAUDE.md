@@ -507,7 +507,10 @@ user taps "Use $X"; nothing is fetched until tapped, which is why it needs no
 settings switch; it is low/median/high with the sample size, never one figure;
 and under three surviving listings the answer is "too few", not a number. The
 call is anonymous (publishable key, `verify_jwt = false`) because the free path
-is signed out. Dormant without `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`.
+is signed out. **It ships OFF and there are two switches**, marketplace-style:
+the function refuses without `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` (the real
+one), and `VITE_EBAY_COMPS=on` reveals the button (so we never offer a check
+the server would refuse). Server first.
 
 Beside the comp is a **soft estimate** (`estimate.ts`, decision 17b) for when
 there is no comp — offline, no keyset, or a promo nobody lists. It is a summary

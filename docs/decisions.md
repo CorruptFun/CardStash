@@ -1293,6 +1293,12 @@ to attach to a user id.
   a few thousand calls a day across every user — the PSA arithmetic again.
   Caching answers it: an hour in the isolate, a day on the device, three days
   for a "too few" answer, and a six-hour stand-down on a 429.
+- **It ships off, with two switches, server first.** The function refuses
+  without an eBay keyset — that is the real one; `VITE_EBAY_COMPS=on` reveals
+  the button, which is all a client can do, and stops a deployed build offering
+  a check against a function that is not deployed. A button that can only fail
+  reads as a broken app rather than an absent feature. The soft estimate (17b)
+  is not gated by either: it is local arithmetic and needs no server.
 - **An unauthenticated function can be called by anyone who reads the bundle.**
   Accepted, and bounded rather than hidden: no money, no user data, a capped
   and normalised query, cached answers. The worst case is that price checks go
