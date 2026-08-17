@@ -494,15 +494,15 @@ always beats a fetched one**. Two switches: `cardSourceLookup` (on) and
 `catalogmatch.ts`, migration `0022`, decision 28): our own copy of Scryfall /
 TCGdex / YGOPRODeck rows, consulted only AFTER a game's own API failed or
 answered empty — never first — under the same `cardSourceLookup` switch and
-the same anon-key rule. It stores each game's own api-id namespace so mirror
-answers dedupe with live ones, synthesizes cards **without prices**
-(`refreshCard` fills real ones), and may carry `art_hash` — the 256-bit
-artwork fingerprint (`cardArtHash` in `vision.ts`) the sync worker
-(`scripts/sync-catalog.mjs`, service key, the table's only writer) computes
-with the same bundled code the client runs. `pickPrintingByArt` uses it in
-identify's tie-break seam to tell alternate arts of an already-named card
-apart; art may never propose a different card, and a read collector line
-always outranks it. `npm run test:mirror` proves the grants.
+the same anon-key rule, behind code lookup, name search, the match layer and
+the variants picker alike. It stores each game's own api-id namespace so
+mirror answers dedupe with live ones and synthesizes cards **without prices**
+(`refreshCard` fills real ones); rows come only from the sync worker
+(`scripts/sync-catalog.mjs`, service key, the table's only writer). The
+schema also reserves an `art_hash` column for a future artwork fingerprint —
+unpopulated, unread by any client code, its format deliberately not yet a
+contract (the scan pipeline's own printing work is `arthash.ts`, a separate
+system). `npm run test:mirror` proves the grants.
 
 ## Sports cards have no catalog
 

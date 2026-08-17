@@ -14,16 +14,16 @@
 --     APIs use — so a card answered from the mirror dedupes with, and later
 --     refreshes through, the real source (`${game}:${apiId}` is the contract,
 --     as everywhere).
---   * ARTWORK. No upstream API can say which PRINTING is in a camera frame.
---     Each row may carry `art_hash` — a 256-bit gradient fingerprint of the
---     artwork window, computed by scripts/sync-catalog.mjs with the SAME
---     `cardArtHash` (src/lib/vision.ts) the capture side runs, which is the
---     only reason two hashes are comparable at all. The client uses it to
---     tell alternate arts of one card apart, under thresholds measured on
---     real images (catalogmatch.ts): different cards never came closer than
---     95 bits on the harness fixture set; the same art re-sampled stayed
---     within 72. Re-run that measurement (the method is in the repo history)
---     before recalibrating.
+--   * VARIANTS. The printings-of lookup backs the variants picker when a
+--     game's own printings API failed or answered empty — same posture, the
+--     mirror behind the live source, never beside it.
+--
+-- The `art_hash` column below is RESERVED and unpopulated this round: an
+-- artwork-fingerprint slot whose format (what is hashed, how, what distances
+-- mean) is deliberately not yet a contract. The sync worker does not write
+-- it and nothing client-side reads it; the column and its shape constraint
+-- exist so the reservation is explicit rather than re-litigated by the next
+-- schema change.
 --
 -- ONE TABLE, deliberately. A `catalog_cards` / `catalog_printings` split was
 -- considered and rejected: every source ships the name ON the printing, every
@@ -93,7 +93,12 @@ create table if not exists public.catalog_printings (
    * "price when everything else failed" needs history to have started.
    */
   price_usd numeric(10, 2),
-  /** 64 lowercase hex chars = 256 bits, or null until the hash pass runs. */
+  /**
+   * RESERVED, unpopulated. 64 lowercase hex chars when it is ever written —
+   * the fingerprint format is not yet a contract, so no writer exists and no
+   * client reads it (see the header). The shape constraint stands guard over
+   * the reservation, not over live data.
+   */
   art_hash text,
   updated_at timestamptz not null default now(),
   constraint catalog_api_id_len check (length(api_id) between 1 and 120),
@@ -217,9 +222,9 @@ as $$
 $$;
 
 /**
- * Every mirrored printing of one card, for the artwork tie-break: the client
- * hashes the frame it captured and compares against these rows' art_hash.
- * Grouped by slug — the same "same card" key the app's variant cache uses.
+ * Every mirrored printing of one card — the fallback behind the variants
+ * picker when a game's own printings API fails or has nothing. Grouped by
+ * slug — the same "same card" key the app's variant cache uses.
  */
 create or replace function public.catalog_printings_of(p_game text, p_name text)
 returns table (
@@ -261,10 +266,9 @@ grant execute on function public.catalog_printings_of(text, text)  to anon, auth
 /* ------------------------------------------- the diagnostics whitelist, again */
 
 -- Same drill as 0013: ingest_events() buckets unknown names as 'other', so
--- each feature teaches the CASE list its counters. Two new here, both
--- content-free — how often the mirror answered where an API could not, and
--- how often the artwork tie-break settled a printing. No card name, no query,
--- no hash ever reaches this function.
+-- each feature teaches the CASE list its counters. One new here, content-free
+-- — how often the mirror answered where an API could not. No card name and no
+-- query ever reaches this function.
 --
 -- Also repairs an omission: `message_sent` shipped with messaging (0019,
 -- lib/messaging.ts tracks it) but no migration taught the list, so it has
@@ -331,8 +335,7 @@ begin
           'backup_restore','search','deck_created','ai_builder_run',
           'price_refresh','friend_added','social_share','trade_update',
           'want_update','sync_run','message_sent','card_patch','card_source',
-          'card_source_submit','card_source_flag','catalog_fallback',
-          'catalog_art_pick','error'
+          'card_source_submit','card_source_flag','catalog_fallback','error'
         ) then ev->>'t'
         else 'other'
       end as event,

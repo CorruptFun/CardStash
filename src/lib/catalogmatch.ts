@@ -1,14 +1,13 @@
 /**
  * The pure half of the catalog mirror (see catalog.ts for the transport and
- * the rules): shaping a server row into an app `Card`, and choosing between
- * printings by artwork fingerprint. Kept free of settings/db/network imports
- * so node unit tests exercise every decision in this file directly.
+ * the rules): shaping a server row into an app `Card`. Kept free of
+ * settings/db/network imports so node unit tests exercise every decision in
+ * this file directly.
  */
 
 import { mergePrices } from './prices'
 import type { Card, Game } from './types'
-import { ebaySoldLink, normalizeName, tcgplayerSearchLink } from './util'
-import { ART_HASH_BITS, artHashDistance } from './vision'
+import { ebaySoldLink, tcgplayerSearchLink } from './util'
 
 /**
  * The games the mirror carries — the three with healthy bulk sources
@@ -22,7 +21,16 @@ export function isCatalogGame(game: string): game is CatalogGame {
   return (CATALOG_GAMES as readonly string[]).includes(game)
 }
 
-/** One sanitized printing row from the mirror. */
+/**
+ * One sanitized printing row from the mirror.
+ *
+ * The server row also carries an `art_hash` column (see migration 0022): a
+ * RESERVED, unpopulated slot for a future artwork fingerprint. Nothing
+ * client-side reads it this round — the hash-format contract (what is hashed,
+ * how, and what distances mean) is deliberately still open, and parsing a
+ * format that is not yet a contract would quietly close it. Don't add the
+ * field back here without settling that question first.
+ */
 export interface CatalogHit {
   game: CatalogGame
   apiId: string
@@ -31,7 +39,6 @@ export interface CatalogHit {
   number?: string
   rarity?: string
   imageUrl?: string
-  artHash?: string
 }
 
 const bounded = (value: unknown, max: number): string | undefined => {
@@ -53,7 +60,6 @@ export function sanitizeCatalogHit(row: unknown): CatalogHit | null {
   const name = bounded(r.name, 200)
   if (!apiId || !name) return null
   const imageUrl = bounded(r.image_url, 500)
-  const artHash = bounded(r.art_hash, ART_HASH_BITS / 4)
   return {
     game,
     apiId,
@@ -64,7 +70,6 @@ export function sanitizeCatalogHit(row: unknown): CatalogHit | null {
     // The value becomes an <img src>; anything but https is dropped, exactly
     // as httpsImage does for shared binders.
     imageUrl: imageUrl?.startsWith('https://') ? imageUrl : undefined,
-    artHash: artHash && new RegExp(`^[0-9a-f]{${ART_HASH_BITS / 4}}$`).test(artHash) ? artHash : undefined,
   }
 }
 
@@ -97,57 +102,3 @@ export function cardFromCatalog(hit: CatalogHit): Card {
   }
 }
 
-/**
- * Accept a printing swap only under this distance. Measured on the harness
- * fixture images through the real `cardArtHash`, twice over. Catalog vs
- * catalog (26 scans, all pairwise): different cards bottom out at 95 bits,
- * median 126. Capture vs catalog under the harness camera model
- * (glare/soft-focus/foil/low-light composed onto the card, crop errors up to
- * 3% injected, the ±3% offset search of `captureArtHashes` applied): the
- * same art recovers to p90 ≤ 78 with a max of 87, while the different-card
- * floor WITH the same search holds at 96. 80 accepts the measured body of
- * genuine matches and sits under everything that was ever a different
- * picture; the few same-art captures past it miss safely. Re-run both
- * measurements before moving either number.
- */
-export const ART_ACCEPT_DISTANCE = 80
-/**
- * And only when the winner beats the runner-up by this much. Inside the
- * margin, two printings are indistinguishable at this hash's resolution
- * (reprints share art exactly), and swapping on a near-tie would let noise
- * pick which — the honest answer is to leave the name match's pick alone.
- * 80 + 16 lands exactly on the measured different-card floor (96): an
- * alternate art can never be the decisive runner-up to itself.
- */
-export const ART_PICK_MARGIN = 16
-
-/**
- * Choose between printings of an ALREADY-IDENTIFIED card by artwork
- * distance. This mirrors the cloud read's treatment rule (gemini.ts): art
- * similarity may pick among printings of the card, never propose a different
- * card — every candidate whose name is not the card's own is dropped before
- * distances are even computed. `captureHashes` is the offset-search
- * neighborhood from `captureArtHashes`; a candidate's distance is the best
- * alignment's. Returns null unless one candidate wins decisively; null
- * means "keep what the name match picked".
- */
-export function pickPrintingByArt(
-  captureHashes: readonly string[],
-  cardName: string,
-  candidates: CatalogHit[],
-): { hit: CatalogHit; distance: number } | null {
-  if (!captureHashes.length) return null
-  const wanted = normalizeName(cardName)
-  const distance = (artHash: string) => Math.min(...captureHashes.map((hash) => artHashDistance(hash, artHash)))
-  const ranked = candidates
-    .filter((hit) => hit.artHash && normalizeName(hit.name) === wanted)
-    .map((hit) => ({ hit, distance: distance(hit.artHash!) }))
-    .sort((a, b) => a.distance - b.distance)
-  // One candidate is not a choice — with nothing to beat, "decisive" cannot
-  // be established and the swap would rest on the absolute threshold alone.
-  if (ranked.length < 2) return null
-  const [best, second] = ranked
-  if (best.distance > ART_ACCEPT_DISTANCE) return null
-  if (second.distance - best.distance < ART_PICK_MARGIN) return null
-  return best
-}

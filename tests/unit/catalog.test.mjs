@@ -1,7 +1,6 @@
 /**
- * The catalog mirror's pure layer: the artwork fingerprint and its distance,
- * the row sanitizer a server answer must pass, the Card it becomes, the
- * art-based printing picker's guards, and the sync worker's source mappers.
+ * The catalog mirror's pure layer: the row sanitizer a server answer must
+ * pass, the Card it becomes, and the sync worker's source mappers.
  * Everything here is what stands between a mirror row and a wrong card on a
  * user's screen, so the guards get tested harder than the happy path.
  */
@@ -11,50 +10,7 @@ import assert from 'node:assert/strict'
 import { bundleImport } from './bundle.mjs'
 import { scryfallToRows, dexSetToRows, ygoToRows, isPaperDexSet, parseBulkLine } from '../../scripts/sync-catalog.mjs'
 
-const { artHashFromGray, artHashDistance, ART_HASH_BITS } = await bundleImport('src/lib/vision.ts')
-const {
-  ART_ACCEPT_DISTANCE,
-  ART_PICK_MARGIN,
-  cardFromCatalog,
-  pickPrintingByArt,
-  sanitizeCatalogHit,
-} = await bundleImport('src/lib/catalogmatch.ts')
-
-/** A 17×16 luma grid from a per-cell function. */
-const grid = (fn) => Array.from({ length: 17 * 16 }, (_, i) => fn(i % 17, (i / 17) | 0))
-
-const zeros = '0'.repeat(64)
-/** Flip `4 * chars` bits off the all-zero hash. */
-const flipped = (chars) => 'f'.repeat(chars) + '0'.repeat(64 - chars)
-
-test('artHashFromGray: 256 bits of horizontal gradient, deterministic', () => {
-  assert.equal(ART_HASH_BITS, 256)
-  const ramp = grid((x) => x * 10)
-  const hash = artHashFromGray(ramp)
-  assert.equal(hash.length, 64)
-  assert.equal(hash, artHashFromGray(ramp))
-  // A strictly rising row never has gray[x] > gray[x+1]: all zero bits.
-  assert.equal(hash, zeros)
-  // Strictly falling: every comparison true, all one bits.
-  assert.equal(artHashFromGray(grid((x) => 200 - x * 10)), 'f'.repeat(64))
-  // Brightness offset must not move a single bit — the reason this hash is
-  // gradient-only (capture lighting differs from catalog scans wholesale).
-  const scene = grid((x, y) => ((x * 31 + y * 17) % 13) * 9)
-  const brighter = grid((x, y) => ((x * 31 + y * 17) % 13) * 9 + 40)
-  assert.equal(artHashFromGray(scene), artHashFromGray(brighter))
-})
-
-test('artHashDistance: counts bits, and malformed answers the maximum', () => {
-  assert.equal(artHashDistance(zeros, zeros), 0)
-  assert.equal(artHashDistance(zeros, '1' + zeros.slice(1)), 1)
-  assert.equal(artHashDistance(zeros, flipped(10)), 40)
-  assert.equal(artHashDistance(zeros, 'f'.repeat(64)), 256)
-  // Wrong length or non-hex is the MAXIMUM distance, not 128: a malformed
-  // hash must never outrank a genuine candidate.
-  assert.equal(artHashDistance(zeros, zeros.slice(1)), 256)
-  assert.equal(artHashDistance('', zeros), 256)
-  assert.equal(artHashDistance(zeros, 'g' + zeros.slice(1)), 256)
-})
+const { cardFromCatalog, sanitizeCatalogHit } = await bundleImport('src/lib/catalogmatch.ts')
 
 test('sanitizeCatalogHit: bounds every field and drops what cannot be trusted', () => {
   const good = sanitizeCatalogHit({
@@ -65,12 +21,10 @@ test('sanitizeCatalogHit: bounds every field and drops what cannot be trusted', 
     collector_number: '0321',
     rarity: 'uncommon',
     image_url: 'https://cards.example/bolt.jpg',
-    art_hash: zeros,
   })
   assert.equal(good.game, 'mtg')
   assert.equal(good.apiId, 'abc-123')
   assert.equal(good.setCode, 'MSH')
-  assert.equal(good.artHash, zeros)
 
   // The mirror serves three games; anything else is not a mirror row.
   assert.equal(sanitizeCatalogHit({ game: 'riftbound', api_id: 'x', name: 'Jinx' }), null)
@@ -81,9 +35,9 @@ test('sanitizeCatalogHit: bounds every field and drops what cannot be trusted', 
     sanitizeCatalogHit({ game: 'mtg', api_id: 'x', name: 'B', image_url: 'javascript:alert(1)' }).imageUrl,
     undefined,
   )
-  // A hash that is not exactly 64 lowercase hex chars is no hash at all.
-  assert.equal(sanitizeCatalogHit({ game: 'mtg', api_id: 'x', name: 'B', art_hash: 'F'.repeat(64) }).artHash, undefined)
-  assert.equal(sanitizeCatalogHit({ game: 'mtg', api_id: 'x', name: 'B', art_hash: 'abc' }).artHash, undefined)
+  // The server row's art_hash is RESERVED and deliberately not parsed: the
+  // fingerprint format is not yet a contract (see catalogmatch.ts).
+  assert.equal('artHash' in sanitizeCatalogHit({ game: 'mtg', api_id: 'x', name: 'B', art_hash: '0'.repeat(64) }), false)
   assert.equal(sanitizeCatalogHit(null), null)
 })
 
@@ -94,35 +48,6 @@ test('cardFromCatalog: the app id contract, and deliberately no prices', () => {
   assert.equal(card.prices.best, null)
   assert.equal(card.prices.entries.length, 0)
   assert.ok(card.links.tcgplayer)
-})
-
-test('pickPrintingByArt: only a decisive winner among the SAME card moves the pick', () => {
-  const hit = (apiId, artHash, name = 'Pikachu') => ({ game: 'pokemon', apiId, name, artHash })
-  const near = hit('a', flipped(10)) // distance 40
-  const far = hit('b', flipped(30)) // distance 120
-
-  const picked = pickPrintingByArt([zeros], 'Pikachu', [near, far])
-  assert.equal(picked.hit.apiId, 'a')
-  assert.equal(picked.distance, 40)
-
-  // One candidate is not a choice.
-  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [near]), null)
-  // Inside the margin, printings are indistinguishable — keep the name match's pick.
-  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [near, hit('c', flipped(12))]), null)
-  assert.ok(ART_PICK_MARGIN > 48 - 40)
-  // Past the accept threshold nothing matches, however clear the margin.
-  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [hit('d', flipped(21)), far]), null)
-  assert.ok(21 * 4 > ART_ACCEPT_DISTANCE)
-  // A different card's art may sit at distance zero and still never be
-  // proposed: art chooses BETWEEN printings, never a different card.
-  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [hit('e', zeros, 'Raichu'), near]), null)
-  // No capture hashes, no pick.
-  assert.equal(pickPrintingByArt([], 'Pikachu', [near, far]), null)
-  // The neighborhood is a search: a candidate's distance is its best
-  // alignment's, so a junk direct crop must not bury an aligned offset.
-  const searched = pickPrintingByArt(['f'.repeat(64), zeros], 'Pikachu', [near, far])
-  assert.equal(searched.hit.apiId, 'a')
-  assert.equal(searched.distance, 40)
 })
 
 test('parseBulkLine: JSONL rows and array-element lines, one bad line loses itself only', () => {

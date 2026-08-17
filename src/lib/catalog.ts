@@ -5,14 +5,13 @@
  * WHY THIS EXISTS. Every card here normally comes straight from Scryfall,
  * TCGdex/pokemontcg.io or YGOPRODeck, and that stays true — the mirror is a
  * FALLBACK, never the first answer. But those APIs have bad days (the app
- * already carries a TCGdex fallback because pokemontcg.io is dying), and none
- * of them can answer one question at all: which PRINTING of a card is in the
- * frame, when the collector line never got read. The mirror answers both — it
- * serves rows when an API is down or empty, and it carries an artwork
- * fingerprint (`art_hash`, computed by the sync worker with the same
- * `cardArtHash` the capture side uses) so a scan can tell alternate arts of
- * one card apart. Schema, grants and the ingestion contract: migration 0022;
- * the worker: scripts/sync-catalog.mjs; the pure logic: catalogmatch.ts.
+ * already carries a TCGdex fallback because pokemontcg.io is dying), so the
+ * mirror serves rows when an API is down or answered empty: code lookups,
+ * name search, the match layer and the variants picker all fall back here.
+ * Schema, grants and the ingestion contract: migration 0022; the worker:
+ * scripts/sync-catalog.mjs; the pure logic: catalogmatch.ts. (The schema
+ * also reserves an `art_hash` column for a future artwork fingerprint;
+ * nothing here reads it — see catalogmatch.ts.)
  *
  * THE RULES, inherited from the shared card index (cardsource.ts) because the
  * privacy shape is identical:
@@ -38,17 +37,10 @@
 
 import { track } from './analytics'
 import { CloudError, readError } from './authsession'
-import {
-  type CatalogHit,
-  cardFromCatalog,
-  isCatalogGame,
-  pickPrintingByArt,
-  sanitizeCatalogHit,
-} from './catalogmatch'
+import { type CatalogHit, cardFromCatalog, isCatalogGame, sanitizeCatalogHit } from './catalogmatch'
 import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
 import { settings } from './settings'
 import type { Card, Game } from './types'
-import { captureArtHashes } from './vision'
 
 /** See cardsource.ts: two in a row is a server, not a tunnel. */
 const FAILURES_BEFORE_STANDDOWN = 2
@@ -71,7 +63,13 @@ export function mirrorLookupOn(): boolean {
   return CLOUD_AVAILABLE && settings().cardSourceLookup && !stoodDown
 }
 
-/** The scan pipeline's leash: a fallback that outlives the scan is a miss. */
+/**
+ * The leash: a fallback that outlives what it was falling back FOR is a miss.
+ * The scan pipeline reaches the mirror through matchGame/searchByCode, so
+ * every mirror ask is time-bounded here rather than at one call site — past
+ * the leash the ask answers empty while the request itself runs on, so the
+ * stand-down bookkeeping still settles on what the server actually did.
+ */
 const CATALOG_TIMEOUT_MS = 3_500
 
 async function anonRpc<T>(fn: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -95,14 +93,25 @@ async function anonRpc<T>(fn: string, body: unknown, signal?: AbortSignal): Prom
 }
 
 async function hits(fn: string, body: unknown, signal?: AbortSignal): Promise<CatalogHit[]> {
+  const ask = (async () => {
+    try {
+      const rows = await anonRpc<unknown[]>(fn, body, signal)
+      noteSuccess()
+      return (Array.isArray(rows) ? rows : []).map(sanitizeCatalogHit).filter((hit): hit is CatalogHit => hit !== null)
+    } catch (err) {
+      if (signal?.aborted) throw err
+      noteFailure(err instanceof MissingFunction)
+      return [] as CatalogHit[]
+    }
+  })()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const leash = new Promise<CatalogHit[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), CATALOG_TIMEOUT_MS)
+  })
   try {
-    const rows = await anonRpc<unknown[]>(fn, body, signal)
-    noteSuccess()
-    return (Array.isArray(rows) ? rows : []).map(sanitizeCatalogHit).filter((hit): hit is CatalogHit => hit !== null)
-  } catch (err) {
-    if (signal?.aborted) throw err
-    noteFailure(err instanceof MissingFunction)
-    return []
+    return await Promise.race([ask, leash])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -128,35 +137,6 @@ export async function mirrorByName(game: Game, query: string, signal?: AbortSign
   const found = await hits('catalog_by_name', { p_game: game, p_query: query.trim() }, signal)
   if (found.length) track('catalog_fallback', { game, how: 'name' })
   return found.map(cardFromCatalog)
-}
-
-/**
- * Choose between printings of an identified card by artwork, when nothing
- * printed pinned the edition. Sits in identify.ts BESIDE the cloud printing
- * tie-break, under the same `!refined?.read.number` gate — a read collector
- * number always outranks art similarity. Thresholds and their measurement:
- * catalogmatch.ts. Returns null for "keep the name match's pick"; every
- * failure is indistinguishable from that on purpose.
- */
-export async function artPrintingTiebreak(card: Card, canvas: HTMLCanvasElement, signal?: AbortSignal): Promise<Card | null> {
-  if (!mirrorLookupOn() || !isCatalogGame(card.game)) return null
-  try {
-    // The offset-search neighborhood, not one crop: refinement is not
-    // 1%-exact and one misaligned hash reads as a different card (see
-    // captureArtHashes). The picker takes each candidate's best alignment.
-    const captureHashes = captureArtHashes(canvas, canvas.width, canvas.height)
-    const leash = new Promise<CatalogHit[]>((resolve) => setTimeout(() => resolve([]), CATALOG_TIMEOUT_MS))
-    const candidates = await Promise.race([
-      hits('catalog_printings_of', { p_game: card.game, p_name: card.name }, signal),
-      leash,
-    ])
-    const picked = pickPrintingByArt(captureHashes, card.name, candidates)
-    if (!picked || picked.hit.apiId === card.apiId) return null
-    track('catalog_art_pick', { game: card.game })
-    return cardFromCatalog(picked.hit)
-  } catch {
-    return null
-  }
 }
 
 /**

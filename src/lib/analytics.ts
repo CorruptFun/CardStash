@@ -48,7 +48,6 @@ export const EVENT_TYPES = [
   'card_source_submit',
   'card_source_flag',
   'catalog_fallback',
-  'catalog_art_pick',
   'error',
 ] as const
 

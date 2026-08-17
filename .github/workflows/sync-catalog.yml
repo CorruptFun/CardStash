@@ -6,9 +6,8 @@
 #     APIs. This is the mapper smoke test the sandboxed unit tests cannot
 #     be — Scryfall/TCGdex/YGOPRODeck response shapes drift, and a dry-run
 #     here catches that before an operator run does.
-#   * WITH it: the real weekly sync — upsert all three sources, fingerprint
-#     artwork newest-first (the hash pass is resumable, so the weekly slice
-#     keeps eating into the backlog), then print per-game coverage.
+#   * WITH it: the real weekly sync — upsert all three sources, then print
+#     per-game coverage.
 #
 # The schedule only fires on the default branch, so this stays inert until
 # merged. Rows written here are read anonymously by lib/catalog.ts; the
@@ -22,9 +21,6 @@ on:
       source:
         description: 'Sources to ingest (comma-separated: mtg,pokemon,yugioh)'
         default: 'mtg,pokemon,yugioh'
-      hash_limit:
-        description: 'Artwork fingerprints to compute this run'
-        default: '2000'
   schedule:
     - cron: '23 9 * * 1' # Mondays 09:23 UTC
   push:
@@ -48,7 +44,6 @@ jobs:
       SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}
       HAS_SECRET: ${{ secrets.SUPABASE_SECRET != '' }}
       SOURCES: ${{ inputs.source || 'mtg,pokemon,yugioh' }}
-      HASH_LIMIT: ${{ inputs.hash_limit || '2000' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,16 +59,6 @@ jobs:
       - name: Sync the mirror
         if: env.HAS_SECRET == 'true'
         run: node scripts/sync-catalog.mjs --source="$SOURCES"
-
-      - name: Fingerprint artwork (resumable slice, newest first)
-        if: env.HAS_SECRET == 'true'
-        env:
-          # The hash pass runs the app's own cardArtHash in a real browser;
-          # the runner image ships Chrome, and only this step needs deps.
-          CHROMIUM_PATH: /usr/bin/google-chrome
-        run: |
-          npm ci
-          node scripts/sync-catalog.mjs --hash --limit="$HASH_LIMIT"
 
       - name: Coverage report
         if: env.HAS_SECRET == 'true'

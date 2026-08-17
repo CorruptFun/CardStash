@@ -1,22 +1,21 @@
 /**
  * Populate the catalog mirror (supabase/migrations/0022) from the three bulk
- * sources, and fill in artwork fingerprints. Operator-run with the service
- * key — this script is the ONLY writer the table has; the app never writes it.
+ * sources. Operator-run with the service key — this script is the ONLY
+ * writer the table has; the app never writes it.
  *
  *   SUPABASE_SECRET=sb_secret_… node scripts/sync-catalog.mjs                 # ingest all three
  *   … --source=mtg,yugioh                                                     # a subset
  *   … --sets=12                                                               # cap Pokémon sets (politeness / smoke)
  *   … --dry-run                                                               # map and count, write nothing
- *   … --hash --limit=500                                                      # fingerprint pass (resumable)
- *   … --stats                                                                 # rows + hash coverage + one anon lookup
+ *   … --stats                                                                 # rows per game + one anon lookup
  *
- * Node on purpose, not Python: the repo is all Node, the fixtures fetcher
- * already speaks these APIs politely, and — the part that actually matters —
- * the artwork hash MUST be computed by the same code the client runs, or the
- * distances mean nothing. The --hash pass bundles src/lib/vision.ts with
- * esbuild and runs the real `cardArtHash` in headless Chromium (both already
- * dev dependencies), so catalog-side and capture-side fingerprints can never
- * drift apart.
+ * Node on purpose, not Python: the repo is all Node and the fixtures fetcher
+ * already speaks these APIs politely.
+ *
+ * The table's `art_hash` column is RESERVED and this script never writes it:
+ * the artwork-fingerprint format is deliberately not yet a contract (see
+ * catalogmatch.ts), and populating rows in a format that may change would
+ * quietly make it one.
  *
  * Sources and the id contract (see the migration header):
  *   mtg      Scryfall bulk "default_cards"  → api_id = Scryfall uuid
@@ -26,7 +25,7 @@
  * Rate limits: Scryfall asks 50-100ms between requests (bulk is ONE request);
  * TCGdex gets 150ms between set fetches; YGOPRODeck is one request. Upserts
  * batch 500 rows with a small gap. Re-running is safe and is the update
- * story: on_conflict merges, updated_at moves, hashes stay.
+ * story: on_conflict merges and updated_at moves.
  */
 
 import readline from 'node:readline'
@@ -168,7 +167,6 @@ export function ygoToRows(card) {
     })
     if (mapped) rows.push(mapped)
   }
-  // Reprints of one passcode share art: hash once, serve every row.
   return rows
 }
 
@@ -288,85 +286,13 @@ async function ingestYugioh(dryRun) {
   return rows.length
 }
 
-/* -------------------------------------------------------------- hash pass */
-
-/**
- * Fill art_hash where it is missing, newest rows first — resumable by
- * construction (finished rows stop matching the filter). Yu-Gi-Oh reprints
- * share one image per passcode; the per-row PATCH below still writes each,
- * which costs a few redundant hashes and keeps the pass dumb enough to trust.
- */
-async function hashPass(limit) {
-  const { build } = await import('esbuild')
-  const { chromium } = await import('playwright-core')
-
-  const query =
-    `${SUPABASE_URL}/rest/v1/catalog_printings` +
-    `?select=id,image_url&art_hash=is.null&image_url=not.is.null&order=updated_at.desc&limit=${limit}`
-  const rows = await (await fetch(query, { headers: serviceHeaders() })).json()
-  if (!Array.isArray(rows) || !rows.length) {
-    console.log('hash: nothing to do')
-    return
-  }
-  console.log(`hash: ${rows.length} rows`)
-
-  const bundle = await build({
-    entryPoints: [new URL('../src/lib/vision.ts', import.meta.url).pathname],
-    bundle: true,
-    format: 'iife',
-    globalName: 'vision',
-    write: false,
-    logLevel: 'silent',
-  })
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium',
-    headless: true,
-    args: ['--no-sandbox'],
-  })
-  const page = await browser.newPage()
-  await page.addScriptTag({ content: bundle.outputFiles[0].text })
-
-  let done = 0
-  try {
-    for (const { id, image_url } of rows) {
-      const res = await fetch(image_url, { headers: { 'User-Agent': UA } }).catch(() => null)
-      if (!res?.ok) continue
-      const mime = res.headers.get('content-type') ?? 'image/jpeg'
-      const b64 = Buffer.from(await res.arrayBuffer()).toString('base64')
-      const hash = await page
-        .evaluate(async ([dataUrl]) => {
-          const img = await new Promise((resolve, reject) => {
-            const el = new Image()
-            el.onload = () => resolve(el)
-            el.onerror = reject
-            el.src = dataUrl
-          })
-          return vision.cardArtHash(img, img.naturalWidth, img.naturalHeight)
-        }, [`data:${mime};base64,${b64}`])
-        .catch(() => null)
-      if (!hash) continue
-      const patch = await fetch(`${SUPABASE_URL}/rest/v1/catalog_printings?id=eq.${id}`, {
-        method: 'PATCH',
-        headers: { ...serviceHeaders(), Prefer: 'return=minimal' },
-        body: JSON.stringify({ art_hash: hash }),
-      })
-      if (patch.ok) done++
-      if (done % 50 === 0 && done) console.log(`  hash: ${done}/${rows.length}`)
-      await sleep(60)
-    }
-  } finally {
-    await browser.close()
-  }
-  console.log(`hash: ${done} rows fingerprinted`)
-}
-
 /* ------------------------------------------------------------------ stats */
 
 /**
- * The post-sync sanity report: rows and artwork coverage per game, plus one
- * anonymous lookup through the same RPC the app calls — because "the table
- * has rows" and "an anon client gets answers" are different claims, and the
- * second is the one the app depends on.
+ * The post-sync sanity report: rows per game, plus one anonymous lookup
+ * through the same RPC the app calls — because "the table has rows" and "an
+ * anon client gets answers" are different claims, and the second is the one
+ * the app depends on.
  */
 async function stats() {
   const count = async (filter) => {
@@ -376,14 +302,12 @@ async function stats() {
     if (!res.ok) return NaN
     return Number((res.headers.get('content-range') ?? '/0').split('/')[1])
   }
-  console.log('game      rows      with art_hash')
+  console.log('game      rows')
   let sampleGame = null
   let sampleName = null
   for (const game of ['mtg', 'pokemon', 'yugioh']) {
     const total = await count(`game=eq.${game}`)
-    const hashed = await count(`game=eq.${game}&art_hash=not.is.null`)
-    const pct = total > 0 ? ` (${Math.round((hashed / total) * 100)}%)` : ''
-    console.log(`${game.padEnd(9)} ${String(total).padEnd(9)} ${hashed}${pct}`)
+    console.log(`${game.padEnd(9)} ${total}`)
     if (!sampleGame && total > 0) {
       const row = await (
         await fetch(`${SUPABASE_URL}/rest/v1/catalog_printings?select=name&game=eq.${game}&limit=1`, {
@@ -431,16 +355,11 @@ async function main() {
     return
   }
 
-  if (flag('hash')) {
-    await hashPass(Number.parseInt(value('limit') ?? '500', 10) || 500)
-    return
-  }
-
   let total = 0
   if (sources.includes('mtg')) total += await ingestMtg(dryRun)
   if (sources.includes('pokemon')) total += await ingestPokemon(dryRun, Number.parseInt(value('sets') ?? '0', 10) || 0)
   if (sources.includes('yugioh')) total += await ingestYugioh(dryRun)
-  console.log(`${dryRun ? '[dry-run] ' : ''}${total} printings ${dryRun ? 'mapped' : 'upserted'}. Now run --hash to fingerprint artwork.`)
+  console.log(`${dryRun ? '[dry-run] ' : ''}${total} printings ${dryRun ? 'mapped' : 'upserted'}.`)
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

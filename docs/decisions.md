@@ -1226,13 +1226,11 @@ exactly the kind of change the scan harness exists to gate.
 
 The app now keeps its own copy of the big three catalogs — `catalog_printings`
 (migration 0022), filled by `scripts/sync-catalog.mjs` from Scryfall, TCGdex
-and YGOPRODeck, read through three anonymous RPCs by `lib/catalog.ts`. Two
-things forced it: pokemontcg.io failing by degrees taught the app what an API
-outage does to a search box and a scanner, and no upstream API can answer
-"which printing is in the frame" at all. Each mirror row may carry `art_hash`,
-a 256-bit gradient fingerprint of the artwork window, computed by the sync
-worker with the SAME `cardArtHash` the capture side runs — that shared code
-path is the entire reason two fingerprints are comparable.
+and YGOPRODeck, read through three anonymous RPCs by `lib/catalog.ts`. One
+thing forced it: pokemontcg.io failing by degrees taught the app what an API
+outage does to a search box and a scanner. The mirror answers when a game's
+own API is down or answered empty — behind the code lookup, name search, the
+match layer and the variants picker — and it answers nothing else.
 
 - **Fallback means fallback.** Every consultation sits BEHIND the live API:
   `searchGame`, `matchGame` and the code lookup ask the mirror only after the
@@ -1240,24 +1238,20 @@ path is the entire reason two fingerprints are comparable.
   fresher, priced, canonical — always wins untouched. The mirror stores each
   game's own api-id namespace verbatim (Scryfall uuid, `dex-…`, passcode), so
   a mirror answer dedupes with, and later refreshes through, the real source.
-- **Art may choose between printings, never a card.** `pickPrintingByArt`
-  drops any candidate whose name is not the identified card's own before
-  distances are computed, mirrors the cloud read's treatment rule, and runs
-  only under identify's `!refined?.read.number` gate — a read collector line
-  always outranks it. Thresholds (accept ≤ 80 of 256 bits, margin ≥ 16) were
-  measured on the harness fixture scans, where different cards never came
-  closer than 95; re-measure before moving them.
-- **The capture side is a search, not a crop.** Measured under the harness
-  camera model, the hash has almost no translation tolerance: a 1% crop
-  misalignment lifts same-art distances past the accept threshold and 2%
-  lands them among different cards — so a single capture hash would fire
-  only on luckily-perfect refinement, and always in the safe direction
-  (missing, never wrong-picking). `captureArtHashes` therefore hashes a 5×5
-  grid of ±3% crop offsets and the picker scores each candidate by its best
-  alignment. Re-measured with crop errors up to 3% injected: same art
-  recovers to p90 ≤ 78 (max 87) across glare, soft focus, foil and low
-  light, while the different-card floor with the same search holds at 96 —
-  which is exactly accept + margin.
+- **The mirror stays out of the scan pipeline's printing decision.** An
+  artwork tie-break — the mirror serving fingerprints so a scan could tell
+  alternate arts of one card apart — was built, measured, and deliberately
+  NOT landed. The scan pipeline already grew its own exact-printing system
+  (`arthash.ts`, hashing the live source's own images at scan time), and a
+  second, mirror-fed fingerprint would have shipped a second format beside
+  it. Which format the mirror should serve — what window is hashed, on what
+  grid, what distances mean, and whether it must simply be `arthash.ts`'s —
+  is a contract that binds every row the sync worker would ever write, so it
+  is deferred rather than guessed at. The schema keeps a RESERVED,
+  unpopulated `art_hash` column (shape-constrained, never written, read by
+  nothing) so the reservation is explicit; `identify.ts` carries no mirror
+  arm at all, and the mirror reaches a scan only as the ordinary fallback
+  behind `matchGame`.
 - **Reading is anonymous, and there is no user door.** Lookups follow decision
   20 (publishable key, never the session JWT) under the existing
   `cardSourceLookup` switch. Unlike `card_data` there is no authenticated
@@ -1271,16 +1265,14 @@ path is the entire reason two fingerprints are comparable.
   live is wrong in the one place people check value, and `refreshCard` fills
   real ones because the api id is real.
 
-**The cost.** A mirror is a second copy, and second copies drift: rows are as
-fresh as the last operator run, and the artwork tie-break only covers rows the
-hash pass has reached. The noise band has now been measured under the harness
-CAMERA MODEL (compose()'s glare, soft focus, foil and low light, with crop
-errors injected) — what remains unmeasured is a real phone in a real hand, so
-a live-capture round is still owed before the thresholds are trusted with
-anything more; until then the tie-break's blast radius stays bounded to
-printings of an already-named card, and its failure direction is a miss.
+**The cost.** A mirror is a second copy, and second copies drift: rows are
+only as fresh as the last operator run, and a fallback that answers stale
+identity is still better than an outage answering nothing — which is the
+only claim this round makes.
 
 **What would reopen it.** The mirror answering FIRST for anything (it must
 not, while the live APIs are the source of truth); prices flowing out of it;
-or a fourth game joining, which belongs here only once its bulk source proves
-as durable as the first three.
+a fourth game joining, which belongs here only once its bulk source proves
+as durable as the first three; or populating `art_hash`, which requires
+settling the fingerprint-format contract above first — and then re-doing the
+measurement work on real captures, not just the harness camera model.

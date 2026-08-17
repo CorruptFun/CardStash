@@ -502,15 +502,14 @@ publishable key and never the session JWT (decision 20), under the existing
 `cardSourceLookup` switch. The mirror stores each game's own api-id namespace
 (Scryfall uuid, `dex-…`, YGO passcode) so its answers dedupe with the live
 APIs'; `cardFromCatalog` synthesizes cards WITHOUT prices — `refreshCard`
-fills real ones because the api id is real. Rows may carry `art_hash`, the
-256-bit artwork fingerprint (`cardArtHash` in vision.ts, run by the sync
-worker's `--hash` pass through the same bundled code the client executes);
-`pickPrintingByArt` uses it in identify's printing tie-break seam to tell
-alternate arts of an already-named card apart, under measured thresholds and
-the rule that art may never propose a different card. Wiring:
+fills real ones because the api id is real. Wiring:
 `searchByCodeWithMirror` / the empty-or-failed branches of `searchGame`,
-`matchGame` and `printingVariants` in cardsearch.ts, and the `tiebreak-art`
-arm in identify.ts. RLS proof: `npm run test:mirror`
+`matchGame` and `printingVariants` in cardsearch.ts — the scan pipeline
+reaches the mirror only through those matchers; `identify.ts` has no mirror
+arm of its own. The table's `art_hash` column is RESERVED and unpopulated:
+its fingerprint format is deliberately not yet a contract, the sync worker
+never writes it and no client code reads it (see decision 28). RLS proof:
+`npm run test:mirror`
 (tests/harness/catalog-rls.mjs) — run it after applying 0022 and after any
 migration touching `catalog_printings`.
 
@@ -527,18 +526,17 @@ session):
    a schema read cannot show any of that.
 3. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs` — fills the table from
    all three sources (re-runnable; re-running IS the update story).
-4. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --hash --limit=2000` —
-   fingerprints artwork newest-first; resumable, so repeat until it reports
-   "nothing to do". The art tie-break only covers rows this pass has reached.
-5. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --stats` — per-game rows,
-   hash coverage, and one lookup through the anonymous RPC the app itself
-   calls, which is the claim that actually matters.
+4. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --stats` — per-game rows
+   and one lookup through the anonymous RPC the app itself calls, which is
+   the claim that actually matters.
 
 The recurring half can ride CI: `.github/workflows/sync-catalog.yml`
 dry-runs the mappers against the live bulk APIs on any push touching the
-worker (catching upstream shape drift with no secret at all), and once the
-repo has a `SUPABASE_SECRET` Actions secret, the same workflow runs the real
-sync plus a 2000-row hash slice every Monday and reports coverage.
+worker (catching upstream shape drift with no secret at all — the push
+trigger runs nothing but the dry-run, even with the secret configured), and
+once the repo has a `SUPABASE_SECRET` Actions secret, the schedule and a
+manual dispatch from the default branch run the real sync every Monday and
+report coverage.
 
 ## Pricing (`lib/prices.ts`)
 
