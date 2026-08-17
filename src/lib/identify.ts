@@ -565,7 +565,7 @@ const SHORT_READ_LEN = 8
  * distance otherwise squeaks wrong cards past the base threshold. */
 const OCR_MATCH_THRESHOLD_NOISY = 0.72
 
-function matchThresholdFor(read: string): number {
+export function matchThresholdFor(read: string): number {
   const normalized = read.toLowerCase().replace(/[^a-z0-9]+/g, '')
   if (normalized.length < SHORT_READ_LEN) return OCR_MATCH_THRESHOLD_SHORT
   const tokens = read.split(/\s+/)
