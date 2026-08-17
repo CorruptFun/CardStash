@@ -78,6 +78,32 @@ test('riftbound: bare fraction pins the collector number', () => {
   assert.equal(read.total, '298')
 })
 
+test('riftbound: the rune line pins set and number without any fraction', () => {
+  // Verbatim from harness traces — '«' is OCR's reading of the printed dot.
+  const read = parseCornerInfo('riftbound', 'h— -w\nVEN « R04 « EN »7 Greg Ghielmett')
+  assert.equal(read.setCode, 'VEN')
+  assert.equal(read.number, 'R04')
+  // An alternate-art rune keeps its letter suffix ("R04a").
+  assert.equal(parseCornerInfo('riftbound', 'VEN · R04a · EN ©2026').number, 'R04A')
+})
+
+test('riftbound: a printed fraction still outranks the rune shape', () => {
+  const read = parseCornerInfo('riftbound', '045/298 « OGN « EN')
+  assert.equal(read.number, '45')
+  assert.equal(read.total, '298')
+})
+
+test('riftbound: the rune shape stays silent without its anchors', () => {
+  // No language tail: not a collector line.
+  assert.equal(parseCornerInfo('riftbound', 'VEN « R04').number, undefined)
+  // Ability text with a stray letter-digit token.
+  assert.equal(parseCornerInfo('riftbound', 'RUNE R04 COST 2').number, undefined)
+  // A language mark cannot serve as the set.
+  assert.equal(parseCornerInfo('riftbound', 'EN « R04 « EN').setCode, undefined)
+  // Other games never grow this vocabulary.
+  assert.equal(parseCornerInfo('starwars', 'VEN « R04 « EN').number, undefined)
+})
+
 test('lorcana: fraction plus language-adjacent set digit', () => {
   const read = parseCornerInfo('lorcana', '23/204 · EN · 1')
   assert.equal(read.number, '23')

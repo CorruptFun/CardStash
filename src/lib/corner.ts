@@ -229,7 +229,19 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     return {}
   }
   // Riftbound / Star Wars: Unlimited and friends — the number alone helps.
-  return frac ? { number: frac[1], total: frac[2], fused } : {}
+  if (frac) return { number: frac[1], total: frac[2], fused }
+  // Riftbound RUNES print no fraction at all: the line reads "VEN • R04 •
+  // EN" — set, letter-prefixed number, language, in that order. Anchored on
+  // all three tokens with tight separators, language tail last, so a stray
+  // "R04" in card text cannot fire. Measured over every captured OCR text in
+  // the matrix: fires only on the one rune fixture, yielding exactly its
+  // printed set and number. The set slot must not itself be a language mark
+  // ("EN « R04 « EN" declares nothing).
+  if (game === 'riftbound') {
+    const rune = upper.match(/\b([A-Z]{2,4})\b[^A-Z0-9\n]{1,4}([A-Z]\d{2}[A-Z]?)\b[^A-Z0-9\n]{1,4}(?:EN|FR|DE|IT|ES|PT)\b/)
+    if (rune && !LANGS.has(rune[1])) return { setCode: rune[1], number: rune[2] }
+  }
+  return {}
 }
 
 /**
