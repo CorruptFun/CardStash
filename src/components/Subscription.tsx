@@ -93,7 +93,8 @@ export function Subscription() {
           <span>
             Active
             {state.expiresAt ? <> — renews in {relativeAge(state.expiresAt).replace(' ago', '')}</> : ''}. Cloud rescue
-            and the AI deck builder are switched on.
+            and the AI deck builder are included; the rescue still runs only while its own switch, under Scanning, is
+            on.
           </span>
         </div>
         {state.source === 'manual' ? (
@@ -142,9 +143,10 @@ export function Subscription() {
         </div>
         <p className="setsec__note">
           Pay <b>{FOUNDING_PRICE} once</b> and <b>cloud rescue</b>, which reads the cards this device cannot, and the{' '}
-          <b>AI deck builder</b> are yours permanently. It is a single payment and not a subscription: it does not
-          renew, it does not run out, and there is nothing to cancel later. Everyone else pays {YEARLY_PRICE} a year for
-          the same two things. Scanning, your collection, decks, trades and backup stay free either way.
+          <b>AI deck builder</b> are yours permanently. In our 282-photo test set the rescue took identification from
+          about 7 in 10 cards to about 9 in 10. It is a single payment and not a subscription: it does not renew, it
+          does not run out, and there is nothing to cancel later. Everyone else pays {YEARLY_PRICE} a year for the same
+          two things. Scanning, your collection, decks, trades and backup stay free either way.
         </p>
         <div className="setrow">
           <div className="setrow__text">
@@ -174,6 +176,11 @@ export function Subscription() {
         Scanning, your collection, decks, trades and backup are all free and always will be — including{' '}
         <b>50 cloud rescues</b> and <b>3 AI deck builds</b> a month. A subscription raises those to 1,000 and 12: the
         two things that cost us money to run.
+      </p>
+      <p className="setsec__note">
+        The rescue reads the cards a camera can’t — worn faces, glare, foils, bad light. In our 282-photo test set it
+        took identification from about 7 in 10 cards to about 9 in 10, and roughly doubled Pokémon reads. Ordinary
+        scanning is never metered and never leaves this device.
       </p>
       {referredPrice && (
         <div className="audience audience--friends">

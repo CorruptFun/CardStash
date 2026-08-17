@@ -13,8 +13,17 @@ storage all work from there.
 
 - **Scan** — live camera identification that runs **entirely on your device**:
   text recognition reads the card name and the collector line, a pixel check
-  spots foil sheen, price chip pops up, one tap to collect. No image ever leaves
-  the phone, no account and no API key are needed, and it works offline.
+  spots foil sheen, price chip pops up, one tap to collect. No image leaves the
+  phone unless you switch on the cloud rescue below, no account and no API key
+  are needed, and it works offline.
+- **Cloud rescue (optional)** — the cards a camera can't read — worn faces,
+  glare, foils, bad light — can be sent, one photo at a time, to be identified
+  in the cloud. Strictly opt-in and off by default, and only a card this device
+  couldn't settle on its own is ever sent. In our 282-photo test set the rescue
+  took identification from about 7 in 10 cards to about 9 in 10, and roughly
+  doubled Pokémon reads. A free account includes 50 rescues a month; a
+  subscription raises that to 1,000. Ordinary scanning is never metered and
+  never leaves the device.
 - **Search** — Scryfall (Magic), pokemontcg.io (Pokémon), YGOPRODeck (Yu-Gi-Oh!),
   Lorcast (Lorcana) and TCGplayer data via TCGCSV (Riftbound, One Piece, Star
   Wars: Unlimited, Digimon, Gundam) — with prices, comps, printings and history.
@@ -33,9 +42,10 @@ storage all work from there.
 - **Decks** — build by hand from search or your collection, assign cards you own
   to decks from the card view (and see which decks a card is in), mana curve /
   color / type stats, owned-vs-missing costing.
-- **AI builder** — bring a free Gemini key; it researches the current meta with
-  live search and proposes decks from your collection, optionally built around
-  specific seed cards you pick.
+- **AI builder** — sign in and it runs on our key, nothing to bring: it
+  researches the current meta with live search and proposes decks from your
+  collection, optionally built around specific seed cards you pick. A free
+  account includes 3 builds a month; a subscription raises that to 12.
 - **Friends & trades** — mark copies "for trade", share your binder (or whole
   collection) as a link or file, follow friends' binders the same way (host the
   file at a stable URL — e.g. a GitHub Gist — and refresh anytime), then
@@ -65,8 +75,9 @@ and link-based sharing all work offline with nothing signed in. API keys live
 on-device and are sent only to their own services. Social works serverlessly by
 default: a share link *is* the data (compressed into the URL), so nothing is
 published anywhere unless you send it to someone. The optional extras — Drive
-backup, the encrypted cloud vault, an account for friends and trades — are
-things you switch on, never things you're switched into.
+backup, the encrypted cloud vault, the cloud scan rescue, an account for
+friends and trades — are things you switch on, never things you're switched
+into.
 
 ## Documentation
 
