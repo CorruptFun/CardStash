@@ -151,8 +151,16 @@ export function ygoToRows(card) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Scryfall REJECTS anonymous requests: no User-Agent means HTTP 400 (their
+ * API guidelines require one), which the first CI dry-run found the hard
+ * way. Same convention as the fixtures fetcher, and sent everywhere — the
+ * other sources don't require it, but a bulk consumer should say who it is.
+ */
+const UA = 'CardstockCatalogSync/1.0 (+https://github.com/CorruptFun/CardStash)'
+
 async function getJson(url, what) {
-  const res = await fetch(url, { headers: { accept: 'application/json' } })
+  const res = await fetch(url, { headers: { 'User-Agent': UA, accept: 'application/json' } })
   if (!res.ok) throw new Error(`${what}: HTTP ${res.status}`)
   return res.json()
 }
@@ -258,7 +266,7 @@ async function hashPass(limit) {
   let done = 0
   try {
     for (const { id, image_url } of rows) {
-      const res = await fetch(image_url).catch(() => null)
+      const res = await fetch(image_url, { headers: { 'User-Agent': UA } }).catch(() => null)
       if (!res?.ok) continue
       const mime = res.headers.get('content-type') ?? 'image/jpeg'
       const b64 = Buffer.from(await res.arrayBuffer()).toString('base64')
