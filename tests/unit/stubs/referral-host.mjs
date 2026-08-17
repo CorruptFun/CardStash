@@ -1,7 +1,8 @@
 /**
- * Stands in for the three modules `referral.ts` — and `social.ts` behind it —
- * pull in at import time: the auth session, the cloud config, and the settings
- * store, which is zustand + localStorage and cannot exist in node at all.
+ * Stands in for the three modules `referral.ts` and `billing.ts` — and
+ * `social.ts` behind them — pull in at import time: the auth session, the
+ * cloud config, and the settings store, which is zustand + localStorage and
+ * cannot exist in node at all.
  *
  * `CLOUD_AVAILABLE` is deliberately TRUE here, for the same reason the
  * marketplace stub says so: a test that finds nothing sent must be finding it
@@ -21,6 +22,8 @@ export const SETTINGS_DEFAULTS = {
   profileName: 'Rae',
   profileNote: '',
   shareScope: 'trade',
+  cloudScanRescue: false,
+  rescueAutoOnAt: 0,
 }
 
 export function settings() {

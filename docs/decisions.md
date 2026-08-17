@@ -76,6 +76,19 @@ The Gemini boundary moved with it and is now stated precisely rather than
 absolutely: the key is scoped to the AI deck builder **and** the scan rescue,
 and to nothing else.
 
+**What changed a third time (auto-on at purchase).** "Paying is not consent"
+above is no longer the whole story: buying the subscription now switches
+`cloudScanRescue` on. The reasoning is that the rescue is the thing being
+bought — the pitch names it, the price is justified by it, and a purchase that
+visibly changed nothing left the thing paid for switched off. The rule that
+keeps it defensible: the flip happens the first time a device sees an active
+entitlement and **never again** — `noteEntitlementSeen()` in billing.ts,
+one-shot per device via `rescueAutoOnAt` — so a subscriber who turns the
+rescue off has made a decision no renewal, re-fetch or later sign-in
+overrules. The switch is still the sole authority over the image; the
+purchase throws it once. The point-of-sale copy says so before the money
+moves, and the free default is unchanged.
+
 ---
 
 ### 2a. A first-party backend is the entitlement authority

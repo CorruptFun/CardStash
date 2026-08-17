@@ -14,8 +14,10 @@ the collector line; canvas pixel analysis finds the card, removes roll, reads
 foil sheen and hashes the frame. The card APIs are consulted only by *name*,
 *set* and *number*.
 
-An image leaves the device in exactly one circumstance: the user switched on
-`cloudScanRescue`, and this frame is one the local pipeline could not settle —
+An image leaves the device in exactly one circumstance: `cloudScanRescue` is on
+— switched by hand, or switched on once by the subscription that includes the
+rescue ([decisions.md](decisions.md) 2) — and this frame is one the local
+pipeline could not settle —
 either nothing identified it, or it identified the card but nothing pinned
 *which printing* it is (see the printing tie-break below). Our Gemini key is
 server-side and scoped to that rescue and the AI deck builder. With the switch
@@ -304,8 +306,9 @@ printing is never worth a lost card.
 
 ### The cloud rescue's timing
 
-`cloudScanRescue` (opt-in, and the switch is its own act — see
-[decisions.md](decisions.md) 1 and [privacy.md](privacy.md)) no longer waits
+`cloudScanRescue` (off for a free account, switched on once by a subscription,
+and the switch stays the authority — see [decisions.md](decisions.md) 2 and
+[privacy.md](privacy.md)) no longer waits
 for the local pipeline to exhaust itself. It starts on a **2.5s timer**
 (`CLOUD_HEADSTART_MS`, measured from the top of `identifyViaOcr` so a sideways
 frame's orientation probing counts) and runs alongside the remaining passes:
@@ -415,7 +418,7 @@ Guards, all narrowing:
 | The picked print must actually carry the seen frame | A model that says "borderless" about a card with no borderless printing changes nothing. |
 | 6s leash (`PRINTING_TIEBREAK_TIMEOUT_MS`), half the rescue's | The rescue's alternative is telling the user "no". This one already has a usable answer on screen. |
 | `budget.printingTiebreak`, false in `PAGE_SCAN_BUDGET` | Nine cards on a page would be nine uploads and nine credits. The review screen re-reads a row at full budget once a human is looking at it. |
-| `cloudScanRescue` + signed in | Same switch, same reason, as the rescue. Being signed in is not consent; paying is not consent. |
+| `cloudScanRescue` + signed in | Same switch, same reason, as the rescue. Being signed in is not consent; a subscription throws the switch once, and off afterwards is final. |
 
 Any refusal — off, unreachable, timed out, rejected — leaves the local answer
 standing. The worst case is what the app does today.

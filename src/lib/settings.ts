@@ -86,13 +86,17 @@ export interface Settings {
    * Send a frame the local pipeline FAILED on to be read in the cloud, as a
    * last resort.
    *
-   * OFF BY DEFAULT, and it stays a switch even though the key is now ours.
-   * Being signed in is not consent and neither is paying: uploading a camera
-   * frame is a different act from subscribing to a tier, so entitlement gates
-   * the BILL and this gates the IMAGE. Leave it off and the promise is
-   * unchanged — scanning is on-device, works offline and on first launch, and
-   * no image ever leaves. Turning it on elects to send only the frames that
-   * already missed, never the ones that succeeded.
+   * OFF BY DEFAULT on a free account, and it stays a switch even though the
+   * key is now ours. Being signed in is not consent — but buying the
+   * subscription is read as asking for the rescue, because the rescue is the
+   * thing being bought: the first time this device sees an active
+   * entitlement, `noteEntitlementSeen()` (billing.ts) switches this on, once,
+   * and stamps `rescueAutoOnAt`. The switch still gates the IMAGE where
+   * entitlement gates the BILL: turned off, nothing is uploaded, subscriber
+   * or not, and no later entitlement check flips it back. Leave it off and
+   * the promise is unchanged — scanning is on-device, works offline and on
+   * first launch, and no image ever leaves. On, it elects to send only the
+   * frames that already missed, never the ones that succeeded.
    */
   cloudScanRescue: boolean
   /**
@@ -102,6 +106,17 @@ export interface Settings {
    * a client-chosen model is a client-chosen bill.
    */
   cloudScanModel: string
+  /**
+   * When a subscription first switched the rescue on for THIS device — 0
+   * until one has. One-shot by design: `noteEntitlementSeen()` flips
+   * `cloudScanRescue` the first time an active entitlement is seen and never
+   * again, so a subscriber who then turns the rescue off has answered, and no
+   * renewal, re-fetch or later sign-in overrules them. Per-device like every
+   * setting — a second phone auto-enables once too, then obeys its own switch
+   * — and deliberately NOT cleared on sign-out: this device has had its one
+   * flip, whoever caused it.
+   */
+  rescueAutoOnAt: number
   /**
    * pokemontcg.io key. NOT user-editable any more — there is no field, and the
    * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
@@ -247,6 +262,7 @@ export const useSettings = create<Settings>()(
       cloudAuto: true,
       cloudScanRescue: false,
       cloudScanModel: '',
+      rescueAutoOnAt: 0,
       pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK

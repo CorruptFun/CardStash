@@ -93,8 +93,8 @@ export function Subscription() {
           <span>
             Active
             {state.expiresAt ? <> — renews in {relativeAge(state.expiresAt).replace(' ago', '')}</> : ''}. Cloud rescue
-            and the AI deck builder are included; the rescue still runs only while its own switch, under Scanning, is
-            on.
+            and the AI deck builder are included — the rescue switched on with your subscription, and its switch under
+            Scanning turns it off any time.
           </span>
         </div>
         {state.source === 'manual' ? (
@@ -146,7 +146,8 @@ export function Subscription() {
           <b>AI deck builder</b> are yours permanently. In our 282-photo test set the rescue took identification from
           about 7 in 10 cards to about 9 in 10. It is a single payment and not a subscription: it does not renew, it
           does not run out, and there is nothing to cancel later. Everyone else pays {YEARLY_PRICE} a year for the same
-          two things. Scanning, your collection, decks, trades and backup stay free either way.
+          two things. Paying switches the rescue on for you; its switch, under Scanning, turns it off any time.
+          Scanning, your collection, decks, trades and backup stay free either way.
         </p>
         <div className="setrow">
           <div className="setrow__text">
@@ -179,8 +180,9 @@ export function Subscription() {
       </p>
       <p className="setsec__note">
         The rescue reads the cards a camera can’t — worn faces, glare, foils, bad light. In our 282-photo test set it
-        took identification from about 7 in 10 cards to about 9 in 10, and roughly doubled Pokémon reads. Ordinary
-        scanning is never metered and never leaves this device.
+        took identification from about 7 in 10 cards to about 9 in 10, and roughly doubled Pokémon reads. Subscribing
+        switches the rescue on for you; its switch, under Scanning, turns it off any time. Ordinary scanning is never
+        metered and never leaves this device.
       </p>
       {referredPrice && (
         <div className="audience audience--friends">

@@ -14,11 +14,12 @@ storage all work from there.
 - **Scan** — live camera identification that runs **entirely on your device**:
   text recognition reads the card name and the collector line, a pixel check
   spots foil sheen, price chip pops up, one tap to collect. No image leaves the
-  phone unless you switch on the cloud rescue below, no account and no API key
+  phone unless the cloud rescue below is on, no account and no API key
   are needed, and it works offline.
 - **Cloud rescue (optional)** — the cards a camera can't read — worn faces,
   glare, foils, bad light — can be sent, one photo at a time, to be identified
-  in the cloud. Strictly opt-in and off by default, and only a card this device
+  in the cloud. Off by default; it switches on with a subscription, the switch
+  under Scanning turns it off any time, and only a card this device
   couldn't settle on its own is ever sent. In our 282-photo test set the rescue
   took identification from about 7 in 10 cards to about 9 in 10, and roughly
   doubled Pokémon reads. A free account includes 50 rescues a month; a
@@ -75,9 +76,10 @@ and link-based sharing all work offline with nothing signed in. API keys live
 on-device and are sent only to their own services. Social works serverlessly by
 default: a share link *is* the data (compressed into the URL), so nothing is
 published anywhere unless you send it to someone. The optional extras — Drive
-backup, the encrypted cloud vault, the cloud scan rescue, an account for
-friends and trades — are things you switch on, never things you're switched
-into.
+backup, the encrypted cloud vault, an account for friends and trades — are
+things you switch on, never things you're switched into; the cloud scan rescue
+comes on with the subscription that includes it, and its switch turns it off
+any time.
 
 ## Documentation
 

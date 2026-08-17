@@ -134,7 +134,8 @@ export function SettingsView() {
             <em>
               Send a card this device can’t settle — or can’t tell which printing of — to be read in the cloud. One
               photo, only for that card; scans this device settles on its own never leave. In our 282-photo test set it
-              took identification from about 7 in 10 cards to about 9 in 10. Off by default.
+              took identification from about 7 in 10 cards to about 9 in 10. Off by default; a subscription switches it
+              on, and turning it off here always wins.
             </em>
           </div>
           <Toggle

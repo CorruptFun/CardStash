@@ -12,12 +12,17 @@
  * the features themselves. Being wrong here shows the wrong button for a moment.
  * Being wrong in `scan-card` would give away a paid API call.
  *
+ * One exception, and it is consent rather than enforcement: the first time an
+ * active subscription is seen, `noteEntitlementSeen()` switches the cloud
+ * rescue on for this device — once, and never again. See that function.
+ *
  * Dormant wherever the cloud is: no project configured, no subscription UI, and
  * the app behaves exactly as it did before any of this existed.
  */
 
 import { CloudError, freshToken, isSignedIn } from './authsession'
 import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
+import { settings } from './settings'
 
 /** Features one subscription buys. Mirrors FEATURES in `stripe-billing`. */
 const SUBSCRIPTION_FEATURES = ['cloud-scan', 'ai-builder'] as const
@@ -50,6 +55,30 @@ export interface SubscriptionState {
 export const billingAvailable = (): boolean => CLOUD_AVAILABLE
 
 /**
+ * The one thing a subscription changes on the client by itself: the first time
+ * THIS DEVICE sees an active entitlement, the cloud rescue's switch comes on.
+ *
+ * The rescue is the thing being bought — the pitch names it, the price is
+ * justified by it — so the purchase is read as asking for it. But exactly
+ * once, recorded in `rescueAutoOnAt`: a subscriber who then turns the rescue
+ * off has answered, and no renewal, re-fetch, checkout return or later
+ * sign-in flips it back. The switch stays the authority over the image
+ * (settings.ts); the purchase throws it one time.
+ *
+ * Every path entitlement state lands through funnels here via
+ * `subscriptionState()` — the Stripe return's `?subscribed=1` re-ask included
+ * — rather than flipping the switch at its own call site. Yearly, founding
+ * and comped grants all pass through, because all three are the same
+ * entitlement row.
+ */
+export function noteEntitlementSeen(state: SubscriptionState): void {
+  if (!state.active) return
+  const config = settings()
+  if (config.rescueAutoOnAt) return
+  config.set({ cloudScanRescue: true, rescueAutoOnAt: Date.now() })
+}
+
+/**
  * What this account has. Read straight from `entitlements`, which users may
  * SELECT for themselves and nobody may write through PostgREST (migration
  * 0005) — so this is honest without being authoritative.
@@ -70,11 +99,13 @@ export async function subscriptionState(): Promise<SubscriptionState> {
     // A null expiry is a comped grant with no end — see 0005.
     const expiresAt = row.expires_at ? Date.parse(row.expires_at) : Number.POSITIVE_INFINITY
     if (!Number.isFinite(expiresAt) && row.expires_at) return none
-    return {
+    const state: SubscriptionState = {
       active: expiresAt > Date.now(),
       expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
       source: typeof row.source === 'string' ? row.source : '',
     }
+    noteEntitlementSeen(state)
+    return state
   } catch {
     // Offline is not "unsubscribed" — say nothing rather than the wrong thing.
     return none
