@@ -33,7 +33,16 @@ async function fetchRetry(url, { as = 'json', tries = 3, headers = {} } = {}) {
   let lastErr
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, ...headers } })
+      // The timeout is load-bearing: node fetch never times out on its own,
+      // so one stalled socket — a CDN throttling CI's shared egress IPs by
+      // trickling bytes — hangs the whole sequential fetcher. Measured: the
+      // first print-image run sat "in progress" near an hour on exactly
+      // that. 15s is generous for a 15KB image or a JSON page; a resource
+      // slower than that is better recorded as a failure and retried.
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, ...headers },
+        signal: AbortSignal.timeout(15_000),
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
       return as === 'json' ? await res.json() : Buffer.from(await res.arrayBuffer())
     } catch (err) {
