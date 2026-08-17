@@ -510,6 +510,45 @@ export function cardArtHash(source: CanvasImageSource, sourceWidth: number, sour
 }
 
 /**
+ * The capture side never trusts one crop. Measured under the harness camera
+ * model, this hash has almost no translation tolerance: a 1% crop
+ * misalignment already lifts same-art distances past 80, and 2% lands them
+ * at 104–128 — inside different-card territory (floor 95). Crop refinement
+ * is good but not 1%-good, so a single capture hash would make the tie-break
+ * fire only on luckily-perfect crops. The fix is a small offset search:
+ * hash the art window at a 5×5 grid of ±3% shifts and let the caller take
+ * the minimum distance per candidate. Re-measured with the search over
+ * injected crop errors up to 3%: same-art recovers to p90 ≤ 78 (max 87)
+ * across glare/soft-focus/foil/low-light, while the different-card floor
+ * holds at 96 — the search does not erode it into the accept zone. 25
+ * hashes of a 17×16 grid cost microseconds; do not "optimize" this back to
+ * one crop.
+ */
+const CAPTURE_SEARCH_STEPS = [-0.03, -0.015, 0, 0.015, 0.03]
+
+export function captureArtHashes(source: CanvasImageSource, sourceWidth: number, sourceHeight: number): string[] {
+  const hashes: string[] = []
+  const ctx = scaledContext(ART_GRID_W, ART_GRID_H)
+  for (const oy of CAPTURE_SEARCH_STEPS) {
+    for (const ox of CAPTURE_SEARCH_STEPS) {
+      ctx.drawImage(
+        source,
+        Math.floor(sourceWidth * (ART_REGION.x + ox)),
+        Math.floor(sourceHeight * (ART_REGION.y + oy)),
+        Math.floor(sourceWidth * ART_REGION.w),
+        Math.floor(sourceHeight * ART_REGION.h),
+        0,
+        0,
+        ART_GRID_W,
+        ART_GRID_H,
+      )
+      hashes.push(artHashFromGray(grayscale(ctx.getImageData(0, 0, ART_GRID_W, ART_GRID_H))))
+    }
+  }
+  return hashes
+}
+
+/**
  * Hamming distance between two art hashes, 0–256. Anything malformed — wrong
  * length, not hex — answers the MAXIMUM distance, not a sentinel mid-value:
  * `hammingDistance` above returns 128 on mismatch, which for these longer

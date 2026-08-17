@@ -101,23 +101,28 @@ test('pickPrintingByArt: only a decisive winner among the SAME card moves the pi
   const near = hit('a', flipped(10)) // distance 40
   const far = hit('b', flipped(30)) // distance 120
 
-  const picked = pickPrintingByArt(zeros, 'Pikachu', [near, far])
+  const picked = pickPrintingByArt([zeros], 'Pikachu', [near, far])
   assert.equal(picked.hit.apiId, 'a')
   assert.equal(picked.distance, 40)
 
   // One candidate is not a choice.
-  assert.equal(pickPrintingByArt(zeros, 'Pikachu', [near]), null)
+  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [near]), null)
   // Inside the margin, printings are indistinguishable — keep the name match's pick.
-  assert.equal(pickPrintingByArt(zeros, 'Pikachu', [near, hit('c', flipped(12))]), null)
+  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [near, hit('c', flipped(12))]), null)
   assert.ok(ART_PICK_MARGIN > 48 - 40)
   // Past the accept threshold nothing matches, however clear the margin.
-  assert.equal(pickPrintingByArt(zeros, 'Pikachu', [hit('d', flipped(21)), far]), null)
+  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [hit('d', flipped(21)), far]), null)
   assert.ok(21 * 4 > ART_ACCEPT_DISTANCE)
   // A different card's art may sit at distance zero and still never be
   // proposed: art chooses BETWEEN printings, never a different card.
-  assert.equal(pickPrintingByArt(zeros, 'Pikachu', [hit('e', zeros, 'Raichu'), near]), null)
-  // No capture hash, no pick.
-  assert.equal(pickPrintingByArt('', 'Pikachu', [near, far]), null)
+  assert.equal(pickPrintingByArt([zeros], 'Pikachu', [hit('e', zeros, 'Raichu'), near]), null)
+  // No capture hashes, no pick.
+  assert.equal(pickPrintingByArt([], 'Pikachu', [near, far]), null)
+  // The neighborhood is a search: a candidate's distance is its best
+  // alignment's, so a junk direct crop must not bury an aligned offset.
+  const searched = pickPrintingByArt(['f'.repeat(64), zeros], 'Pikachu', [near, far])
+  assert.equal(searched.hit.apiId, 'a')
+  assert.equal(searched.distance, 40)
 })
 
 test('scryfallToRows: en paper printings with the Scryfall uuid as api_id', () => {

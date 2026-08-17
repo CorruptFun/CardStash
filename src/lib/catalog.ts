@@ -48,7 +48,7 @@ import {
 import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
 import { settings } from './settings'
 import type { Card, Game } from './types'
-import { cardArtHash } from './vision'
+import { captureArtHashes } from './vision'
 
 /** See cardsource.ts: two in a row is a server, not a tunnel. */
 const FAILURES_BEFORE_STANDDOWN = 2
@@ -141,19 +141,35 @@ export async function mirrorByName(game: Game, query: string, signal?: AbortSign
 export async function artPrintingTiebreak(card: Card, canvas: HTMLCanvasElement, signal?: AbortSignal): Promise<Card | null> {
   if (!mirrorLookupOn() || !isCatalogGame(card.game)) return null
   try {
-    const captureHash = cardArtHash(canvas, canvas.width, canvas.height)
+    // The offset-search neighborhood, not one crop: refinement is not
+    // 1%-exact and one misaligned hash reads as a different card (see
+    // captureArtHashes). The picker takes each candidate's best alignment.
+    const captureHashes = captureArtHashes(canvas, canvas.width, canvas.height)
     const leash = new Promise<CatalogHit[]>((resolve) => setTimeout(() => resolve([]), CATALOG_TIMEOUT_MS))
     const candidates = await Promise.race([
       hits('catalog_printings_of', { p_game: card.game, p_name: card.name }, signal),
       leash,
     ])
-    const picked = pickPrintingByArt(captureHash, card.name, candidates)
+    const picked = pickPrintingByArt(captureHashes, card.name, candidates)
     if (!picked || picked.hit.apiId === card.apiId) return null
     track('catalog_art_pick', { game: card.game })
     return cardFromCatalog(picked.hit)
   } catch {
     return null
   }
+}
+
+/**
+ * Every mirrored printing of a card, as Cards — the fallback behind the
+ * variants picker when a game's own printings API failed or had nothing.
+ * Same posture as every other mirror read: behind the live source, never
+ * beside it.
+ */
+export async function mirrorPrintingsOf(game: Game, name: string, signal?: AbortSignal): Promise<Card[]> {
+  if (!mirrorLookupOn() || !isCatalogGame(game) || !name.trim()) return []
+  const found = await hits('catalog_printings_of', { p_game: game, p_name: name.trim() }, signal)
+  if (found.length) track('catalog_fallback', { game, how: 'printings' })
+  return found.map(cardFromCatalog)
 }
 
 /** For Settings/diagnostics parity with cardsource: forget this session's stand-down. */

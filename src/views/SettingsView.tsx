@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { clearAnalytics, insights, noteDiagConsent, type Insights } from '../lib/analytics'
 import { isSignedIn } from '../lib/authsession'
 import { cardSourceAvailable, clearCardSourceMisses } from '../lib/cardsource'
+import { clearMirrorStanddown } from '../lib/catalog'
 import { weightOfChars } from '../lib/cardimage'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
 import { clearAllData, db, patchStorage } from '../lib/db'
@@ -426,21 +427,27 @@ function CardSourceSection() {
       )}
       <div className="setrow">
         <div className="setrow__text">
-          <span>Fill in missing pictures</span>
+          <span>Ask Cardstock’s card index</span>
           <em>
-            When a card has no picture at all, ask Cardstock’s card index whether another collector has photographed
-            it. Sends only the card’s id, never your account — and never for cards that already have art.
+            When a card has no picture at all, ask whether another collector has photographed it — and when a game’s
+            own catalog is down or has no answer, fall back to Cardstock’s copy of it. Sends only the card’s id, name
+            or printed code, never your account.
           </em>
         </div>
         <Toggle
           on={config.cardSourceLookup}
           onChange={(cardSourceLookup) => {
             config.set({ cardSourceLookup })
-            // Turning it back on clears the "nobody has this" cache, so the
-            // answer is not stale for days after the user changed their mind.
-            if (cardSourceLookup) void clearCardSourceMisses()
+            // Turning it back on clears the "nobody has this" cache and both
+            // stand-downs, so the answer is not stale for days after the user
+            // changed their mind — flipping the switch is the one signal worth
+            // more than our own last failure.
+            if (cardSourceLookup) {
+              void clearCardSourceMisses()
+              clearMirrorStanddown()
+            }
           }}
-          label="Fill in missing pictures"
+          label="Ask Cardstock’s card index"
         />
       </div>
       <div className="setrow">

@@ -1247,6 +1247,17 @@ path is the entire reason two fingerprints are comparable.
   always outranks it. Thresholds (accept ≤ 80 of 256 bits, margin ≥ 16) were
   measured on the harness fixture scans, where different cards never came
   closer than 95; re-measure before moving them.
+- **The capture side is a search, not a crop.** Measured under the harness
+  camera model, the hash has almost no translation tolerance: a 1% crop
+  misalignment lifts same-art distances past the accept threshold and 2%
+  lands them among different cards — so a single capture hash would fire
+  only on luckily-perfect refinement, and always in the safe direction
+  (missing, never wrong-picking). `captureArtHashes` therefore hashes a 5×5
+  grid of ±3% crop offsets and the picker scores each candidate by its best
+  alignment. Re-measured with crop errors up to 3% injected: same art
+  recovers to p90 ≤ 78 (max 87) across glare, soft focus, foil and low
+  light, while the different-card floor with the same search holds at 96 —
+  which is exactly accept + margin.
 - **Reading is anonymous, and there is no user door.** Lookups follow decision
   20 (publishable key, never the session JWT) under the existing
   `cardSourceLookup` switch. Unlike `card_data` there is no authenticated
@@ -1262,12 +1273,12 @@ path is the entire reason two fingerprints are comparable.
 
 **The cost.** A mirror is a second copy, and second copies drift: rows are as
 fresh as the last operator run, and the artwork tie-break only covers rows the
-hash pass has reached. The capture-side noise band (phone lighting and
-perspective against a flat scan) could not be measured in the sandbox this
-shipped from — the thresholds absorb resampling plus a wide margin, and the
-tie-break's blast radius is bounded to printings of an already-named card, but
-a live-capture measurement round is owed before the thresholds are trusted
-with anything more.
+hash pass has reached. The noise band has now been measured under the harness
+CAMERA MODEL (compose()'s glare, soft focus, foil and low light, with crop
+errors injected) — what remains unmeasured is a real phone in a real hand, so
+a live-capture round is still owed before the thresholds are trusted with
+anything more; until then the tie-break's blast radius stays bounded to
+printings of an already-named card, and its failure direction is a miss.
 
 **What would reopen it.** The mirror answering FIRST for anything (it must
 not, while the live APIs are the source of truth); prices flowing out of it;

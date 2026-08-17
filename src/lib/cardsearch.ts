@@ -1,5 +1,5 @@
 import { parseCardCode, type CardCode } from './cardcode'
-import { mirrorByCode, mirrorByName } from './catalog'
+import { mirrorByCode, mirrorByName, mirrorPrintingsOf } from './catalog'
 import { lorcanaBySetNumber, lorcanaPrintings, matchLorcana, lorcanaById, searchLorcana } from './lorcast'
 import { matchMtg, mtgById, mtgBySetNumber, mtgCollection, mtgPrintings, searchMtg } from './scryfall'
 import { matchPokemon, pokemonById, pokemonByCollector, pokemonBySetNumber, pokemonPrintings, searchPokemon } from './pokemon'
@@ -473,29 +473,46 @@ export async function printingVariants(card: Card, keys: ApiKeys = {}, signal?: 
   const cached = variantsCache.get(cacheKey)
   if (cached && Date.now() - cached.at < VARIANTS_TTL_MS) return withCurrent(cached.cards, card)
 
-  let cards: Card[]
-  switch (card.game) {
-    case 'mtg':
-      cards = await mtgPrintings(card.name, signal)
-      break
-    case 'pokemon':
-      cards = await pokemonPrintings(card.name, keys.pokemonKey, signal)
-      break
-    case 'yugioh': {
-      // One YGO api id covers every reprint; the set list rides on the card.
-      const source = card.printings?.length ? card : ((await ygoById(card.apiId)) ?? card)
-      cards = ygoPrintingVariants(source)
-      break
+  let cards: Card[] = []
+  let sourceError: unknown = null
+  try {
+    switch (card.game) {
+      case 'mtg':
+        cards = await mtgPrintings(card.name, signal)
+        break
+      case 'pokemon':
+        cards = await pokemonPrintings(card.name, keys.pokemonKey, signal)
+        break
+      case 'yugioh': {
+        // One YGO api id covers every reprint; the set list rides on the card.
+        const source = card.printings?.length ? card : ((await ygoById(card.apiId)) ?? card)
+        cards = ygoPrintingVariants(source)
+        break
+      }
+      case 'lorcana':
+        cards = await lorcanaPrintings(card.name, signal)
+        break
+      case 'sports':
+        cards = await sportsPrintings(card.name, signal)
+        break
+      default:
+        cards = await catalogPrintings(card.game, card.name, signal)
     }
-    case 'lorcana':
-      cards = await lorcanaPrintings(card.name, signal)
-      break
-    case 'sports':
-      cards = await sportsPrintings(card.name, signal)
-      break
-    default:
-      cards = await catalogPrintings(card.game, card.name, signal)
+  } catch (err) {
+    if (isAbort(err) || signal?.aborted) throw err
+    sourceError = err
   }
+  // The mirror stands behind the printings API like everywhere else: an
+  // outage or an empty page, never a healthy answer. A mirror answer clears
+  // the error because the picker got what it asked for.
+  if (!cards.length) {
+    cards = await mirrorPrintingsOf(card.game, card.name, signal).catch((err) => {
+      if (isAbort(err) || signal?.aborted) throw err
+      return [] as Card[]
+    })
+    if (cards.length) sourceError = null
+  }
+  if (sourceError) throw sourceError
   variantsCache.set(cacheKey, { at: Date.now(), cards })
   // Patches apply AFTER the cache write, so turning one off takes effect on the
   // next render rather than ten minutes later.

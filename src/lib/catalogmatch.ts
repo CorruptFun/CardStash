@@ -99,13 +99,16 @@ export function cardFromCatalog(hit: CatalogHit): Card {
 
 /**
  * Accept a printing swap only under this distance. Measured on the harness
- * fixture images through the real `cardArtHash` (26 catalog scans, all
- * pairwise): different cards bottom out at 95 bits (median 126), while the
- * same art re-sampled to phone-preview size stays within 25–72. A live
- * capture adds lighting and perspective on top of resampling, so 80 accepts
- * most genuine same-art matches while sitting safely under everything that
- * was ever a different picture. Re-run the measurement before moving either
- * number — the method is in the 0021 migration header.
+ * fixture images through the real `cardArtHash`, twice over. Catalog vs
+ * catalog (26 scans, all pairwise): different cards bottom out at 95 bits,
+ * median 126. Capture vs catalog under the harness camera model
+ * (glare/soft-focus/foil/low-light composed onto the card, crop errors up to
+ * 3% injected, the ±3% offset search of `captureArtHashes` applied): the
+ * same art recovers to p90 ≤ 78 with a max of 87, while the different-card
+ * floor WITH the same search holds at 96. 80 accepts the measured body of
+ * genuine matches and sits under everything that was ever a different
+ * picture; the few same-art captures past it miss safely. Re-run both
+ * measurements before moving either number.
  */
 export const ART_ACCEPT_DISTANCE = 80
 /**
@@ -113,6 +116,8 @@ export const ART_ACCEPT_DISTANCE = 80
  * margin, two printings are indistinguishable at this hash's resolution
  * (reprints share art exactly), and swapping on a near-tie would let noise
  * pick which — the honest answer is to leave the name match's pick alone.
+ * 80 + 16 lands exactly on the measured different-card floor (96): an
+ * alternate art can never be the decisive runner-up to itself.
  */
 export const ART_PICK_MARGIN = 16
 
@@ -121,19 +126,22 @@ export const ART_PICK_MARGIN = 16
  * distance. This mirrors the cloud read's treatment rule (gemini.ts): art
  * similarity may pick among printings of the card, never propose a different
  * card — every candidate whose name is not the card's own is dropped before
- * distances are even computed. Returns null unless one candidate wins
- * decisively; null means "keep what the name match picked".
+ * distances are even computed. `captureHashes` is the offset-search
+ * neighborhood from `captureArtHashes`; a candidate's distance is the best
+ * alignment's. Returns null unless one candidate wins decisively; null
+ * means "keep what the name match picked".
  */
 export function pickPrintingByArt(
-  captureHash: string,
+  captureHashes: readonly string[],
   cardName: string,
   candidates: CatalogHit[],
 ): { hit: CatalogHit; distance: number } | null {
-  if (!captureHash) return null
+  if (!captureHashes.length) return null
   const wanted = normalizeName(cardName)
+  const distance = (artHash: string) => Math.min(...captureHashes.map((hash) => artHashDistance(hash, artHash)))
   const ranked = candidates
     .filter((hit) => hit.artHash && normalizeName(hit.name) === wanted)
-    .map((hit) => ({ hit, distance: artHashDistance(captureHash, hit.artHash!) }))
+    .map((hit) => ({ hit, distance: distance(hit.artHash!) }))
     .sort((a, b) => a.distance - b.distance)
   // One candidate is not a choice — with nothing to beat, "decisive" cannot
   // be established and the swap would rest on the absolute threshold alone.
