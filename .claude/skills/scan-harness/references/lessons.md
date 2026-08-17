@@ -997,3 +997,23 @@ result seems absurd, check this list before writing code.
     the harness BRIDGE (prompt/model/schema verified byte-identical to
     the edge function); auth, entitlement and the monthly meter are the
     parts being stood in for and remain unexercised.
+86. **Reproduced twice is necessary, not sufficient — and the cloud floor
+    is wider.** The ja-collector-door gate (branch claude/ja-collector-door,
+    anchor 250/249 → fixed 269/271, all 18 gains mechanism-explained) also
+    produced two cells that moved the same way in BOTH passes with no
+    mechanism that could explain them — pokemon/rayquaza-vmax·worst and
+    counterspell-retro·rot-5's printing — in cells the change provably
+    could not touch (the door runs only where the rescue returned null;
+    both had cloud-accepted answers before). They are filed as
+    UNATTRIBUTED, not claimed: attribution needs reproduction AND a
+    mechanism, and "reproduced but unexplained" is how a flap gets
+    laundered into a result. Calibration that matters for any model
+    comparison: identical cloud runs differ in ~7 cells (5 of them
+    Pokémon) where identical offline runs differ in ~4 — so a ±3 Pokémon
+    move between cloud runs is noise, not signal. And the meta-lesson
+    from where this landed: a branch NAMED in a brief can be stale by the
+    time the work is done (ai-card-scans-priority was 40 commits behind,
+    fully merged); landing on it would have voided the comparison against
+    a baseline measured on newer code. Honor the brief's intent (nothing
+    auto-deploys), check the named branch's merge state before using its
+    letter.
