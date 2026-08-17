@@ -33,7 +33,7 @@ export interface ApiKeys {
  * statement of intent, so nothing here needs the corroboration a read off a
  * photo does.
  */
-async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
+export async function searchByCode(game: Game, code: CardCode, keys: ApiKeys, signal?: AbortSignal): Promise<Card[]> {
   const one = (card: Card | null) => (card ? [card] : [])
   switch (game) {
     case 'mtg': {

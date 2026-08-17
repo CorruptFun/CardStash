@@ -12,6 +12,8 @@
     "icons:check": "node scripts/make-icons.mjs --check",
     "test:unit": "node --test tests/unit/*.test.mjs",
     "test:scan": "node tests/harness/run-matrix.mjs",
+    "test:corpus": "node --max-old-space-size=6144 tests/corpus/sweep-names.mjs --sample=600 --out=names-sample && node --max-old-space-size=6144 tests/corpus/sweep-codes.mjs --sample=3000 --out=codes-sample",
+    "test:corpus:full": "node --max-old-space-size=8192 tests/corpus/sweep-names.mjs && node --max-old-space-size=8192 tests/corpus/sweep-codes.mjs",
     "test:scanui": "node tests/harness/drive-scan-ui.mjs",
     "test:batch": "node tests/harness/batch-add-ui.mjs",
     "test:invite": "node tests/harness/invite-ui.mjs",

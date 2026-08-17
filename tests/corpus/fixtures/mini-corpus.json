@@ -1,0 +1,280 @@
+{
+  "_comment": [
+    "Twenty cards, chosen so every bug class the corpus sweep hunts is present in a catalog small enough to reason about by hand.",
+    "mtg: a hyphen-and-accent name, a prefix-sibling pair, and the collector number the padded/unpadded contrast is drawn on.",
+    "pokemon: the Krookodile suffix pair, the hyphenated Tauros-GX, a Rayquaza V pair, the Darkrai/Mega trio, a zero-padded number, a lettered number (SL5).",
+    "yugioh: a hyphenated name, and one card printed both as IOC-EN017 and IOC-017 — the pair sameCardCode deliberately treats as one."
+  ],
+  "mtg": [
+    {
+      "apiId": "mtg-0001",
+      "name": "Boseiju, Who Endures",
+      "set": "neo",
+      "number": "266",
+      "rarity": "rare"
+    },
+    {
+      "apiId": "mtg-0002",
+      "name": "Boseiju, Who Shelters All",
+      "set": "chk",
+      "number": "271",
+      "rarity": "rare"
+    },
+    {
+      "apiId": "mtg-0003",
+      "name": "Lim-Dûl's Vault",
+      "set": "all",
+      "number": "112",
+      "rarity": "uncommon"
+    },
+    {
+      "apiId": "mtg-0005",
+      "name": "Snapcaster Mage",
+      "set": "isd",
+      "number": "78",
+      "rarity": "rare"
+    }
+  ],
+  "pokemon": {
+    "sets": [
+      {
+        "id": "swsh7",
+        "name": "Evolving Skies",
+        "official": 203,
+        "total": 237,
+        "releaseDate": "2021-08-27",
+        "ptcgoCode": "EVS"
+      },
+      {
+        "id": "sm9",
+        "name": "Team Up",
+        "official": 181,
+        "total": 196,
+        "releaseDate": "2019-02-01",
+        "ptcgoCode": "TEU"
+      },
+      {
+        "id": "me01",
+        "name": "Mega Evolution",
+        "official": 132,
+        "total": 180,
+        "releaseDate": "2025-09-26",
+        "ptcgoCode": "ME1"
+      },
+      {
+        "id": "col1",
+        "name": "Call of Legends",
+        "official": 95,
+        "total": 106,
+        "releaseDate": "2011-02-09",
+        "ptcgoCode": "COL"
+      }
+    ],
+    "prints": [
+      {
+        "apiId": "dex-swsh7-104",
+        "name": "Krookodile",
+        "set": "swsh7",
+        "number": "104",
+        "rarity": "Rare"
+      },
+      {
+        "apiId": "dex-swsh7-105",
+        "name": "Krookodile ex",
+        "set": "swsh7",
+        "number": "105",
+        "rarity": "Double Rare"
+      },
+      {
+        "apiId": "dex-sm9-100",
+        "name": "Tauros",
+        "set": "sm9",
+        "number": "100",
+        "rarity": "Common"
+      },
+      {
+        "apiId": "dex-sm9-101",
+        "name": "Tauros-GX",
+        "set": "sm9",
+        "number": "101",
+        "rarity": "Ultra Rare"
+      },
+      {
+        "apiId": "dex-swsh7-110",
+        "name": "Rayquaza",
+        "set": "swsh7",
+        "number": "110",
+        "rarity": "Rare"
+      },
+      {
+        "apiId": "dex-swsh7-111",
+        "name": "Rayquaza V",
+        "set": "swsh7",
+        "number": "111",
+        "rarity": "Ultra Rare"
+      },
+      {
+        "apiId": "dex-me01-021",
+        "name": "Numel",
+        "set": "me01",
+        "number": "021",
+        "rarity": "Common"
+      },
+      {
+        "apiId": "dex-me01-030",
+        "name": "Darkrai",
+        "set": "me01",
+        "number": "030",
+        "rarity": "Rare"
+      },
+      {
+        "apiId": "dex-me01-031",
+        "name": "Darkrai ex",
+        "set": "me01",
+        "number": "031",
+        "rarity": "Double Rare"
+      },
+      {
+        "apiId": "dex-me01-032",
+        "name": "Mega Darkrai ex",
+        "set": "me01",
+        "number": "032",
+        "rarity": "Mega Rare"
+      },
+      {
+        "apiId": "dex-col1-SL5",
+        "name": "Ho-Oh",
+        "set": "col1",
+        "number": "SL5",
+        "rarity": "Shiny Rare"
+      },
+      {
+        "apiId": "dex-col1-5",
+        "name": "Forretress",
+        "set": "col1",
+        "number": "5",
+        "rarity": "Rare"
+      }
+    ]
+  },
+  "yugioh": [
+    {
+      "id": "89631139",
+      "name": "Blue-Eyes White Dragon",
+      "type": "Normal Monster",
+      "atk": 3000,
+      "def": 2500,
+      "level": 8,
+      "race": "Dragon",
+      "attribute": "LIGHT",
+      "card_sets": [
+        {
+          "set_name": "Legend of Blue Eyes White Dragon",
+          "set_code": "LOB-001",
+          "set_rarity": "Ultra Rare",
+          "set_price": "39.99"
+        }
+      ],
+      "card_prices": [
+        {
+          "tcgplayer_price": "9.99"
+        }
+      ],
+      "card_images": [
+        {
+          "image_url": "https://images.ygoprodeck.com/images/cards/89631139.jpg"
+        }
+      ]
+    },
+    {
+      "id": "1434352",
+      "name": "Chaos Necromancer",
+      "type": "Effect Monster",
+      "atk": 0,
+      "def": 0,
+      "level": 3,
+      "race": "Fiend",
+      "attribute": "DARK",
+      "card_sets": [
+        {
+          "set_name": "Invasion of Chaos",
+          "set_code": "IOC-017",
+          "set_rarity": "Common",
+          "set_price": "1.05"
+        },
+        {
+          "set_name": "Invasion of Chaos",
+          "set_code": "IOC-EN017",
+          "set_rarity": "Rare",
+          "set_price": "3.40"
+        }
+      ],
+      "card_prices": [
+        {
+          "tcgplayer_price": "0.35"
+        }
+      ],
+      "card_images": [
+        {
+          "image_url": "https://images.ygoprodeck.com/images/cards/1434352.jpg"
+        }
+      ]
+    },
+    {
+      "id": "46986414",
+      "name": "Dark Magician",
+      "type": "Normal Monster",
+      "atk": 2500,
+      "def": 2100,
+      "level": 7,
+      "race": "Spellcaster",
+      "attribute": "DARK",
+      "card_sets": [
+        {
+          "set_name": "Legend of Blue Eyes White Dragon",
+          "set_code": "LOB-005",
+          "set_rarity": "Ultra Rare",
+          "set_price": "29.99"
+        }
+      ],
+      "card_prices": [
+        {
+          "tcgplayer_price": "4.50"
+        }
+      ],
+      "card_images": [
+        {
+          "image_url": "https://images.ygoprodeck.com/images/cards/46986414.jpg"
+        }
+      ]
+    },
+    {
+      "id": "31786629",
+      "name": "Thunder Dragon",
+      "type": "Effect Monster",
+      "atk": 1600,
+      "def": 1500,
+      "level": 5,
+      "race": "Thunder",
+      "attribute": "LIGHT",
+      "card_sets": [
+        {
+          "set_name": "Metal Raiders",
+          "set_code": "MRD-EN097",
+          "set_rarity": "Common",
+          "set_price": "0.80"
+        }
+      ],
+      "card_prices": [
+        {
+          "tcgplayer_price": "0.30"
+        }
+      ],
+      "card_images": [
+        {
+          "image_url": "https://images.ygoprodeck.com/images/cards/31786629.jpg"
+        }
+      ]
+    }
+  ]
+}
