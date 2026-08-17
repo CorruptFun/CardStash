@@ -1,4 +1,4 @@
--- 0021_catalog_index.sql
+-- 0022_catalog_index.sql
 --
 -- The catalog mirror: our own copy of the big three card catalogs.
 --

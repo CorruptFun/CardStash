@@ -1225,7 +1225,7 @@ exactly the kind of change the scan harness exists to gate.
 ### 28. The catalog mirror is a fallback with our name on it, never the first answer
 
 The app now keeps its own copy of the big three catalogs — `catalog_printings`
-(migration 0021), filled by `scripts/sync-catalog.mjs` from Scryfall, TCGdex
+(migration 0022), filled by `scripts/sync-catalog.mjs` from Scryfall, TCGdex
 and YGOPRODeck, read through three anonymous RPCs by `lib/catalog.ts`. Two
 things forced it: pokemontcg.io failing by degrees taught the app what an API
 outage does to a search box and a scanner, and no upstream API can answer

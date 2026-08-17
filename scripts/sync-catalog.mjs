@@ -1,5 +1,5 @@
 /**
- * Populate the catalog mirror (supabase/migrations/0021) from the three bulk
+ * Populate the catalog mirror (supabase/migrations/0022) from the three bulk
  * sources, and fill in artwork fingerprints. Operator-run with the service
  * key — this script is the ONLY writer the table has; the app never writes it.
  *
@@ -406,7 +406,7 @@ async function stats() {
     console.log(
       res.ok && Array.isArray(hits) && hits.length
         ? `anon lookup: "${sampleName}" answers through catalog_by_name ✓`
-        : `anon lookup FAILED (HTTP ${res.status}) — has 0021 been applied? has test:mirror been run?`,
+        : `anon lookup FAILED (HTTP ${res.status}) — has 0022 been applied? has test:mirror been run?`,
     )
     if (!res.ok) process.exitCode = 1
   }

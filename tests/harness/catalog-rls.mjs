@@ -1,5 +1,5 @@
 /**
- * The catalog mirror's grants (migration 0021), proven against a real
+ * The catalog mirror's grants (migration 0022), proven against a real
  * Supabase project — schema reads can show the functions exist, never that
  * the right callers can use them and the wrong ones cannot.
  *
@@ -14,7 +14,7 @@
  *   * **Normalization is real.** "0321" must find a row stored as "321", and
  *     "085" one stored as "EN085" — the shapes cardcode.ts produces.
  *
- * Run after applying 0021 and after any migration touching catalog_printings:
+ * Run after applying 0022 and after any migration touching catalog_printings:
  *
  *   SUPABASE_SECRET=sb_secret_... node tests/harness/catalog-rls.mjs
  *

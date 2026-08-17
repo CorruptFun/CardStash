@@ -112,7 +112,7 @@ test('the capture neighborhood matters: any alignment may carry the match', asyn
   assert.equal(swapped.id, 'pokemon:dex-a')
 })
 
-test('a project without 0021 stands the mirror down after one 404', async () => {
+test('a project without 0022 stands the mirror down after one 404', async () => {
   reset()
   const calls = serve(() => new Response('{"message":"function not found"}', { status: 404 }))
   assert.deepEqual(await mirrorByName('mtg', 'Bolt'), [])

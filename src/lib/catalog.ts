@@ -11,7 +11,7 @@
  * serves rows when an API is down or empty, and it carries an artwork
  * fingerprint (`art_hash`, computed by the sync worker with the same
  * `cardArtHash` the capture side uses) so a scan can tell alternate arts of
- * one card apart. Schema, grants and the ingestion contract: migration 0021;
+ * one card apart. Schema, grants and the ingestion contract: migration 0022;
  * the worker: scripts/sync-catalog.mjs; the pure logic: catalogmatch.ts.
  *
  * THE RULES, inherited from the shared card index (cardsource.ts) because the
@@ -30,7 +30,7 @@
  *    migrated must cost near-nothing: every path answers null/[] on failure,
  *    and repeated failures stand the mirror down for the session, exactly as
  *    cardsource.ts does (its stand-down is separate from this one — a
- *    project can have 0013 applied and not 0021).
+ *    project can have 0013 applied and not 0022).
  *
  * Dormant with no project configured (`CLOUD_AVAILABLE` false): nothing in
  * this file makes a request and the app behaves as if it did not exist.
@@ -86,7 +86,7 @@ async function anonRpc<T>(fn: string, body: unknown, signal?: AbortSignal): Prom
   if (!res.ok) {
     const message = await readError(res, 'The catalog mirror did not answer')
     // 404 from PostgREST: the RPC is not in the schema — a project without
-    // 0021 applied, which every project is on the day this ships. Permanent
+    // 0022 applied, which every project is on the day this ships. Permanent
     // for the session, so it stands the mirror down at once.
     if (res.status === 404) throw new MissingFunction(message)
     throw new CloudError(message)

@@ -490,7 +490,7 @@ stat, since TCGplayer lists young sets sparsely and backfills later), falling
 back to a packaging-name regex; `NOT_SEALED` keeps sleeves, playmats and binders
 out of "sealed products".
 
-### The catalog mirror — `catalog.ts`, `catalogmatch.ts` (migration 0021)
+### The catalog mirror — `catalog.ts`, `catalogmatch.ts` (migration 0022)
 
 Our own copy of the big three catalogs, consulted only AFTER a game's own API
 failed or answered empty — read decision 28 before touching it. One table,
@@ -511,14 +511,14 @@ the rule that art may never propose a different card. Wiring:
 `searchByCodeWithMirror` / the empty-or-failed branches of `searchGame`,
 `matchGame` and `printingVariants` in cardsearch.ts, and the `tiebreak-art`
 arm in identify.ts. RLS proof: `npm run test:mirror`
-(tests/harness/catalog-rls.mjs) — run it after applying 0021 and after any
+(tests/harness/catalog-rls.mjs) — run it after applying 0022 and after any
 migration touching `catalog_printings`.
 
 **Turning it on** (operator, in this order — every client is dormant until
 the first two steps land, at the cost of two stood-down requests per
 session):
 
-1. `supabase db push` applies 0021. If every project-scoped call answers
+1. `supabase db push` applies 0022. If every project-scoped call answers
    "does not have the necessary privileges", the CLI is signed in as the
    wrong account — see the hosted-social notes in CLAUDE.md before touching
    anything else.

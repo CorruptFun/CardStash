@@ -1,4 +1,4 @@
-# The catalog mirror's ingestion, automated (migration 0021, decision 28).
+# The catalog mirror's ingestion, automated (migration 0022, decision 28).
 #
 # Two modes, decided by whether the repo has a SUPABASE_SECRET secret:
 #
