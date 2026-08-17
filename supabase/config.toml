@@ -434,3 +434,13 @@ verify_jwt = false
 # could force every pending payout in the system to release early.
 [functions.stripe-escrow-sweep]
 verify_jwt = false
+
+# Same shape as stripe-escrow: `/checkout` asks GoTrue who the bearer is, and
+# `/webhook` trusts nothing but a valid `Stripe-Signature` -- which Stripe sends
+# with no JWT beside it. This pin was MISSING when the function first deployed,
+# so the platform 401'd the webhook route at the door (found 2026-08-17 by
+# probing the deployed function; fixed live via the Management API the same
+# day). Without it, every renewal and checkout event fails as "payments
+# silently never arrive".
+[functions.stripe-billing]
+verify_jwt = false
