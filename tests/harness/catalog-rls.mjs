@@ -101,6 +101,12 @@ async function main() {
           slug: `harness dragon ${STAMP}`,
           set_code: 'HRN',
           collector_number: 'EN085',
+          // PostgREST bulk inserts demand IDENTICAL key sets across rows
+          // (PGRST102 "All object keys must match") -- this row's nulls are
+          // load-bearing, discovered on the harness's first-ever live run.
+          rarity: null,
+          image_url: null,
+          art_hash: null,
         },
       ]),
     })
