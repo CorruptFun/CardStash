@@ -1432,3 +1432,63 @@ rather than the main answer. Short of that, the failure mode to watch is the
 tempting one: adding "just one" attribute adjustment, or widening the tiers
 until a comparable is anything vaguely similar. Both convert a traceable
 summary into a guess wearing its clothes.
+
+### 29. A miss states, a panel acts — and the panel is where the offer lives
+
+The scan screen's "no match" chip carried four buttons and was on screen for
+about a second and a half. The scanner's own retry replaced it; any real
+movement of the phone threw the loop back to `searching` and took it away
+sooner. So the buttons were unreachable in practice — and reaching for one
+moved the phone, which is what dismissed it. Nothing was broken in a way a
+type, a unit test or a screenshot could show, which is why it survived so long.
+
+The fix is a split by LIFETIME rather than by content. `ScanChip` states what
+happened and what usually fixes it, and carries no buttons at all. `MissHelp`
+holds every action — try again, upload a photo, search it instead, add it
+myself, what did the scanner see — and is driven by a run of misses rather than
+by the scanner's status, so it survives the churn underneath it.
+
+That panel is also, deliberately, where the subscription offer goes. A card
+that will not read is the one honest moment to mention cloud rescue: it is a
+description of what is happening on screen rather than a sales line. Which is
+exactly why it needed rules.
+
+**Consequences.**
+
+- **Free things first, always, and the offer sits under a rule.** Holding
+  still, a still photo, searching by name and describing the card by hand cost
+  nothing, work offline, and between them fix most misses. An offer that
+  arrives before them is an advert wearing a diagnosis. It also arrives a miss
+  later than the help itself.
+- **Turning on a free thing is not an upsell.** Cloud rescue's first 50 reads a
+  month are free. An account with the switch off is shown the SWITCH and no
+  price at all — selling a subscription to someone who has never used the free
+  version of the feature is selling a bigger version of nothing.
+- **A signed-out user is never asked for money here.** Scanning, the
+  collection, decks and trades never need an account, and the screen where
+  scanning is failing is the last place to start asking for one. It also
+  follows the house rule: say nothing rather than offer a button that cannot
+  work.
+- **Only an affirmative "not subscribed" opens it.** `isSubscribed()` answers
+  `null` when it could not ask, and a failed fetch that read as "unsubscribed"
+  would advertise a subscription to someone who has already paid.
+- **The quote and the till agree or there is no sale.** The client asks for an
+  *offer*, never a price; the server re-derives the tier from the caller's own
+  token and sells whichever is cheaper; and an unconfigured offer price is
+  refused outright rather than downgraded to the standard one. A panel that
+  says $10.99 must never end at a $11.99 checkout — that is discovered after
+  paying, and never forgiven.
+- **"No thanks" is persisted** (`settings.scanOfferAt`, 14 days). The offer is
+  made at a bad moment by definition, and a run of misses is the easiest thing
+  in this app to reproduce by accident; a refusal that lasts until the next
+  launch is a delay, not an answer.
+- **It ships off.** `VITE_SCAN_OFFER` is the client switch and
+  `STRIPE_SCAN_OFFER_PRICE_ID` the real one — server first, like the
+  marketplace and the eBay comps.
+
+**What would make this wrong.** Evidence that the panel itself is the problem —
+that people want the viewfinder clear and would rather tap once for help. The
+failure mode to watch for is the offer creeping up the panel, or the run
+shortening until a single bad frame sells a subscription. If the words ever
+have to work harder than "this is what cloud rescue does", the offer has
+stopped describing the moment and started exploiting it.

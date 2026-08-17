@@ -893,6 +893,44 @@ Verification is `tests/unit/referral.test.mjs`, which pins the two easiest thing
 to break: a sharer without a handle gets a byte-identical link, and a payload and
 a referral in one URL never eat each other.
 
+### The fourth price: a dollar off at the scan miss (v0.19.0)
+
+There are now four prices, and the new one is not a tier — it is a **discount on
+the standard tier**, offered by the scan screen to someone whose card would not
+read (decision 29). `$10.99` a year against `$11.99`, sold by
+`STRIPE_SCAN_OFFER_PRICE_ID` on `stripe-billing` and quoted by
+`SCAN_OFFER_PRICE` in `src/lib/billing.ts`.
+
+Four things about it are load-bearing:
+
+- **The client asks for an OFFER, never a price.** `startSubscriptionCheckout({
+  offer: 'scan-miss' })` posts one string; `/checkout` still reads
+  `referral_tier` off the caller's own JWT and sells whichever is cheaper, so a
+  referred ($9.99) or founding ($6.99) buyer who taps it keeps the better deal.
+  A client that could name its price would name $0.
+- **An unconfigured offer is REFUSED (503), never downgraded to the full
+  price.** This is the opposite of the `referred` fallback three paragraphs up,
+  and deliberately: the referred discount is quoted in Settings beside the
+  standard price where both are visible, while this one is quoted *alone*, in a
+  panel that says "$10.99", by a client that cannot see the server's variables.
+  Selling that person $11.99 because a deployment is half-configured is
+  discovered after paying.
+- **It is sold as `standard`.** `metadata[tier]` stays `standard` so
+  `record_referral_reward()` pays the referrer exactly what it did before;
+  `metadata[offer]` carries where the sale came from, so the offer can be
+  counted without changing what anybody is owed.
+- **Two switches, server first**, like the marketplace and the eBay comps.
+  `VITE_SCAN_OFFER=on` only reveals the panel's money half — it stops us
+  offering something the till would refuse, and it is **off** in the deployed
+  build until the Stripe price exists.
+
+`isSubscribed()` is the client's read of whether there is anyone to offer it to,
+and it answers `null` when it could not ask — offline, signed out, a failed
+request. Only an affirmative "no subscription" opens the offer, because a failed
+fetch that reads as "unsubscribed" is an advert shown to someone who has already
+paid. It memoizes for 15 minutes: the caller is a card that will not read, and
+that card is read at again and again.
+
 ### The invite, and the friendship it promises (v0.18.0)
 
 Recording who invited whom decides a price and nothing else — the two of them

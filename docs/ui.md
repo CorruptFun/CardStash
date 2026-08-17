@@ -190,6 +190,32 @@ the pill takes an active state. The label used to be hidden below 430px, back
 when three pills fought for the row — that rule is gone, and reinstating it
 would hide exactly the state that most needs showing.
 
+### A miss is two surfaces, and the split is the point
+
+When a card will not read, the screen says two different kinds of thing, and
+they have different lifetimes:
+
+- **`ScanChip` (`chip--nomatch`) states.** What happened, plus one line of
+  advice — try again, or upload a photo. It carries **no buttons at all**, and
+  that is deliberate: the chip is torn down by the scanner's own retry about a
+  second and a half later, and any real movement of the phone throws the loop
+  back to `searching` and takes it away immediately. Buttons on it were
+  unreachable in practice, and reaching for one moved the phone, which is
+  itself what dismissed them.
+- **`MissHelp` (`scan__misshelp`) acts.** Try again · Upload a photo · Search
+  it instead · Add it myself · what did the scanner see · Hide. It is driven by
+  `missRun` — consecutive entries into `nomatch`, reset by any hit — and NOT by
+  the scanner's status, so it survives the retry churn underneath it. It shares
+  the iOS hint's slot (`scan__ioshint`), so the two never stack, and it is
+  capped at `min(46vh, 340px)` with its own scroll: help must not become a
+  takeover of the viewfinder.
+
+Free things first, always. Holding still, a still photo, searching by name and
+describing the card by hand cost nothing and fix most misses; `MissOffer` is
+appended **under** them, behind a rule, never in front. `npm run test:misshelp`
+is what proves the panel outlives a retry it started — the failure this whole
+split exists to fix is invisible to a screenshot and to the type system.
+
 ## Mobile behaviours worth knowing
 
 - **Viewport**: `maximum-scale=1` stops iOS auto-zooming when a sub-16px input

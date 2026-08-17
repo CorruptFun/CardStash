@@ -62,6 +62,20 @@ const FOUNDING_PRICE_ID = Deno.env.get('STRIPE_FOUNDING_PRICE_ID') ?? ''
  *  the standard price when unset, so a half-configured deployment overcharges
  *  nobody by accident — it simply fails to discount. */
 const REFERRED_PRICE_ID = Deno.env.get('STRIPE_REFERRED_PRICE_ID') ?? ''
+/**
+ * $10.99/year — a dollar off, offered by the scan screen to someone whose card
+ * would not read. Empty = the offer is OFF, and a checkout asking for it is
+ * REFUSED (503) rather than falling through to the standard price.
+ *
+ * That refusal is the opposite of the `referred` fallback above, and
+ * deliberately so. The referred discount is quoted in Settings beside the
+ * standard price and both are visible; this one is quoted ALONE, in a panel
+ * that says "$10.99", by a client that cannot see this variable. Selling that
+ * person a $11.99 subscription because a deployment is half-configured is the
+ * exact failure the price constants in `src/lib/billing.ts` warn about, and it
+ * is discovered after paying.
+ */
+const SCAN_OFFER_PRICE_ID = Deno.env.get('STRIPE_SCAN_OFFER_PRICE_ID') ?? ''
 const RETURN_URL = Deno.env.get('STRIPE_BILLING_RETURN_URL') ?? 'https://cardstock.corrupt.solutions/'
 
 async function stripe(path: string, key: string, form: Record<string, string>): Promise<Response | null> {
@@ -92,6 +106,10 @@ Deno.serve(async (req: Request) => {
   // ------------------------------------------------------------- /checkout
   if (route === 'checkout') {
     if (!PRICE_ID) return json({ error: 'not configured' }, 503)
+    // The only thing a client may say about price, and it is a request rather
+    // than a number: which OFFER it made. Anything unrecognised is no offer.
+    const body = (await req.json().catch(() => null)) as { offer?: unknown } | null
+    const asked = body?.offer === 'scan-miss' ? 'scan-miss' : ''
     const auth = req.headers.get('Authorization') ?? ''
     if (!auth.startsWith('Bearer ')) return json({ error: 'sign in required' }, 401)
     const who = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -149,9 +167,22 @@ Deno.serve(async (req: Request) => {
       if (reserve?.ok) seat = Number(await reserve.json().catch(() => 0)) || 0
     }
 
+    // The scan-miss offer only ever applies to someone paying the STANDARD
+    // price. A referred ($9.99) or founding ($6.99) buyer is already cheaper
+    // than $10.99, so the offer is silently ignored for them rather than
+    // upgrading them into a worse deal they asked for by accident.
+    const discounted = asked === 'scan-miss' && tier === 'standard'
+    if (discounted && !SCAN_OFFER_PRICE_ID) return json({ error: 'offer not configured' }, 503)
+
     // The recurring price this person gets. `referred` falls back to standard
     // when unconfigured — a missing discount is recoverable, a wrong charge is not.
-    const recurringPrice = tier === 'referred' && REFERRED_PRICE_ID ? REFERRED_PRICE_ID : PRICE_ID
+    const recurringPrice =
+      tier === 'referred' && REFERRED_PRICE_ID ? REFERRED_PRICE_ID : discounted ? SCAN_OFFER_PRICE_ID : PRICE_ID
+    // The offer is a discount on the standard tier, not a tier of its own: the
+    // referral bounty is paid on what the SQL says the buyer is, and
+    // `record_referral_reward` knows two words. Where the sale came from rides
+    // in its own metadata field, where it can be counted without changing what
+    // anyone is owed.
     const soldTier = tier === 'referred' && REFERRED_PRICE_ID ? 'referred' : 'standard'
 
     if (seat > 0) {
@@ -189,6 +220,7 @@ Deno.serve(async (req: Request) => {
       'metadata[tier]': soldTier,
       'subscription_data[metadata][user_id]': user.id,
       'subscription_data[metadata][tier]': soldTier,
+      ...(discounted ? { 'metadata[offer]': asked, 'subscription_data[metadata][offer]': asked } : {}),
       ...(user.email ? { customer_email: String(user.email) } : {}),
     })
     if (!checkout?.ok) return json({ error: 'could not start checkout' }, 502)

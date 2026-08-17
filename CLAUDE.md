@@ -441,6 +441,34 @@ it. Four things are load-bearing:
   never launder a refusal. `seedFriendRows()` gives an accepted friend a local
   row before they publish, or the Friends screen contradicts the toast.
 
+## When a card won't read, and the offer that lives there
+
+A miss is **two surfaces with two lifetimes** (decision 29, `docs/ui.md`).
+`ScanChip` states — what happened, plus "try again, or upload a photo" — and
+carries **no buttons**, because the scanner's own retry replaces it in ~1.6s and
+any movement of the phone takes it away sooner; buttons there were unreachable
+in practice, and reaching for one moved the phone. `MissHelp` acts, keyed on a
+run of misses rather than the scanner's status, so it outlives the churn.
+`npm run test:misshelp` is what proves that, and nothing else can.
+
+`MissOffer` is appended UNDER the free actions, behind a rule, and is the app's
+one moment of selling on the scan screen. Five things are load-bearing:
+
+- **Free first, and a free switch is not an upsell.** Cloud rescue's first 50
+  reads a month are free, so an account with `cloudScanRescue` off is shown the
+  SWITCH and no price at all. A signed-out user is never asked for money here.
+- **The quote and the till agree or there is no sale.** The client asks for an
+  *offer* (`startSubscriptionCheckout({ offer: 'scan-miss' })`), never a price;
+  `/checkout` re-reads `referral_tier` and sells whichever tier is cheaper, so
+  a referred/founding buyer keeps their better price. An unconfigured
+  `STRIPE_SCAN_OFFER_PRICE_ID` is **refused (503), never downgraded** to
+  $11.99 — this panel quotes $10.99 alone, where Settings shows both prices.
+- **Only an affirmative "no" opens it.** `isSubscribed()` answers `null` when
+  it could not ask; a failed fetch must not advertise to a subscriber.
+- **It ships OFF, two switches, server first**: `VITE_SCAN_OFFER=on` reveals it.
+- **"No thanks" persists** (`settings.scanOfferAt`, 14 days) — a run of misses
+  is trivially reproduced by accident.
+
 ## Cards the catalogs got wrong, or never had
 
 A card with **no picture** (TCGCSV ships those constantly) and a card in **no

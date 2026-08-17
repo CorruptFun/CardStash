@@ -53,10 +53,13 @@ test('round-trips a payload through a passphrase', async () => {
 
 test('the envelope leaks no plaintext', async () => {
   const salt = randomSalt()
-  const key = await deriveKey('pw', salt)
+  // The sentinel must contain characters outside the base64 alphabet ('-', '!')
+  // — a short all-letter passphrase like 'pw' shows up inside the ~150 base64
+  // chars of salt/iv/ct by pure chance in a few percent of runs.
+  const key = await deriveKey('pw-sentinel!', salt)
   const env = await encryptJson({ name: 'Black Lotus' }, key, salt)
   assert.ok(!JSON.stringify(env).includes('Black Lotus'))
-  assert.ok(!JSON.stringify(env).includes('pw'))
+  assert.ok(!JSON.stringify(env).includes('pw-sentinel!'))
 })
 
 test('a wrong passphrase fails as WrongPassphraseError, not a crash', async () => {
