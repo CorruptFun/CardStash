@@ -46,9 +46,10 @@ const MODEL = Deno.env.get('GEMINI_SCAN_MODEL') ?? 'gemini-3.1-flash-lite'
 /** A card photo at capture size is ~250KB of base64; this is a sanity ceiling. */
 const MAX_IMAGE_BYTES = 6_000_000
 
-// Kept WORD FOR WORD in step with CARD_PROMPT in src/lib/gemini.ts. The client
-// parses what this returns against that contract, so a prompt that drifts here
-// is a field the client quietly stops getting.
+// The canonical copy — the harness mirrors it WORD FOR WORD as SCAN_PROMPT in
+// tests/harness/run-matrix.mjs. The rescue in src/lib/identify.ts parses what
+// this returns, so a prompt that drifts here is a field the client quietly
+// stops getting.
 const PROMPT =
   'You are reading a trading card photograph for a collection app. ' +
   'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
