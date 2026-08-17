@@ -934,7 +934,12 @@ result seems absurd, check this list before writing code.
     179; check before trusting an unchanged column) — but the regression
     halves of that same gate (identify, claimed-wrong) were still valid:
     a no-op snapshot invalidates the improvement claim, never the
-    no-drop claim.
+    no-drop claim. The actionable form (from the session whose gate hit
+    this): before measuring a feature, ASSERT the fixtures contain the
+    inputs that feature consumes -- `ls fixtures/images/prints | wc -l`
+    is checkable where "did it help" is not. The run output will never
+    warn you: the blind gate reported mtg 23/46 with full confidence
+    and no hint that the path under test had never executed.
 83. **Compare runners before comparing runs.** a05f528 changed
     run-matrix.mjs (printing serialised into byGame) on the branch side
     of the 7a829a1 gate, so baseline and candidate consoles were produced
