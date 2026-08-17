@@ -37,6 +37,10 @@ export const EVENT_TYPES = [
   'deck_created',
   'ai_builder_run',
   'price_refresh',
+  // Sports comps: how often a price check is asked for and whether it lands.
+  // The QUERY never travels — see `redact` and the sports-comp rules in
+  // `lib/ebaycomps.ts`. Only counts, timings and the refusal reason do.
+  'comps_check',
   'friend_added',
   'social_share',
   'trade_update',

@@ -95,6 +95,8 @@ construction. Value comes from two places:
 - **eBay sold comps** — `sportsCompLink` builds the query a collector would
   type (year, brand, product, player, `#number`, parallel, `/run`, and the
   grade when there is one). This is what the hobby actually prices on.
+- **A live comp spread** — the same query, run against eBay's *active*
+  listings, described below.
 
 A bulk price refresh **skips** sports rather than counting every row as a
 failure; `refreshCards` filters them and they surface as "skipped".
@@ -102,6 +104,98 @@ failure; `refreshCards` filters them and they surface as "skipped".
 Do not add a paid price API on the free path. If one is ever wired up it
 belongs behind a user-supplied key (like `pokemonKey`) or the entitlement seam
 in `entitlement.ts`, and scanning must keep working without it.
+
+### The comp lookup (`ebaycomps.ts` + `ebay-comps`)
+
+The link above was the whole answer until a number could be put beside it
+honestly. It can now, with a narrow definition of "honestly" — decision 17a.
+
+**What it is.** `supabase/functions/ebay-comps` searches eBay's Browse API for
+the card and returns `{ count, scanned, low, median, high, kind: 'asking' }`.
+`lib/ebaycomps.ts` asks for it, caches it and hands it to `PriceCheck.tsx`.
+
+**What it is not.** eBay's sold-comp feed (Buy → Marketplace Insights) is a
+limited release that is not open to new applications, so these are **asking
+prices on active listings** — what sellers want, not what anyone paid. Every
+layer says so: the field is called `kind: 'asking'`, the UI prints "asking
+prices, not sales" under the spread, and the sold-comps link sits beside it.
+
+Five properties are load-bearing:
+
+| Property | Why |
+| -------- | --- |
+| It never writes `card.prices` | An asking price in `prices.entries` would enter portfolio totals, price history and every shared binder, for cards nobody looked at. It becomes `CollectionItem.marketValue` **only** when the collector taps "Use $X". |
+| Nothing is fetched until tapped | No prefetch, no bulk sweep, no background refresh. Which cards someone is pricing is not a stream this app should emit by default — and a tap is consent, which is why there is no settings switch (`cardSourceLookup` needed one because it fires automatically). |
+| The proxy is not optional | eBay sends no CORS headers, and the client-credentials grant needs a client **secret** — unlike the PSA token, that cannot ship in a bundle at all. |
+| It is called anonymously | Publishable key, `verify_jwt = false`, no session token. The free path is signed out, and what card someone is pricing should not be tied to a user id (decision 20's rule). |
+| A thin sample is refused | `MIN_COMPARABLES` is 3, after lots/repacks/reprints are dropped by title and outliers by a five-fold band around the median. Below that the answer is "too few listings", not a number. |
+
+**Turning it on — two switches, server first**, the same shape as the
+marketplace (decision 2a):
+
+1. Deploy `ebay-comps` with `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` (an eBay
+   developer account, production keyset — the Browse API needs no special
+   approval). Missing either, it answers 503. **This is the real switch.**
+2. Build with `VITE_EBAY_COMPS=on`. This only hides the button, which is all a
+   client can do — but without it a deployed build would offer a price check
+   against a function that is not there, and a button that can only fail reads
+   as a broken app rather than an absent feature.
+
+Optional: `EBAY_MARKETPLACE` (`EBAY_US`), `EBAY_CATEGORY` (`261328`, "Sports
+Trading Card Singles" — the scoping that keeps a player name from returning
+jerseys and posters).
+
+**It ships off**, so today the estimate below is the whole sports answer and
+the eBay *link* is the manual check, exactly as before 17a.
+
+### The soft estimate (`estimate.ts`)
+
+The comp lookup needs credentials, a network and a card with enough printed
+facts to search on. None of that is true offline, on a promo nobody lists, or
+in a build with no eBay keyset — so beside it there is an estimate that needs
+none of them, and it is the answer to "what do we *think* this goes for?"
+(decision 17b).
+
+**Where the numbers come from.** Cards the collector has already priced —
+`CollectionItem.marketValue`, falling back to `purchasePrice`. That is real
+evidence, specific to the corner of the hobby they actually collect, and every
+dollar in it traces back to something they typed. What it is emphatically NOT
+is a model of card attributes: "rookie + auto + /25 ≈ $200" would produce a
+confident figure for a card nobody has ever priced, which is the exact thing
+decision 17 refuses.
+
+**Three tiers, strongest only, never blended:**
+
+| Tier | Comparables | Why not wider |
+| ---- | ----------- | ------------- |
+| `player` | same player, same year | Different years are different markets — a 1989 rookie against a 1994 base is the comparison that produces an invisible error |
+| `set` | same year + brand + product | The set's own price band |
+| `brand` | same year + brand | Last resort, and it says so |
+
+Three comparables minimum (the comps floor again), outliers dropped by the same
+five-fold band, slabs compared only with slabs (decision 18). The strongest
+tier that clears the floor wins outright — averaging three same-player cards in
+with twenty commons from the set buries the good evidence in the weak.
+
+**Three ways it says "estimate", on purpose.** The word, the range instead of a
+figure, and the basis line naming the comparables ("Rough guess from 4 Ken
+Griffey Jr cards from 1989 you've priced"). A number this soft gets read by
+whichever cue the user notices first, so it carries all three. Figures round to
+a step that widens with size — `$34.17` claims a precision this cannot have.
+
+**Nothing is adjusted.** No rookie multiplier, no parallel premium, no
+condition curve. Each would be a number we invented, and one is enough to make
+the output untraceable to anything the user said.
+
+**It compounds.** Accepting an estimate or a comp writes `marketValue`, which
+is corpus for the next card — so a collection gets easier to price the more of
+it is priced. A new collector sees nothing, which is the honest cold start.
+
+**The quota.** eBay's default Browse allowance is a few thousand calls a day
+for the *application*, shared across all users — the same arithmetic as the PSA
+token. Two caches answer it: an hour in the function's isolate, a day on the
+device (three days for "too few"), so a popular card costs eBay one call an
+hour for everybody. A 429 stands the device down for six hours.
 
 ### Local recall is the catalog
 

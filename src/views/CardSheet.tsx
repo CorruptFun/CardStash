@@ -4,6 +4,7 @@ import { CardImg, ManaCost, Seg, Stepper, Toggle } from '../components/basics'
 import { BinderPicker } from '../components/BinderPicker'
 import { DeckPicker } from '../components/DeckPicker'
 import { Icon } from '../components/Icon'
+import { PriceCheck } from '../components/PriceCheck'
 import { Sheet } from '../components/Sheet'
 import { amountBucket, track } from '../lib/analytics'
 import { canBuyFrom, marketReady, startCheckout } from '../lib/marketplace'
@@ -27,6 +28,7 @@ import { addedToBoardToast, boardForCard } from '../lib/deckstats'
 import { CONDITIONS, FINISH_LABEL, finishOptions, GAME_FINISHES, GAME_LABEL, isFoilFinish, SOURCE_LABEL } from '../lib/games'
 import { gradeShort } from '../lib/slab'
 import { SPORT_LABEL } from '../lib/sports'
+import { clearEstimateCorpus } from '../lib/estimate'
 import { cardTrend } from '../lib/portfolio'
 import { sealedSetContents, setListLink } from '../lib/sealed'
 import {
@@ -521,31 +523,47 @@ function CardSheet() {
         </h3>
         <Sparkline points={history ?? []} />
       </section>
-      {comps.length > 0 && (
+      {(comps.length > 0 || card.game === 'sports') && (
         <section className="sheetsec">
           <h3>
             <Icon name="tag" size={15} /> Prices & comps
           </h3>
-          <div className="compsscroll">
-            <div className="compstable" role="table">
-              <div className="compstable__row compstable__row--head" role="row">
-                <span>Source</span>
-                <span>Finish</span>
-                <span className="num">Low</span>
-                <span className="num">Market</span>
-                <span className="num">High</span>
-              </div>
-              {comps.map((row, i) => (
-                <div key={i} className="compstable__row" role="row">
-                  <span>{SOURCE_LABEL[row.source]}</span>
-                  <span className="dim">{FINISH_LABEL[row.finish]}</span>
-                  <span className="num dim">{money(row.low ?? null)}</span>
-                  <span className="num strong">{money(row.market ?? row.trend ?? row.mid ?? null)}</span>
-                  <span className="num dim">{money(row.high ?? row.avg30 ?? null)}</span>
+          {/* Sports has no comp table to show — no catalog prices these cards
+              (decision 17) — so its section is the eBay link plus a lookup the
+              user asks for. The section used to be gated on price rows, which a
+              sports card can never have, so the sold-comps link `sports.ts`
+              builds for every one of them rendered nowhere at all. */}
+          {card.game === 'sports' && (
+            <>
+              <p className="printpick__hint">
+                No catalog prices sports cards, so what a copy is worth is yours to set. The eBay link below is what
+                the hobby actually prices on.
+              </p>
+              <PriceCheck card={card} />
+            </>
+          )}
+          {comps.length > 0 && (
+            <div className="compsscroll">
+              <div className="compstable" role="table">
+                <div className="compstable__row compstable__row--head" role="row">
+                  <span>Source</span>
+                  <span>Finish</span>
+                  <span className="num">Low</span>
+                  <span className="num">Market</span>
+                  <span className="num">High</span>
                 </div>
-              ))}
+                {comps.map((row, i) => (
+                  <div key={i} className="compstable__row" role="row">
+                    <span>{SOURCE_LABEL[row.source]}</span>
+                    <span className="dim">{FINISH_LABEL[row.finish]}</span>
+                    <span className="num dim">{money(row.low ?? null)}</span>
+                    <span className="num strong">{money(row.market ?? row.trend ?? row.mid ?? null)}</span>
+                    <span className="num dim">{money(row.high ?? row.avg30 ?? null)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           <div className="compslinks">
             <a className="btn btn--ghost" href={card.links.ebaySold} target="_blank" rel="noreferrer">
               <Icon name="external" size={15} /> eBay solds
@@ -864,6 +882,10 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
     )
     setSaving(false)
     if (result !== undefined) {
+      // A value just saved is evidence for the NEXT card's estimate, and the
+      // flow is usually "price this one, open the next" — well inside the
+      // corpus memo's life. Drop it so the estimate does not lag a card behind.
+      clearEstimateCorpus()
       setEditing(false)
       if (result === null) {
         toast('That copy is no longer in your collection', 'info')
@@ -963,6 +985,12 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
                 : 'Enter an amount like 12.50'}
             </span>
           )}
+          {/* Grade-aware on purpose: a PSA 10 and a raw copy are different
+              markets, and the grade lives on the COPY (decision 18), which is
+              why the check belongs here rather than only up in the comp
+              section. Accepting a figure fills the field — it does not save;
+              the user still presses Save, and can still type over it. */}
+          <PriceCheck card={row.card} grade={row.grade} onUse={(amount) => setValue(amount.toFixed(2))} />
           {!(sealed && opened) && (
             <div className="copyedit__trade">
               <span className="copyedit__tradetext">

@@ -485,6 +485,11 @@ confident wrong answers at scale.
   collector entered and nothing else. That is honest, and quietly inventing
   numbers about someone's money would not be.
 
+**Amended by 17a**, which puts a NUMBER beside the comps link: the spread of
+active eBay listings, fetched on a tap and applied only when accepted. Nothing
+above changed — a synthesized `Card` still carries no prices — and the reason
+that is not a contradiction is the whole of 17a.
+
 **What would make this wrong.** A genuinely free, openly licensed sports
 catalog appearing — then this becomes an adapter like any other and the
 synthesis path should retire to a fallback. Short of that, the failure mode to
@@ -1276,3 +1281,152 @@ a fourth game joining, which belongs here only once its bulk source proves
 as durable as the first three; or populating `art_hash`, which requires
 settling the fingerprint-format contract above first — and then re-doing the
 measurement work on real captures, not just the harness camera model.
+
+---
+
+### 17a. A sports card can carry a comp, and it is an asking price the collector accepts
+
+**Context.** Decision 17 left sports with no price feed and an eBay sold-comps
+*link* as the whole answer. That was honest, and it made the one category the
+app cannot price also the only one where every figure in the portfolio has to
+be typed by hand — for a category where the number on the screen is most of
+why people open a collection app at all.
+
+The thing that made this look impossible was checked again rather than assumed.
+It is half true: eBay's sold-comp feed (Buy → **Marketplace Insights**) is a
+limited-release API that is not open to new applications, and every paid
+alternative (SportsCardsPro, CardHedge, Beckett, PriceCharting) fails decision
+11 on the free path. But eBay's **Browse** API is open to any developer
+account, needs no approval, and returns active listings — asking prices.
+
+**Decision.** Ship the asking-price spread, and never let it pretend to be
+anything else. `supabase/functions/ebay-comps` holds the eBay credentials and
+returns `{ count, scanned, low, median, high, kind: 'asking' }`;
+`lib/ebaycomps.ts` fetches and caches; `components/PriceCheck.tsx` renders a
+button, a spread, and the sentence "asking prices, not sales".
+
+**Why this way.** The failure mode decision 17 is built around is a *confident
+wrong number*, and an asking price is precisely that if it is presented as a
+value. So the design is arranged so it cannot become one:
+
+- **It never touches `card.prices`.** A comp becomes the collector's own
+  `CollectionItem.marketValue`, and only when they tap "Use $34". Writing it to
+  the `Card` would put an unsold seller's hope into portfolio totals, price
+  history and every shared binder, silently, for cards nobody ever opened.
+- **Nothing is fetched until asked.** No prefetch on sheet open, no bulk
+  refresh, no background sweep — which is also why it needs no settings switch.
+  `cardSourceLookup` has one because it fires on its own; a tap is consent.
+- **Spread, not figure.** Low / median / high with the sample size beside it.
+  "Median of 14 active listings" is a fact. "$34" is a claim this data cannot
+  support, and it is the claim decision 17 exists to refuse.
+- **The median, never the high**, is what "Use $X" hands over. The number that
+  flatters a collection is not the one to make a tap away.
+- **A thin sample is refused outright.** Lots, repacks, reprints and "you pick"
+  listings go by title; outliers go by a five-fold band around the median; under
+  three survivors the answer is "too few listings". Decision 4, applied to money.
+
+**Why a server at all**, in an app whose first decision is "no backend". eBay
+sends no CORS headers, so the browser cannot make the call; and the
+client-credentials grant needs a client **secret**, which — unlike the PSA
+token, merely unwise in a bundle — is an account handed over. It is the
+`scan-card` shape: the credential is the reason the function exists. The app
+keeps working with the function absent, which is the property that matters.
+
+**The call is anonymous, deliberately.** `verify_jwt = false`, publishable key,
+no session token — the same rule as `lookup_card_data` and diagnostics
+(decision 20). The free path is signed out, so gating "what is this worth?"
+behind an account would make the most basic question in the app an account
+feature; and what card someone is pricing today is not a fact worth being able
+to attach to a user id.
+
+**Consequences.**
+
+- **Sports still has no prices**, in the sense decision 17 meant. `sportsCard`
+  emits an empty `prices.entries`, bulk refresh still skips sports, and a
+  portfolio total is still exactly what the collector entered.
+- **We now spend a shared quota.** eBay's Browse allowance is per-application,
+  a few thousand calls a day across every user — the PSA arithmetic again.
+  Caching answers it: an hour in the isolate, a day on the device, three days
+  for a "too few" answer, and a six-hour stand-down on a 429.
+- **It ships off, with two switches, server first.** The function refuses
+  without an eBay keyset — that is the real one; `VITE_EBAY_COMPS=on` reveals
+  the button, which is all a client can do, and stops a deployed build offering
+  a check against a function that is not deployed. A button that can only fail
+  reads as a broken app rather than an absent feature. The soft estimate (17b)
+  is not gated by either: it is local arithmetic and needs no server.
+- **An unauthenticated function can be called by anyone who reads the bundle.**
+  Accepted, and bounded rather than hidden: no money, no user data, a capped
+  and normalised query, cached answers. The worst case is that price checks go
+  quiet for a day, which the client already treats as ordinary.
+- **The query is shared with the link** (`sportsCompTerms`), so the number on
+  screen and the eBay page the user opens to check it answer the same question.
+
+**What would make this wrong.** Getting real sold data — Marketplace Insights
+access, or a paid feed the product decides to buy — at which point `kind`
+stops being a constant and every renderer of it is forced to notice that the
+meaning changed. That field exists for that day. The failure mode to watch for
+meanwhile is the obvious one: someone deciding the median is good enough to
+write onto the card, or to fill in automatically, or to total a collection
+with. Each of those is one small edit and each turns an honest reading into the
+invented number decision 17 was written to prevent.
+
+---
+
+### 17b. A soft estimate is a summary of the collector's own numbers, never a guess about the card
+
+**Context.** 17a gave sports a comp, but it needs an eBay keyset, a network,
+and a card with enough printed facts to search on. Offline, on a regional promo
+nobody lists, or in a build with no credentials, the answer is still "type a
+number in". The obvious next idea is an *estimate* — a soft figure the app
+offers when it has no comp — and the obvious way to build one is a model of
+card attributes: rookie, auto, serial run, brand tier, year.
+
+**Decision.** Ship the estimate, and build it out of the collector's own priced
+cards rather than out of attributes. `lib/estimate.ts` finds comparables among
+their valued (or failing that, purchased) copies, summarizes them into a range,
+and shows the comparables it used.
+
+**Why this way.** An attribute model produces a confident dollar figure for a
+card nobody has ever priced. That is exactly the failure decision 17 was
+written around, moved from identity to money: not the wrong *real* answer, but
+an invented one, with nothing on screen that could let the user tell. And the
+numbers it would need — how much a rookie stamp is worth, what a /25 multiplies
+by — do not exist anywhere in this app. We would be making all of them up.
+
+The collector's own history, by contrast, is real, is specific to the corner of
+the hobby they actually collect, works offline with no key and no account, and
+every dollar in it traces back to something they typed. It is also a smaller
+claim, honestly stated: not "this card is worth $30" but "cards like it, that
+you priced, run $20–$40".
+
+**Consequences.**
+
+- **Three tiers, strongest only, never blended.** Same player + year; then the
+  set; then brand + year. Three comparables minimum, outliers dropped by the
+  same five-fold band as the comps, slabs compared only with slabs (18).
+  Averaging three same-player cards in with twenty commons would bury the good
+  evidence in the weak.
+- **Nothing is adjusted.** No rookie multiplier, no parallel premium, no
+  condition curve. One invented factor is enough to make the output
+  untraceable, and traceability is the entire defence.
+- **It says "estimate" three ways** — the word, a range instead of a figure,
+  and the basis sentence naming the comparables. That is not belt-and-braces
+  copy: a number this soft gets read by whichever cue the reader notices first.
+  `describeBasis` is unit-tested for the same reason the figures are; the
+  sentence IS the disclosure.
+- **Figures round to a widening step.** `$34.17` claims a precision four
+  comparables cannot support.
+- **It compounds, and its cold start is honest.** Accepting an estimate or a
+  comp writes `marketValue`, which becomes corpus for the next card. A new
+  collector with nothing priced sees nothing at all, and that is correct — the
+  alternative is inventing the first number, which is where this started.
+- **Still never automatic.** `card.prices` stays empty, bulk refresh still
+  skips sports, portfolio totals are still exactly what the collector entered.
+  An estimate reaches `marketValue` only on a tap, like a comp.
+
+**What would make this wrong.** Enough real sold data to price a card directly
+— at which point the estimate becomes a fallback for cards the feed misses
+rather than the main answer. Short of that, the failure mode to watch is the
+tempting one: adding "just one" attribute adjustment, or widening the tiers
+until a comparable is anything vaguely similar. Both convert a traceable
+summary into a guess wearing its clothes.
