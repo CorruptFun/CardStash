@@ -43,7 +43,13 @@ async function fetchRetry(url, { as = 'json', tries = 3, headers = {} } = {}) {
         headers: { 'User-Agent': UA, ...headers },
         signal: AbortSignal.timeout(15_000),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+      if (!res.ok) {
+        // Release the socket: an error body left unconsumed keeps the
+        // connection — and with it the process — alive. Eleven 500s times
+        // three tries held the event loop open for 76 silent minutes once.
+        res.body?.cancel().catch(() => {})
+        throw new Error(`HTTP ${res.status} for ${url}`)
+      }
       return as === 'json' ? await res.json() : Buffer.from(await res.arrayBuffer())
     } catch (err) {
       lastErr = err
@@ -895,6 +901,7 @@ for (const [host, url] of corsProbeUrls) {
   try {
     const res = await fetch(url, { headers: { 'User-Agent': UA, Origin: 'https://corruptfun.github.io' } })
     manifest.corsProbe[host] = { status: res.status, allowOrigin: res.headers.get('access-control-allow-origin') }
+    res.body?.cancel().catch(() => {})
   } catch (err) {
     manifest.corsProbe[host] = { error: String(err?.message ?? err) }
   }
@@ -916,3 +923,9 @@ if (manifest.fixtures.length < FIXTURE_FLOOR || wholeGameFailures.length) {
   )
   process.exit(1)
 }
+// Exit EXPLICITLY. The work is done and everything is on disk; letting the
+// process wait for the event loop to drain leaves the job's fate to whatever
+// sockets upstream servers feel like holding half-open tonight — measured
+// twice as a finished fetcher sitting silent for over an hour, snapshot
+// built and never published.
+process.exit(0)
