@@ -1,5 +1,6 @@
 // Sync + tiny: just reads whether a session exists in localStorage. The cloud
 // modules it would otherwise pull in stay behind the dynamic import below.
+import { artRectFor, captureArtHashes, pickPrintingByArt } from './arthash'
 import { isSignedIn } from './authsession'
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
@@ -1176,10 +1177,31 @@ async function identifyViaOcr(
       // its 12 cells and answers the base printing on all 12.
       const pinned = linePinnedPrinting(refined)
       if (!pinned) {
-        const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
-        if (settled) {
-          traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
-          card = settled
+        // Free before paid: printings that differ only by ARTWORK — basic
+        // lands, alternate-art commons — are invisible to the treatment
+        // tie-break (its own guard exits when the frames match), and the
+        // artwork is the one discriminator already in hand. Candidates come
+        // from the same exact-name printings list, so a different card is
+        // not a reachable answer; a decisive art win settles the edition
+        // without spending the cloud credit, and every way of declining —
+        // offline, one art, incumbent winning, thin margin — falls through
+        // to the tie-break with nothing changed.
+        const byArt = await artRepick(card, canvas, mapRect, signal).catch(() => null)
+        if (byArt) {
+          traceEvent('art-pick', {
+            from: card.number ?? null,
+            to: byArt.card.number ?? null,
+            edition: byArt.card.setCode ?? null,
+            d: byArt.distance,
+            margin: byArt.margin,
+          })
+          card = byArt.card
+        } else {
+          const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
+          if (settled) {
+            traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
+            card = settled
+          }
         }
       }
       return {
@@ -1709,6 +1731,30 @@ const RAW_LINE_SLIVER: OcrRect = { x: 0, y: 0.885, w: 0.35, h: 0.05 }
  * line, because every pass short-circuits on a finished read.
  */
 const RAW_BAND_PASSES = 3
+
+/**
+ * The art-hash re-pick, packaged for the one call site: printings list, the
+ * capture's shift-grid hashes, the argmin-with-margin decision. Every
+ * failure returns null and the caller's answer stands — see arthash.ts for
+ * the guards and the measurements behind them.
+ */
+async function artRepick(
+  card: Card,
+  canvas: HTMLCanvasElement,
+  mapRect: (rect: OcrRect) => OcrRect,
+  signal?: AbortSignal,
+): Promise<{ card: Card; distance: number; margin: number } | null> {
+  const art = artRectFor(card.game)
+  if (!art) return null
+  const raws = await mtgRawPrintings(card.name).catch(() => [] as any[])
+  if (raws.length < 2) return null
+  const hashes = captureArtHashes(canvas, art, mapRect)
+  const pick = await pickPrintingByArt(card, raws, hashes, signal)
+  if (!pick) return null
+  const chosen = mtgCardFromRaw(pick.raw)
+  if (chosen.apiId === card.apiId) return null
+  return { card: chosen, distance: pick.distance, margin: pick.margin }
+}
 
 function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false

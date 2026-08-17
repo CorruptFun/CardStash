@@ -387,10 +387,15 @@ function scaledContext(width: number, height: number): CanvasRenderingContext2D 
 /**
  * 128-bit perceptual hash of a frame (mean + gradient bits on an 8×8 grid) —
  * good enough to recognize "same card, same table" across a few seconds.
+ *
+ * `srcRect` (source PIXELS) hashes a sub-region instead of the whole frame —
+ * how the art hash compares a captured art box against a catalog scan's. Same
+ * bits either way, so distances stay comparable across callers.
  */
-export function frameHash(source: CanvasImageSource): string {
+export function frameHash(source: CanvasImageSource, srcRect?: { x: number; y: number; w: number; h: number }): string {
   const ctx = scaledContext(9, 8)
-  ctx.drawImage(source, 0, 0, 9, 8)
+  if (srcRect) ctx.drawImage(source, srcRect.x, srcRect.y, srcRect.w, srcRect.h, 0, 0, 9, 8)
+  else ctx.drawImage(source, 0, 0, 9, 8)
   const gray = grayscale(ctx.getImageData(0, 0, 9, 8))
   let mean = 0
   for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) mean += gray[y * 9 + x]
