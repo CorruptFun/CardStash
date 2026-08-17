@@ -73,7 +73,7 @@ const cloudErrors = []
  * different question from the one the app asks, which is worse than not
  * measuring at all.
  */
-const CLOUD_SCAN_MODEL = 'gemini-3.1-flash-lite'
+const CLOUD_SCAN_MODEL = (process.env.GEMINI_SCAN_MODEL ?? '').trim() || 'gemini-3.1-flash-lite'
 const SCAN_PROMPT =
   'You are reading a trading card photograph for a collection app. ' +
   'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
@@ -770,7 +770,7 @@ async function main() {
       binders: binderResults,
       clips: clipResults,
       stubCalls: stubs.stats.calls,
-      cloud: cloudKey ? { model: cloudModel, calls: cloudCalls, errors: cloudErrors } : null,
+      cloud: cloudKey ? { model: cloudModel || CLOUD_SCAN_MODEL, calls: cloudCalls, errors: cloudErrors } : null,
       unknownHosts: [...new Set(stubs.stats.unknown)],
       cells: results,
     }
