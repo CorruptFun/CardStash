@@ -133,6 +133,9 @@ const CARD_SCHEMA = {
 
 const CARD_PROMPT =
   'You are reading a trading card photograph for a collection app. ' +
+  'The image contains the full card at the top, plus magnified high-resolution zoomed crops ' +
+  'of the card title band and bottom collector line below it. ' +
+  'Use the zoomed crops to precisely read small type, set codes, and collector numbers. ' +
   'Return the card NAME exactly as printed, including any suffix that is part of the name ' +
   '(ex, GX, V, VMAX, VSTAR) and any possessive prefix ("Iono\'s", "Team Rocket\'s"). ' +
   'Also return the collector number and printed set total from the small collector line ' +
@@ -151,6 +154,61 @@ const CARD_PROMPT =
   'answer them only when the card is clearly enough visible to judge. ' +
   'CRITICAL: omit any field you cannot actually read on the card. Never guess a number. ' +
   'An omitted field is correct; an invented one is not.'
+
+/**
+ * Creates a high-magnification multi-region composite canvas for cloud scan rescue.
+ * Stacks the full card view alongside zoomed crops of the Title Band (Top 20%)
+ * and Collector Line (Bottom 20%) to maximize OCR precision on small text.
+ */
+export function createZoomedRescueCanvas(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const sw = sourceCanvas.width
+  const sh = sourceCanvas.height
+  if (sw < 100 || sh < 100) return sourceCanvas
+
+  const titleH = Math.floor(sh * 0.20)
+  const collectorH = Math.floor(sh * 0.20)
+  const collectorY = sh - collectorH
+
+  const zoomHeight = Math.floor((titleH + collectorH) * 1.2)
+  const targetW = sw
+  const targetH = sh + zoomHeight + 16
+
+  try {
+    const composite = document.createElement('canvas')
+    composite.width = targetW
+    composite.height = targetH
+    const ctx = composite.getContext('2d')
+    if (!ctx) return sourceCanvas
+
+    ctx.fillStyle = '#0f172a'
+    ctx.fillRect(0, 0, targetW, targetH)
+
+    // 1. Full Card
+    ctx.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, sw, sh)
+
+    // 2. Zoomed Title Band (Top 20%)
+    const titleZoomH = Math.floor(zoomHeight * 0.48)
+    ctx.drawImage(sourceCanvas, 0, 0, sw, titleH, 0, sh + 4, targetW, titleZoomH)
+
+    // 3. Zoomed Collector Line (Bottom 20%)
+    const collectorZoomH = Math.floor(zoomHeight * 0.48)
+    ctx.drawImage(
+      sourceCanvas,
+      0,
+      collectorY,
+      sw,
+      collectorH,
+      0,
+      sh + 8 + titleZoomH,
+      targetW,
+      collectorZoomH,
+    )
+
+    return composite
+  } catch {
+    return sourceCanvas
+  }
+}
 
 /** Scanning is interactive — a rescue that outlives the user's patience is a miss. */
 const CLOUD_SCAN_TIMEOUT_MS = 12_000
@@ -215,7 +273,8 @@ export async function readCardHosted(canvas: HTMLCanvasElement, signal?: AbortSi
   const { isSignedIn, freshToken } = await import('./authsession')
   const { SUPABASE_URL, CLOUD_AVAILABLE } = await import('./cloudconfig')
   if (!CLOUD_AVAILABLE || !isSignedIn()) return null
-  const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  const rescueCanvas = createZoomedRescueCanvas(canvas)
+  const data = rescueCanvas.toDataURL('image/jpeg', 0.85).split(',')[1]
   if (!data) return null
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CLOUD_SCAN_TIMEOUT_MS)
@@ -252,11 +311,8 @@ export async function readCardViaGemini(
   signal?: AbortSignal,
 ): Promise<CloudCardRead | null> {
   if (!apiKey) return null
-  // The capture is already capped at CAPTURE_MAX_EDGE (1600); at that size the
-  // image bills ~1.1k tokens, so a rescue costs a fraction of a cent. Sending
-  // it smaller would save nothing that matters and can cost the collector line,
-  // which is the half of the answer the guard actually needs.
-  const data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  const rescueCanvas = createZoomedRescueCanvas(canvas)
+  const data = rescueCanvas.toDataURL('image/jpeg', 0.85).split(',')[1]
   if (!data) return null
   try {
     const res = await callWithFallback(

@@ -419,6 +419,46 @@ export function frameHash(source: CanvasImageSource): string {
   return hex(meanHi) + hex(meanLo) + hex(gradHi) + hex(gradLo)
 }
 
+/**
+ * 256-bit perceptual fingerprint of the central artwork region of a card frame
+ * (Y: 18% to 55%, X: 10% to 90%). Used for local variant tie-breaking and image similarity.
+ */
+export function cardArtHash(source: CanvasImageSource, sourceWidth = 488, sourceHeight = 680): string {
+  const artX = Math.floor(sourceWidth * 0.10)
+  const artY = Math.floor(sourceHeight * 0.18)
+  const artW = Math.floor(sourceWidth * 0.80)
+  const artH = Math.floor(sourceHeight * 0.37)
+
+  const ctx = scaledContext(17, 16)
+  ctx.drawImage(source, artX, artY, artW, artH, 0, 0, 17, 16)
+  const gray = grayscale(ctx.getImageData(0, 0, 17, 16))
+
+  let mean = 0
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      mean += gray[y * 17 + x]
+    }
+  }
+  mean /= 256
+
+  const bits: number[] = []
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const val = gray[y * 17 + x]
+      const aboveMean = val > mean ? 1 : 0
+      const grad = val > gray[y * 17 + x + 1] ? 1 : 0
+      bits.push(aboveMean ^ grad)
+    }
+  }
+
+  let hexStr = ''
+  for (let i = 0; i < bits.length; i += 4) {
+    const chunk = (bits[i] << 3) | (bits[i + 1] << 2) | (bits[i + 2] << 1) | bits[i + 3]
+    hexStr += chunk.toString(16)
+  }
+  return hexStr
+}
+
 export function hammingDistance(a: string, b: string): number {
   if (a.length !== b.length) return 128
   let distance = 0
