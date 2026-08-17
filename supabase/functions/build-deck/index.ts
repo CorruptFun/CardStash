@@ -190,8 +190,11 @@ Deno.serve(async (req: Request) => {
   if (!credit?.ok) return json({ error: 'entitlement check failed' }, 503)
   const remaining = Number(await credit.json())
   if (!Number.isFinite(remaining)) return json({ error: 'entitlement check failed' }, 503)
-  if (remaining < 0) return json({ error: 'not subscribed' }, 403)
-  if (remaining === 0) return json({ error: 'monthly allowance used' }, 429)
+  // -1 = not entitled; -2 = over the cap (0023). Zero is a VALID answer: the
+  // month's last credit, consumed and spendable -- refusing it ate a call the
+  // allowance had already paid for.
+  if (remaining === -1) return json({ error: 'not subscribed' }, 403)
+  if (remaining < 0) return json({ error: 'monthly allowance used' }, 429)
 
   // --- build ---------------------------------------------------------------
   let body: Record<string, unknown>
