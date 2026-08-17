@@ -1017,3 +1017,23 @@ result seems absurd, check this list before writing code.
     a baseline measured on newer code. Honor the brief's intent (nothing
     auto-deploys), check the named branch's merge state before using its
     letter.
+87. **Newer is not better at a niche question — measure the swap, and let
+    the verdict revert it.** gemini-3.5-flash-lite (validated 2026-08-17
+    against the 3.1-flash-lite anchor, print-bearing snapshot, both sides
+    recomputed from cells, pre-registered gates written before run 1):
+    identified 267/266 vs 269/271, printing 195/196 vs 201/205 — the loss
+    is ONE mechanism-attributed cluster, mtg/borderless-any, where the
+    tie-break fired identically and read the same card on both models but
+    3.5 classified the treatment "regular"/"showcase" where 3.1 answers
+    "borderless" — the single question the tie-break exists to ask. It
+    also renamed "Tauros GX" to hyphenated "Tauros-GX", which the
+    acceptance matcher refuses, and cost ~30% more per call. Production
+    was flipped back the hour the verdict landed (~$0.13 total spend to
+    avoid a permanently worse, dearer model). Standing pattern for any
+    future model swap: bridge reads GEMINI_SCAN_MODEL (same env as prod,
+    merged 7b97c90), pre-register gates and the claimed-wrong definition
+    BEFORE run 1, two runs, per-cell diff vs a same-snapshot anchor,
+    verdict only on reproduced deltas with mechanisms — and check the
+    snapshot fingerprint (stubCalls per host) when in doubt about WHICH
+    snapshot an anchor was measured on: 499 scryfall stub calls = the
+    print-less set, 444 = print-bearing.
