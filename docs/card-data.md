@@ -549,6 +549,30 @@ the reprint's headline. The endpoint is an **exact string match**, so the
 caller supplies the spellings: region infix present or absent, digits padded to
 three or not.
 
+**Selecting that printing is two-pass, and the order is load-bearing.**
+`sameYgoCode` (`corner.ts`) folds the region infix away on purpose — LOB-EN001
+≡ LOB-001 — because a scan reads Latin digits off a card in any language and
+still has to find it. That rule is right for *comparing* and wrong for
+*choosing*: asked first, it answered a typed "IOC-EN017" with whichever row the
+feed listed earliest, which is the right card wearing another region's rarity
+and another region's price. YGOPRODeck lists PSV-089, PSV-E089 and PSV-EN089 as
+separate rows, and Blue-Eyes' LOB-001 is $62 where its LOB-E001 is $681 — the
+infix is not decoration. So `printingByCode` prefers an **exactly spelled**
+row (case, whitespace and zero-padding normalised, region infix *not*) and
+falls back to the cross-language set only when the card has no exact row, so a
+regional print the catalog lists only region-lessly still answers. Every exact
+key is also a `sameYgoCode` match, so the first pass can only narrow the
+second. Measured on the corpus sweep: yugioh codes exact 39,313 → 40,661,
+wrong-printing 1,348 → 0, with mtg and pokemon unmoved.
+
+The residual is a card listing the **same** code twice at different rarities
+(PSV-EN089 is both Common and Short Print — 9,442 of the 40,670 codes the sweep
+asks are in that shape). No printed code can choose between those rows, so feed
+order does, deterministically; the variant picker is where a user corrects it.
+The sweep scores them `exact` either way — it compares api id and printed
+number, and both rows answer to both — so that number comes from counting the
+feed, not from the verdict table.
+
 `fname` has zero tolerance, so one OCR-eaten hyphen finds nothing. The recovery
 is to re-query on the longest clean *words* (plural — the longest token is
 regularly the garbled one) and let name similarity pick from the pooled

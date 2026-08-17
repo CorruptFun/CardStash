@@ -36,13 +36,13 @@ const CARDS = [
   ...fixture.yugioh.map((c) => ({ game: 'yugioh', name: c.name, apiId: String(c.id) })),
 ]
 
-test('the fixture is twenty cards and every game is fed', () => {
+test('the fixture is twenty-one cards and every game is fed', () => {
   // Assert the corpus can feed what is measured BEFORE measuring it — a game
   // with no rows reports a flawless zero (scan-harness lesson 82).
-  assert.equal(CARDS.length, 20)
+  assert.equal(CARDS.length, 21)
   assert.equal(CARDS.filter((c) => c.game === 'mtg').length, 4)
   assert.equal(CARDS.filter((c) => c.game === 'pokemon').length, 12)
-  assert.equal(CARDS.filter((c) => c.game === 'yugioh').length, 4)
+  assert.equal(CARDS.filter((c) => c.game === 'yugioh').length, 5)
 })
 
 test('every card finds itself by its own printed name', async () => {
@@ -125,6 +125,52 @@ test('Yu-Gi-Oh codes still resolve without their region and without their paddin
     const hits = await app.searchByCode('yugioh', code, {})
     assert.equal(hits[0]?.name, 'Blue-Eyes White Dragon', `typed "${typed}"`)
   }
+})
+
+test('a Yu-Gi-Oh code answers ITS region’s printing, not the region-less one', async () => {
+  // Fixed 2026-08-17. Chaos Necromancer is listed as IOC-017 (Common, $1.05)
+  // and IOC-EN017 (Rare, $3.40) — two rows, two prices, one card. Selection
+  // used to ask `sameYgoCode` first, which folds the region away by design, so
+  // whichever row the feed listed earliest answered BOTH codes: a typed
+  // "IOC-EN017" came back as the Common. Corpus gate for the fix: yugioh
+  // wrong-printing 1,348 → 0, exact 39,313 → 40,661, nothing else moved.
+  const en = await app.searchByCode('yugioh', app.parseCardCode('IOC-EN017'), {})
+  assert.equal(en[0]?.number, 'IOC-EN017')
+  assert.equal(en[0]?.rarity, 'Rare')
+  const bare = await app.searchByCode('yugioh', app.parseCardCode('IOC-017'), {})
+  assert.equal(bare[0]?.number, 'IOC-017')
+  assert.equal(bare[0]?.rarity, 'Common')
+})
+
+test('a region that printed nothing still answers the printing that exists', async () => {
+  // The cross-language rule the fix must not cost. Thunder Dragon's Metal
+  // Raiders row is listed only as "MRD-EN097", so a region-less "MRD-097"
+  // has no exact row anywhere — and must still land the card, exactly as it
+  // did before exactness was preferred.
+  for (const typed of ['MRD-097', 'MRD-97', 'MRD-EN097']) {
+    const hits = await app.searchByCode('yugioh', app.parseCardCode(typed), {})
+    assert.equal(hits[0]?.number, 'MRD-EN097', `typed "${typed}"`)
+  }
+})
+
+test('CHARACTERISATION: the sweep cannot see the same-code rarity split', async () => {
+  // Gradius prints one number in Pharaoh's Servant and YGOPRODeck lists four
+  // rows for it: PSV-089 and PSV-E089 are separate regions at separate prices
+  // (the fix tells those apart), but PSV-EN089 appears TWICE, Common and Short
+  // Print. No printed code can choose between the last two, so feed order
+  // does — deterministically, and correctably in the variant picker.
+  //
+  // The sweep scores BOTH of those rows `exact`, because `landedExactly`
+  // compares api id and printed number and both rows answer to both. That is
+  // why this residual is reported as a count (9,442 of the 40,670 codes the
+  // sweep asks) rather than read off the verdict table: it is real, and the
+  // gate is blind to it by construction.
+  const psv = (typed) => app.searchByCode('yugioh', app.parseCardCode(typed), {})
+  assert.equal((await psv('PSV-089'))[0]?.rarity, 'Short Print')
+  const en = (await psv('PSV-EN089'))[0]
+  assert.equal(en?.number, 'PSV-EN089')
+  assert.equal(en?.rarity, 'Common', 'the first PSV-EN089 row the feed lists')
+  assert.equal(en?.printings.filter((p) => p.setCode === 'PSV-EN089').length, 2)
 })
 
 test('an MTG code resolves whether or not the number is zero-padded', async () => {
