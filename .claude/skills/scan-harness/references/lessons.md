@@ -847,3 +847,28 @@ result seems absurd, check this list before writing code.
     vocabulary gap in the parser produces the same null at zero OCR cost to
     fix. matchCatalog needed no change: +0.2 digits / +0.1 set already
     ranked the right printing first once evidence existed.
+79. **When the rect that contains the line reads garbage, suspect the rect's
+    GEOMETRY before its treatment — and probe both before touching the
+    pipeline.** Rayquaza VMAX's "218/203" sat inside the deep tier's raw
+    bottom band on eleven wrong cells and came back garbage at 5× under
+    normal, binary AND binary-flip — the polarity hypothesis (white type
+    over dark art wants a flipped threshold) probed clean-negative in two
+    minutes, which is the whole point of probing first: two matrix runs
+    were NOT spent measuring it. Geometry was the lever. The wide bands'
+    top edge (y 0.90) clips the line and their 0.55 width spends
+    `readRegionText`'s 1600px cap on rules text beside it; a 0.35-wide
+    sliver at y 0.885 leaves the cap to the line's own glyphs and parses
+    218/203 outright. `RAW_LINE_SLIVER` now runs FIRST in the deep tier's
+    raw-band list: printing 125 → 128 (pokemon 35/55 → 38/55), identical
+    over two runs, and a hit costs one pass while skipping both wide bands.
+    Two boundaries measured at the same time, both worth keeping: charizard-
+    base's degraded cells are a genuine READ limit — no rect or variant
+    resolves "4/102" under soft-focus/lowlight/worst — and the counterspell
+    glare auto cell flipped fail after the change on both runs, which the
+    reproduce-twice rule says to treat as caused; its traces settled it the
+    other way — byte-identical OCR text and candidates, only the lookup
+    LATENCIES differ, so the cell is decided by wall-clock deadlines under
+    CPU load, not by any code path (the sliver is unreachable from an MTG
+    auto cell). When a cell flips the same way twice, diff its TRACES, not
+    its verdicts, before accepting blame — same-direction flips can still
+    be timing, and the trace is what says so.
