@@ -692,15 +692,54 @@ easiest way to overstate the scanner:
 
 | Battery | Command | Result |
 | ------- | ------- | ------ |
-| Standard matrix (rendered fixtures, 9 degradations) | `npm run test:scan` | **204/282 (72%), zero wrong cards** |
+| Standard matrix (rendered fixtures, 9 degradations), offline | `npm run test:scan` | **197–198/282 identified (~70%)**; printing 124–125 of the 168–170 graded; 6 wrong printings while claiming the code was read; MTG printing 27/46. Baseline of record: 2026-08-17, print-bearing snapshot `3b60035`, two runs. |
 | Hand-curated real photographs | `npm run test:photos` | **4/12 (33%)**, 1 wrong card |
 | Handheld clips (frames from real video) | see lesson 47 | **10 wrong in 40 identifications** |
 
-The matrix reports zero wrong cards across 282 cells; two ordinary handheld
-clips produced ten. `compose()` structurally cannot generate the input that
-causes it — a frame where a *moving* highlight leaves the name half-legible in
-one specific way. **A battery of stills cannot bound the wrong-card rate of a
-live scanner**, and the wrong-card rate is the number that matters most.
-Per-game on the matrix: Yu-Gi-Oh 36/36, One Piece 18/18, Riftbound 50/54,
-MTG 46/57, Pokémon 54/117 — Pokémon is the standing weak spot (58 ocr-misread,
-5 match-none).
+Matrix numbers are two-run ranges on their named snapshot, never points, and
+absolute numbers do not compare across snapshots — re-baseline after any
+fixture refresh.
+
+In the round that produced the clips row, the matrix reported zero wrong cards
+across its 282 cells while two ordinary handheld clips produced ten.
+`compose()` structurally cannot generate the input that causes it — a frame
+where a *moving* highlight leaves the name half-legible in one specific way.
+**A battery of stills cannot bound the wrong-card rate of a live scanner**,
+and the wrong-card rate is the number that matters most.
+
+**The cloud rescue is measured on the same benchmark.** With `cloudScanRescue`
+bridged into the run (`--gemini`, a real key — prompt, model and schema
+verified byte-identical to the edge function), identification went from that
+round's own offline anchor of 196/282 to **250 and 249 of 282**, roughly
+doubling Pokémon (49/117 →
+99–100/117 — the offline failure mass there is `ocr-misread` ×57, and the
+rescue reads exactly those). The collector-line door below then took the same
+runs to **269 and 271 of 282 — about 89% → 95–96%**. Printing rode along:
+124–125 of 168–170 graded offline, 182–184/224 with the rescue, 201–205 of
+241–243 after the door, with wrong-while-claiming flat (6 → 5–6) and zero
+cards or printings lost. Those are the exact fractions behind the README's
+"about 7 in 10 cards to about 9 in 10" line: a result on this 282-photo test
+set, rounded down when sold, never a guarantee. Every offline matrix
+understates a rescue-enabled user's experience by that margin, because the
+rescue never fires offline.
+
+**The rescue has a second door: the printed collector line** (`byCollectorLine`
+in `identify.ts`). The rescue's name gate asks whether the transcribed name
+matches a catalog name, which a Japanese, Korean or Chinese print can never
+answer — the catalogs are English — so the model's correctly transcribed
+collector line used to be discarded along with the miss. Now, when the name
+finds nothing, the printed line is resolved through the same resolvers
+`cornerIdentify` uses (`mtgBySetNumber`, `pokemonByCollector`,
+`catalogByCollector`), so each game's evidence requirements travel with its
+resolver instead of being re-derived at a second site. It runs only where the
+rescue already returned null — it converts misses or does nothing —
+single-game only (auto mode still has no collector rescue), and the answer
+stays `pinned: false`: a card *selected by* this number can never be
+corroborated by it. All 18 cells it recovered on its merge gate are
+`ja-collector` fixtures, every one mechanism-explained.
+
+Per-cell methodology, the snapshot-qualification rule (a snapshot can only
+gate a feature it can *feed*) and the noise floors — identical offline runs
+differ by ~4 cells, identical cloud runs by ~7, 5 of them Pokémon — live in
+the scan-harness skill's `references/lessons.md`, lessons 81–86. Read those
+before quoting or comparing any of these numbers.

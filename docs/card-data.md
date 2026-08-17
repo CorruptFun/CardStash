@@ -629,8 +629,8 @@ dry-runs the mappers against the live bulk APIs on any push touching the
 worker (catching upstream shape drift with no secret at all — the push
 trigger runs nothing but the dry-run, even with the secret configured), and
 once the repo has a `SUPABASE_SECRET` Actions secret, the schedule and a
-manual dispatch from the default branch run the real sync every Monday and
-report coverage.
+manual dispatch from the default branch run the real sync **daily at 09:23
+UTC** and report coverage.
 
 ## Pricing (`lib/prices.ts`)
 
