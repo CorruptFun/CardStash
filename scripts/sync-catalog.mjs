@@ -187,8 +187,19 @@ async function upsert(rows, dryRun) {
 
 async function ingestMtg(dryRun) {
   const bulk = await getJson(SCRYFALL_BULK, 'scryfall bulk index')
-  const entry = (bulk.data ?? []).find((b) => b.type === 'default_cards')
-  if (!entry?.download_uri) throw new Error('scryfall: no default_cards bulk entry')
+  // The index is documented as {data:[{type,download_uri,…}]} but the exact
+  // vocabulary is the server's to change — so match generously and, when
+  // nothing matches, FAIL NAMING WHAT WAS THERE: this script's errors are
+  // read in CI logs where the live response cannot be poked at by hand.
+  const list = Array.isArray(bulk?.data) ? bulk.data : Array.isArray(bulk) ? bulk : []
+  const entry =
+    list.find((b) => b?.type === 'default_cards') ??
+    list.find((b) => /default/i.test(String(b?.type ?? b?.name ?? '')))
+  if (!entry?.download_uri)
+    throw new Error(
+      `scryfall: no default_cards bulk entry among [${list.map((b) => b?.type ?? b?.name).join(', ') || 'nothing'}]` +
+        (entry ? ` (entry keys: ${Object.keys(entry).join(',')})` : ` (index keys: ${Object.keys(bulk ?? {}).join(',')})`),
+    )
   console.log(`mtg: downloading ${entry.download_uri} (~${Math.round((entry.size ?? 0) / 1e6)} MB)…`)
   const rows = scryfallToRows(await getJson(entry.download_uri, 'scryfall default_cards'))
   console.log(`mtg: ${rows.length} printings`)
