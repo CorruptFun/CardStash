@@ -194,6 +194,23 @@ function serviceHeaders() {
 
 async function upsert(rows, dryRun) {
   if (dryRun || !rows.length) return
+  // ONE ROW PER CONFLICT KEY PER COMMAND. Feeds repeat (game, api_id,
+  // set_code) -- YGOPRODeck lists the same passcode in one set at several
+  // rarities, and "LOB-001" and "LOB-EN001" share a prefix -- and Postgres
+  // refuses ON CONFLICT touching a row twice in one statement (21000),
+  // which killed the whole yugioh ingest on the first live sync. The
+  // schema can only hold one row per key regardless, so folding here
+  // loses nothing a sequential upsert would have kept. Logged, not
+  // silent: a fold count that suddenly grows is a feed-shape change.
+  const seen = new Map()
+  for (const r of rows) {
+    const k = `${r.game}|${r.api_id}|${r.set_code}`
+    if (!seen.has(k)) seen.set(k, r)
+  }
+  if (seen.size < rows.length) {
+    console.log(`  ${rows.length - seen.size} duplicate-key rows folded (one per game/api_id/set_code)`)
+  }
+  rows = [...seen.values()]
   for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
     const batch = rows.slice(i, i + UPSERT_BATCH)
     const res = await fetch(`${SUPABASE_URL}/rest/v1/catalog_printings?on_conflict=game,api_id,set_code`, {
