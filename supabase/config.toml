@@ -453,3 +453,20 @@ verify_jwt = false
 # safe under that: no money, no user data, a capped query and a cached answer.
 [functions.ebay-comps]
 verify_jwt = false
+
+# PSA cert lookup for graded slabs (`psa.ts` with VITE_PSA_ENDPOINT pointed
+# here, holding our PSA token server-side as the PSA_TOKEN secret). Slab
+# scanning is part of the signed-out free path, so the same posture as
+# ebay-comps -- a JWT gate would make resolving a cert an account feature, and
+# which cert someone scanned is not a fact worth tying to a user id (decision
+# 20's rule). Unlike ebay-comps it is called KEYLESS, not even the publishable
+# key: `psa.ts`'s endpoint override is host-agnostic (the same code must still
+# reach PSA directly when no proxy is set, so it cannot grow Supabase
+# headers), and a bare GET with no headers stays a CORS simple request.
+# Written to be safe under that: the cert is validated to bare digits before
+# anything rides upstream under our bearer, answers are cached in the isolate,
+# 429s are forwarded so clients stand down -- and the only thing an abuser can
+# spend is the same ~100/day PSA quota the bundled token used to hand out,
+# minus the ability to read the credential itself.
+[functions.psa-proxy]
+verify_jwt = false

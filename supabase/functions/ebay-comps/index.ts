@@ -16,8 +16,9 @@
  *   * eBay's REST APIs send no CORS headers, so a browser cannot call them at
  *     all — every eBay-in-the-browser integration is a proxy wearing a hat.
  *   * The client-credentials grant needs a client SECRET. Unlike the PSA token
- *     (`psa.ts`), which is merely unwise to ship, a secret in a static bundle
- *     is an account handed over. It has to live server-side or not exist.
+ *     (`psa.ts` — since moved server-side too, into `psa-proxy`), which was
+ *     merely unwise to ship, a secret in a static bundle is an account handed
+ *     over. It has to live server-side or not exist.
  *
  * Contract (matches CompSummary in src/lib/ebaycomps.ts):
  *   POST { q: "1989 upper deck ken griffey jr #1" }

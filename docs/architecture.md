@@ -206,7 +206,7 @@ Nothing here is required for the app to function; each degrades to "no data" or
 | `db.ygoprodeck.com` | Yu-Gi-Oh | read |
 | `api.lorcast.com` | Lorcana | read |
 | `tcgcsv.com` | Catalog games + sealed products for every game | read |
-| `api.psacard.com` | Slab scan with a cert; our compiled-in token, dormant if the build has none | read |
+| `psa-proxy` on our own project → `api.psacard.com` | Slab scan with a cert. Keyless (not even the publishable key); our PSA token never leaves the function. A dev build with `VITE_PSA_TOKEN` talks to `api.psacard.com` directly instead; with neither value the path is dormant | read |
 | `ebay-comps` on our own project → `api.ebay.com` | Only when the user taps "Check eBay prices" on a sports card. Anonymous (publishable key, no session token); the eBay secret never leaves the function | read |
 | card image CDNs | `<img>` loads only | read |
 | `generativelanguage.googleapis.com` | AI deck builder, only with a user-supplied key | write prompt |

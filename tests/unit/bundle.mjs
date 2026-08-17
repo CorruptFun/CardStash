@@ -2,7 +2,10 @@
  * Import an app TypeScript module from plain-node unit tests: bundles the
  * entry with esbuild (already present as Vite's dependency) into the ESM the
  * test imports. Browser-only entries can stub DOM-touching siblings via
- * `alias`.
+ * `alias`, and build-time configuration can be injected via `define` (e.g.
+ * `{ 'import.meta.env': JSON.stringify({...}) }`) — which is how tests pin
+ * behaviour that Vite decides at compile time, like which endpoint a build
+ * ships with.
  */
 
 import { mkdtempSync } from 'node:fs'
@@ -15,7 +18,7 @@ const REPO = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..')
 const outDir = mkdtempSync(join(tmpdir(), 'cardstock-unit-'))
 let n = 0
 
-export async function bundleImport(entryRelativeToRepo, { alias = {}, external = [] } = {}) {
+export async function bundleImport(entryRelativeToRepo, { alias = {}, external = [], define } = {}) {
   const outfile = join(outDir, `m${n++}.mjs`)
   // esbuild's `alias` option only takes package names; relative keys
   // ("./fetchJson") are matched against the specifier as written, via a
@@ -43,6 +46,7 @@ export async function bundleImport(entryRelativeToRepo, { alias = {}, external =
     external,
     plugins: Object.keys(paths).length ? [pathAlias] : [],
     logLevel: 'silent',
+    ...(define ? { define } : {}),
   })
   return import(pathToFileURL(outfile).href)
 }

@@ -41,16 +41,25 @@ jobs:
           # To rotate without a commit, replace the literal with
           # ${{ vars.VITE_GOOGLE_CLIENT_ID }} and set the repo variable.
           VITE_GOOGLE_CLIENT_ID: 522632498220-ak548mr1qgb0g0kg1q42nfmq99kfsaj2.apps.googleusercontent.com
-          # Our PSA token for slab cert lookup (lib/psa.ts). Unset = the feature
-          # is dormant and slab scanning still reads the label, so a missing
-          # secret degrades rather than breaks the build.
+          # Slab cert lookup (lib/psa.ts) — two shapes, prefer the endpoint.
           #
-          # This one IS a real credential, so it comes from a secret rather than
-          # a literal — but be clear about what that buys: it keeps the token
-          # out of the repo, NOT out of the bundle. Vite substitutes it into the
-          # JavaScript published to gh-pages, where anyone can read it, and the
-          # ~100/day free quota is shared across all users. Prefer pointing
-          # VITE_PSA_ENDPOINT at a proxy that holds the token server-side.
+          # VITE_PSA_ENDPOINT (a repo VARIABLE, not a secret — it is a public
+          # URL) points builds at supabase/functions/psa-proxy, which holds
+          # the real token server-side as the PSA_TOKEN Supabase secret. With
+          # it set the bundle ships NO token at all and calls the proxy
+          # keyless. The value to set:
+          #   https://xvfuyvaehtdxroyzixak.supabase.co/functions/v1/psa-proxy
+          #
+          # VITE_PSA_TOKEN is the legacy direct-to-PSA shape. It IS a real
+          # credential, so it comes from a secret rather than a literal — but
+          # be clear about what that buys: it keeps the token out of the repo,
+          # NOT out of the bundle. Vite substitutes it into the JavaScript
+          # published to gh-pages, where anyone can read it. Leave it unset
+          # once the endpoint is set — the endpoint wins, and psa.ts refuses
+          # to send the token to the proxy host anyway.
+          #
+          # With NEITHER value the feature is dormant and slab scanning still
+          # reads the label, so a missing value degrades rather than breaks.
           VITE_PSA_TOKEN: ${{ secrets.VITE_PSA_TOKEN }}
           VITE_PSA_ENDPOINT: ${{ vars.VITE_PSA_ENDPOINT }}
       - name: Publish dist/ to gh-pages
