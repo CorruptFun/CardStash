@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installErrorHooks, installSessionTracking, installTelemetryFlusher } from './lib/analytics'
+import { installSessionKeepalive } from './lib/authsession'
 import { installAutoBackup } from './lib/autobackup'
 import { db, loadPatches, requestPersistence, pruneHistory } from './lib/db'
 import { hasAnyData, seedDemoData } from './lib/demo'
@@ -111,6 +112,10 @@ async function boot(): Promise<void> {
   )
   pruneHistory().catch(() => {})
   installTelemetryFlusher()
+  // Keep a signed-in session alive across a wake-up, before the pollers below
+  // ask for a token. Costs nothing signed out, and no new chunk: `autobackup`
+  // already pulls `authsession` into the boot graph.
+  installSessionKeepalive()
   // Backup runs itself from here on. Signed-out users are a no-op — there is no
   // account to attach a vault to, which is the honest limit of the feature.
   installAutoBackup()

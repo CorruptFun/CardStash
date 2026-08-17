@@ -13,6 +13,10 @@ Everything the user creates lives in browser storage on their device:
 - IndexedDB `cardstock-analytics` — local diagnostics events.
 - localStorage `cardstock-settings` — preferences **including the user's own API
   keys**, and `cardstock-version`.
+- localStorage `cardstock-cloud-session` — the signed-in session's tokens, in
+  their own key so they are never swept into an export or a backup. Unticking
+  "Keep me signed in" moves them to sessionStorage, where closing the tab ends
+  them; `cardstock-remember` records that choice.
 
 **Signed in, there is also a copy on our server, and it is not optional.** The
 vault (`lib/cloud.ts`) backs the collection up automatically — see decision 15b.
