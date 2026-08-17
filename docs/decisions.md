@@ -1221,3 +1221,58 @@ the camera (`BarcodeDetector`), which is deliberately not in the scan pipeline
 today: any phone camera already opens the link, and a per-frame barcode pass is
 exactly the kind of change the scan harness exists to gate.
 
+
+### 28. The catalog mirror is a fallback with our name on it, never the first answer
+
+The app now keeps its own copy of the big three catalogs — `catalog_printings`
+(migration 0022), filled by `scripts/sync-catalog.mjs` from Scryfall, TCGdex
+and YGOPRODeck, read through three anonymous RPCs by `lib/catalog.ts`. One
+thing forced it: pokemontcg.io failing by degrees taught the app what an API
+outage does to a search box and a scanner. The mirror answers when a game's
+own API is down or answered empty — behind the code lookup, name search, the
+match layer and the variants picker — and it answers nothing else.
+
+- **Fallback means fallback.** Every consultation sits BEHIND the live API:
+  `searchGame`, `matchGame` and the code lookup ask the mirror only after the
+  game's own source failed or answered empty, so a healthy API's answer —
+  fresher, priced, canonical — always wins untouched. The mirror stores each
+  game's own api-id namespace verbatim (Scryfall uuid, `dex-…`, passcode), so
+  a mirror answer dedupes with, and later refreshes through, the real source.
+- **The mirror stays out of the scan pipeline's printing decision.** An
+  artwork tie-break — the mirror serving fingerprints so a scan could tell
+  alternate arts of one card apart — was built, measured, and deliberately
+  NOT landed. The scan pipeline already grew its own exact-printing system
+  (`arthash.ts`, hashing the live source's own images at scan time), and a
+  second, mirror-fed fingerprint would have shipped a second format beside
+  it. Which format the mirror should serve — what window is hashed, on what
+  grid, what distances mean, and whether it must simply be `arthash.ts`'s —
+  is a contract that binds every row the sync worker would ever write, so it
+  is deferred rather than guessed at. The schema keeps a RESERVED,
+  unpopulated `art_hash` column (shape-constrained, never written, read by
+  nothing) so the reservation is explicit; `identify.ts` carries no mirror
+  arm at all, and the mirror reaches a scan only as the ordinary fallback
+  behind `matchGame`.
+- **Reading is anonymous, and there is no user door.** Lookups follow decision
+  20 (publishable key, never the session JWT) under the existing
+  `cardSourceLookup` switch. Unlike `card_data` there is no authenticated
+  write path at all — catalog facts are not community contributions, and a
+  defaced mirror would poison every scanner's fallback. The sync worker with
+  the service key is the only writer; `tests/harness/catalog-rls.mjs` proves
+  the asymmetry against the live project.
+- **Mirror cards carry no prices.** The rows store `price_usd` for operators
+  and for a future "price when everything failed", but `cardFromCatalog`
+  deliberately synthesizes without prices: a day-stale number presented as
+  live is wrong in the one place people check value, and `refreshCard` fills
+  real ones because the api id is real.
+
+**The cost.** A mirror is a second copy, and second copies drift: rows are
+only as fresh as the last operator run, and a fallback that answers stale
+identity is still better than an outage answering nothing — which is the
+only claim this round makes.
+
+**What would reopen it.** The mirror answering FIRST for anything (it must
+not, while the live APIs are the source of truth); prices flowing out of it;
+a fourth game joining, which belongs here only once its bulk source proves
+as durable as the first three; or populating `art_hash`, which requires
+settling the fingerprint-format contract above first — and then re-doing the
+measurement work on real captures, not just the harness camera model.

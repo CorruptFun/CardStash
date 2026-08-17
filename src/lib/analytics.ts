@@ -47,6 +47,7 @@ export const EVENT_TYPES = [
   'card_source',
   'card_source_submit',
   'card_source_flag',
+  'catalog_fallback',
   'error',
 ] as const
 

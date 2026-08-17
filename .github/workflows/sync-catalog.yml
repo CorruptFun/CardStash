@@ -1,0 +1,73 @@
+# The catalog mirror's ingestion, automated (migration 0022, decision 28).
+#
+# Two modes, and the EVENT decides which may run — not the secret:
+#
+#   * A PUSH runs the --dry-run smoke and NOTHING ELSE, secret or no secret.
+#     This is the mapper smoke test the sandboxed unit tests cannot be —
+#     Scryfall/TCGdex/YGOPRODeck response shapes drift, and a dry-run here
+#     catches that before an operator run does. A push must never write the
+#     live table: any branch can push, and the day SUPABASE_SECRET lands in
+#     Actions must not be the day every claude/** branch starts syncing prod.
+#   * The real sync — upsert all three sources, then print per-game coverage
+#     — runs only on the weekly schedule or a manual workflow_dispatch, only
+#     from the default branch, and only once the secret exists. Without the
+#     secret those events fall back to the same dry-run.
+#
+# The ref check is hardcoded to main on purpose: schedules only ever run
+# there, and a dispatch from any other ref gets the harmless dry-run. Rows
+# written here are read anonymously by lib/catalog.ts; the service key never
+# leaves the job. Off-hour minute on purpose.
+
+name: Sync catalog mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Sources to ingest (comma-separated: mtg,pokemon,yugioh)'
+        default: 'mtg,pokemon,yugioh'
+  schedule:
+    - cron: '23 9 * * 1' # Mondays 09:23 UTC
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'scripts/sync-catalog.mjs'
+      - '.github/workflows/sync-catalog.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-catalog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}
+      # The one gate for the writing steps. All three legs are load-bearing:
+      # the event (a push may never write), the ref (only the default branch
+      # speaks for the repo), and the secret (nothing to write with, otherwise).
+      MAY_SYNC: ${{ secrets.SUPABASE_SECRET != '' && github.event_name != 'push' && github.ref == 'refs/heads/main' }}
+      SOURCES: ${{ inputs.source || 'mtg,pokemon,yugioh' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Dry-run the mappers against the live APIs
+        if: env.MAY_SYNC != 'true'
+        # Pokémon capped to the newest sets: a shape change shows up there
+        # first, and a full 150-set sweep proves nothing more in a smoke.
+        run: node scripts/sync-catalog.mjs --dry-run --source="$SOURCES" --sets=6
+
+      - name: Sync the mirror
+        if: env.MAY_SYNC == 'true'
+        run: node scripts/sync-catalog.mjs --source="$SOURCES"
+
+      - name: Coverage report
+        if: env.MAY_SYNC == 'true'
+        run: node scripts/sync-catalog.mjs --stats

@@ -343,6 +343,15 @@ export function createStubs(fixturesDir) {
         // clean empty result, which is right: we capture no Lorcana fixtures.
         return json({ error: 'not found' }, 404)
       default:
+        // The catalog mirror (lib/catalog.ts) answers "nothing mirrored" for
+        // every card in the battery. An empty answer is the ONE mirror
+        // response a stub may honestly give: it exercises the full fallback
+        // path (RPC → sanitize → decline) without inventing catalog rows,
+        // and it keeps a fallback that only fires on failing cells from
+        // polluting the unstubbed-hosts report. Anything non-empty would
+        // measure the stub, not the pipeline — the same reason the cloud
+        // rescue is never stubbed.
+        if (url.pathname.startsWith('/rest/v1/rpc/catalog_')) return json([])
         return unknown()
     }
   }

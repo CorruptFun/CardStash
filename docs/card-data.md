@@ -490,6 +490,54 @@ stat, since TCGplayer lists young sets sparsely and backfills later), falling
 back to a packaging-name regex; `NOT_SEALED` keeps sleeves, playmats and binders
 out of "sealed products".
 
+### The catalog mirror — `catalog.ts`, `catalogmatch.ts` (migration 0022)
+
+Our own copy of the big three catalogs, consulted only AFTER a game's own API
+failed or answered empty — read decision 28 before touching it. One table,
+`catalog_printings`, filled by the operator-run `scripts/sync-catalog.mjs`
+(service key, the table's only writer) from Scryfall bulk data, TCGdex en sets
+(TCG Pocket filtered out) and YGOPRODeck; read anonymously through three RPCs
+(`catalog_by_code`, `catalog_by_name`, `catalog_printings_of`) with the
+publishable key and never the session JWT (decision 20), under the existing
+`cardSourceLookup` switch. The mirror stores each game's own api-id namespace
+(Scryfall uuid, `dex-…`, YGO passcode) so its answers dedupe with the live
+APIs'; `cardFromCatalog` synthesizes cards WITHOUT prices — `refreshCard`
+fills real ones because the api id is real. Wiring:
+`searchByCodeWithMirror` / the empty-or-failed branches of `searchGame`,
+`matchGame` and `printingVariants` in cardsearch.ts — the scan pipeline
+reaches the mirror only through those matchers; `identify.ts` has no mirror
+arm of its own. The table's `art_hash` column is RESERVED and unpopulated:
+its fingerprint format is deliberately not yet a contract, the sync worker
+never writes it and no client code reads it (see decision 28). RLS proof:
+`npm run test:mirror`
+(tests/harness/catalog-rls.mjs) — run it after applying 0022 and after any
+migration touching `catalog_printings`.
+
+**Turning it on** (operator, in this order — every client is dormant until
+the first two steps land, at the cost of two stood-down requests per
+session):
+
+1. `supabase db push` applies 0022. If every project-scoped call answers
+   "does not have the necessary privileges", the CLI is signed in as the
+   wrong account — see the hosted-social notes in CLAUDE.md before touching
+   anything else.
+2. `SUPABASE_SECRET=sb_secret_… npm run test:mirror` — proves anon can read,
+   no user role can write, and the code normalization holds. Do not skip it:
+   a schema read cannot show any of that.
+3. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs` — fills the table from
+   all three sources (re-runnable; re-running IS the update story).
+4. `SUPABASE_SECRET=… node scripts/sync-catalog.mjs --stats` — per-game rows
+   and one lookup through the anonymous RPC the app itself calls, which is
+   the claim that actually matters.
+
+The recurring half can ride CI: `.github/workflows/sync-catalog.yml`
+dry-runs the mappers against the live bulk APIs on any push touching the
+worker (catching upstream shape drift with no secret at all — the push
+trigger runs nothing but the dry-run, even with the secret configured), and
+once the repo has a `SUPABASE_SECRET` Actions secret, the schedule and a
+manual dispatch from the default branch run the real sync every Monday and
+report coverage.
+
 ## Pricing (`lib/prices.ts`)
 
 **USD only.** `usdOnly()` filters every read; a legacy €-value must never
