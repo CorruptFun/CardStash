@@ -10,7 +10,7 @@ import { bundleImport } from './bundle.mjs'
  * TCGCSV games through the day-cached catalog already in memory.
  */
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const { ygoBySetCode } = await bundleImport('src/lib/ygo.ts', {
+const { ygoBySetCode, ygoById, ygoVariantByCode } = await bundleImport('src/lib/ygo.ts', {
   alias: { './fetchJson': join(HERE, 'stubs', 'ygo-net.mjs') },
 })
 const { parseCardCode } = await bundleImport('src/lib/cardcode.ts')
@@ -105,6 +105,35 @@ test('CHARACTERISATION: one code printed at two rarities is settled by feed orde
     card.printings.filter((p) => p.setCode === 'PSV-EN089').length === 2,
     'both rows are still offered to the variant picker',
   )
+})
+
+test('the scan road picks the printing the read code spells — not a cross-language cousin', async () => {
+  // identify.ts in miniature: the passcode names the card (`ygoById`), the
+  // mid-card code read off the face picks the printing (`ygoVariantByCode`
+  // at the corner path and the refine). Same two-pass rule as search.
+  const card = await ygoById('10000089')
+  assert.equal(card.name, 'Gradius')
+  const en = ygoVariantByCode(card, 'PSV-EN089')
+  assert.equal(en?.number, 'PSV-EN089')
+  assert.equal(en?.rarity, 'Common', 'feed order decides the same-code-twice residual')
+  const bare = ygoVariantByCode(card, 'PSV-089')
+  assert.equal(bare?.number, 'PSV-089')
+  assert.equal(bare?.rarity, 'Short Print')
+  assert.equal(ygoVariantByCode(card, 'psv-e89')?.number, 'PSV-E089', 'case and padding are noise; the region is not')
+})
+
+test('cross-language confirmation survives the exact-first pass', async () => {
+  // The catalog lists only AST-070; an EN read off the physical card must
+  // still pin it — that is what `sameYgoCode` exists for, and the fallback
+  // pass keeps it. A French card reading Latin digits confirms the same way.
+  const card = await ygoById('10000070')
+  assert.equal(ygoVariantByCode(card, 'AST-EN070')?.number, 'AST-070')
+})
+
+test('a code confirming NO printing answers null, so the refine declines instead of guessing', async () => {
+  const card = await ygoById('10000089')
+  assert.equal(ygoVariantByCode(card, 'LOB-001'), null)
+  assert.equal(ygoVariantByCode(card, undefined), null)
 })
 
 test('catalog games match the printed number out of the cached catalog', async () => {

@@ -280,7 +280,10 @@ Identifying the card and identifying the printing are two different
 achievements, and the pipeline reports them separately.
 
 `refineFromCorner` pins the edition from the printed code once the name has
-found the card. When it can't — the code didn't read, or the card was
+found the card — for Yu-Gi-Oh preferring the exactly spelled row over a
+cross-language equivalent (`ygoVariantByCode`), because the region infix is a
+different printing at a different price, while the cross-language fallback
+still lets any language's Latin digits confirm the card. When it can't — the code didn't read, or the card was
 identified by a Yu-Gi-Oh passcode, which names the card in every language but
 says nothing about which reprint is in the hand — the edition shown is the
 SOURCE's default: for YGOPRODeck, the first entry in `card_sets`, an arbitrary

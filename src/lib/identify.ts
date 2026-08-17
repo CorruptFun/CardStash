@@ -55,7 +55,7 @@ import { catalogByCollector, catalogLeadVariants, isCatalogGame } from './tcgcsv
 import type { Card, Game, GradeInfo } from './types'
 import { detectFoil, hammingDistance, looksSideways, refineCardCrop, rotateQuarter, type CropRefinement } from './vision'
 import { isLeadOnlyMatch, nameLead, nameScore, normalizeName, similarity, sleep } from './util'
-import { ygoById, ygoPrintingVariants } from './ygo'
+import { ygoById, ygoVariantByCode } from './ygo'
 
 export type ScanMode = 'card' | 'sealed' | 'slab'
 
@@ -1480,9 +1480,12 @@ async function identifyViaOcr(
           traceEvent('corner-id', { passcode })
           card = await ygoById(passcode)
           // The mid-card set code, when it was also read, picks the exact
-          // printing (rarity moves YGO prices by orders of magnitude).
+          // printing (rarity moves YGO prices by orders of magnitude) — the
+          // exactly spelled row first, its cross-language kin only as
+          // fallback (`ygoVariantByCode`): "PSV-EN089" read off the card IS
+          // the EN printing, not whichever region the feed listed first.
           if (card && read.number) {
-            card = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? card
+            card = ygoVariantByCode(card, read.number) ?? card
           }
         }
       }
@@ -2152,7 +2155,12 @@ async function refineFromCorner(
   }
   let exact: Card | null = null
   if (card.game === 'yugioh') {
-    exact = ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, read.number)) ?? null
+    // Two questions in one find: does the printed code CONFIRM the card —
+    // cross-language on purpose, a French card's Latin digits must keep
+    // pinning a region-less catalog row — and which printing does it name.
+    // `ygoVariantByCode` keeps the confirmation set exactly as wide while
+    // answering the second with the exactly spelled row first.
+    exact = ygoVariantByCode(card, read.number)
   } else if (card.game === 'pokemon') {
     // Verified inside `matchPokemon`, against the printed SET SIZE rather than
     // here against the number — measured, that distinction is the whole
