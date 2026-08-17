@@ -689,28 +689,29 @@ async function mtg() {
   // honest replay of the same miss live. A dead CDN is bounded the same way:
   // after 8 straight misses the loop records one summary failure and stops
   // instead of retrying its way through every remaining print.
+  // Concurrency is load-bearing, not impatience: the CDN rate-limits the
+  // runner PER CONNECTION — measured at ~12.7s per image, which put the
+  // first sequential run at 38 silent minutes for ~180 files and would tax
+  // every future fixture round the same. Six parallel connections is what a
+  // browser opens against one host; the per-connection drip divides by it.
   const allPrints = dedupeBy(Object.values(printsByName).flat(), (p) => p.id)
+  const wanted = allPrints.filter((p) => p.image_uris?.small) // double-faced layouts carry imagery per face
   let printImages = 0
-  let missStreak = 0
-  for (const p of allPrints) {
-    const small = p.image_uris?.small
-    if (!small) continue // double-faced layouts carry imagery per face; nothing to fetch
-    if (missStreak >= 8) {
-      fail('mtg-print-images', `stopped after ${missStreak} consecutive image failures`)
-      break
-    }
+  let printMisses = 0
+  await pool(wanted, 6, async (p) => {
+    // A dead CDN is bounded: a dozen misses with not one success means every
+    // remaining request would fail the same way — stop scheduling work.
+    if (printMisses >= 12 && printImages === 0) return
     try {
-      await saveImage(`images/prints/${p.id}.jpg`, small)
+      await saveImage(`images/prints/${p.id}.jpg`, p.image_uris.small)
       printImages++
-      missStreak = 0
-      await new Promise((r) => setTimeout(r, 60))
     } catch (err) {
-      missStreak++
+      printMisses++
       fail(`mtg-print-image/${p.id}`, err)
     }
-  }
+  })
   manifest.datasets.mtg.printImages = printImages
-  console.log(`  print images: ${printImages}/${allPrints.length}`)
+  console.log(`  print images: ${printImages}/${wanted.length}`)
 }
 
 function trimScryfall(raw) {
