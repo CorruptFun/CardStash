@@ -344,10 +344,17 @@ function markdown(payload) {
 /* -------------------------------------------------------------------- main */
 
 const log = (msg) => console.log(msg)
+
+// Load the corpus FIRST, then seal. The claim being asserted is that no live
+// call happens while the matcher is being graded — not that the cached bulk
+// download never happens, which is the one network access this harness is
+// built on. Sealing first made a cold cache die on its own trap with
+// "live network attempt blocked — api.scryfall.com/bulk-data", which reads as
+// an egress bug and is really just an unwarmed cache; it also let
+// `compressPoliteWaits` eat TCGdex's 150ms courtesy gap during the download.
+const corpus = await loadCorpus(args.games, { log })
 const liveNetworkAttempts = sealNetwork()
 const restoreTimers = compressPoliteWaits()
-
-const corpus = await loadCorpus(args.games, { log })
 const inventory = corpusInventory(corpus)
 // Assert the corpus can FEED what is about to be measured, before measuring it
 // (lesson 82). A game with no printings would otherwise report a flawless zero.

@@ -321,10 +321,14 @@ function markdown(payload) {
 /* -------------------------------------------------------------------- main */
 
 const log = (msg) => console.log(msg)
+
+// Corpus first, seal second — see the same note in sweep-names.mjs. The floor
+// this asserts is "no live call while the matcher is graded"; the cached bulk
+// download is the access the harness is built on, and sealing ahead of it
+// turned a cold cache into a misleading egress failure.
+const corpus = await loadCorpus(args.games, { log })
 const liveNetworkAttempts = sealNetwork()
 const restoreTimers = compressPoliteWaits()
-
-const corpus = await loadCorpus(args.games, { log })
 const inventory = corpusInventory(corpus)
 for (const game of args.games) {
   if (!inventory[game]?.printings) throw new Error(`corpus: ${game} loaded 0 printings — nothing to sweep`)

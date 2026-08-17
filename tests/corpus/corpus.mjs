@@ -37,9 +37,15 @@ import { createGunzip } from 'node:zlib'
 
 import { dexSetToRows, isPaperDexSet, parseBulkLine, scryfallToRows, ygoToRows } from '../../scripts/sync-catalog.mjs'
 
+/**
+ * Where the bulk downloads live. Repo-local and gitignored by default, so a
+ * fresh checkout warms its own cache; `CORPUS_CACHE` points it at a shared
+ * directory when two agents are sweeping at once and one download should serve
+ * both. It must NOT default to a machine- or session-specific absolute path:
+ * that silently re-downloads 100 MB for everybody who is not the author.
+ */
 export const CORPUS_CACHE =
-  process.env.CORPUS_CACHE ??
-  '/private/tmp/claude-502/-Users-lucid-Creative-CardStash/0518304a-508a-4ac1-b5c5-08b13e32fb9e/scratchpad/corpus-cache'
+  process.env.CORPUS_CACHE ?? join(fileURLToPath(new URL('.', import.meta.url)), '.cache')
 
 const SCRYFALL_BULK = 'https://api.scryfall.com/bulk-data'
 const DEX_BASE = 'https://api.tcgdex.net/v2/en'
