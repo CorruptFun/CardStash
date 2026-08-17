@@ -66,6 +66,13 @@ extended. Treat this tree as the source of truth from now on. Hard rules:
 - `npm run test:binder` — the binder screens end to end (filing, the label, the
   link a printed QR carries, and the delete that must keep every card). No
   camera, no fixtures.
+- `npm run test:collection` — the collection screen and the card sheet it opens:
+  that tapping an owned card lands on **its editor** rather than on Add, that the
+  sticky action row neither clips a button nor ellipsises its own label (at 375px
+  *and* 320px), that subset chips filter while sort still orders inside them, and
+  that Select's "All" takes what is on screen rather than the whole collection.
+  Run it after touching `CollectionView.tsx` or `CardSheet.tsx`. No camera, no
+  fixtures.
 - `npm run test:unit` — node tests (corner parsing, name candidates, card
   patches, the QR encoder against a real decoder, harness stubs). `npm run test:scan` — the real-image scan regression matrix
   (headless Chromium over real card photos; fixtures come from the

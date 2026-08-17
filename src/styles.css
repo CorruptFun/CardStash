@@ -454,7 +454,7 @@ button {
     var(--holo);
   background-size:
     auto,
-    240% 100%;
+    200% 100%;
   background-blend-mode: soft-light, normal;
   animation: holoshift 9s linear infinite;
   font-weight: 620;
@@ -465,16 +465,38 @@ button {
   position: absolute;
   inset: 0;
   background: var(--holo-spec);
-  background-size: 240% 100%;
+  background-size: 200% 100%;
   animation: holoshift 9s linear infinite;
   pointer-events: none;
 }
+/*
+ * The shine loop, and the 200% is arithmetic rather than taste. DO NOT change
+ * either number on its own.
+ *
+ * A percentage `background-position` is resolved against `container - image`,
+ * not against the container: at position P with `background-size: S`, the
+ * offset is `P × (1 - S) × width`. The gradient tiles every `S × width`, so
+ * the loop is seamless only when the travel is a whole number of tiles:
+ *
+ *     P × (S - 1) = N × S        →  at N = 1, P = S / (S - 1)
+ *
+ * S = 200% is the one size where that lands back on P = S, so the end position
+ * and the background-size can be the same memorable number. Every other pair
+ * has to be computed: the 240%/240% this used to carry travelled 1.4 tiles and
+ * snapped back 0.4 of a tile — almost a full element width — every nine
+ * seconds, on every foil and 1st-edition tag in the collection grid. Each tag
+ * starts its own clock, so the jumps looked random rather than periodic.
+ *
+ * `--holo` opens and closes on the same #4fc7dd, so one tile of travel is
+ * genuinely invisible; a gradient whose ends differ would still seam here
+ * however exact the arithmetic.
+ */
 @keyframes holoshift {
   0% {
     background-position: 0% 50%;
   }
   to {
-    background-position: 240% 50%;
+    background-position: 200% 50%;
   }
 }
 .btn--big {
@@ -712,14 +734,21 @@ button {
    highlight crosses the letterforms instead of the whole word pulsing. The
    drop-shadow is the colour bleeding onto the surface behind it — small, but
    it is the difference between letters PRINTED in foil and letters filled
-   with a gradient. */
+   with a gradient.
+
+   Both layers are 200%, and they have to be: one `background-position` drives
+   every layer of a background, so a layer at any other size loops on a
+   different tile and snaps (see `holoshift`). The two used to sit at 260% and
+   240%, which drifted them against each other — and cost two different jumps
+   per cycle for it. Moving in lockstep still sends the band across the
+   letterforms, which is the whole of what this effect is for. */
 .holotext {
   background:
     var(--holo-spec),
     var(--holo);
   background-size:
-    260% 100%,
-    240% 100%;
+    200% 100%,
+    200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -829,7 +858,7 @@ button {
 }
 .empty__icon--holo {
   background: var(--holo);
-  background-size: 240% 100%;
+  background-size: 200% 100%;
   animation: holoshift 9s linear infinite;
   color: #0d0b09;
   border-color: transparent;
@@ -1305,7 +1334,7 @@ button {
   padding: 2px 5px;
   border-radius: var(--r-0);
   background: var(--holo);
-  background-size: 240% 100%;
+  background-size: 200% 100%;
   animation: holoshift 9s linear infinite;
   color: #0d0b09;
   font-family: var(--font-num);
@@ -1313,6 +1342,16 @@ button {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+/* 1st Edition is an EDITION STAMP, not a surface, so it gets silver chrome and
+   not the rainbow. `--holo` is data — it asserts the card is a foil printing —
+   and `isFoilFinish` in games.ts already refuses `firstEd` for exactly that
+   reason, so a rainbow tag here had the grid claiming foil on cards whose own
+   art correctly stayed matte. Same shine, and now the two are told apart at a
+   glance in a grid where a YGO collector has both. */
+.cardcell__finish--stamp {
+  background: var(--foil);
+  background-size: 200% 100%;
 }
 .cardcell__name {
   font-size: 12.5px;
@@ -2629,12 +2668,60 @@ button {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
+/* Wraps rather than clips. A card the user owns gets three buttons here where a
+   search result gets two, and at 320px three do not fit however short the
+   primary's label is — the bulk bar learned the same lesson (see `.bulkbar`). */
 .addbar__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--s2);
 }
+/* The basis is what makes the row above wrap, and it is doing real work.
+   A card the user OWNS is the only case with three buttons here — Edit/Add,
+   Deck and Binder — and three do not fit in the 341px a 375px phone gives:
+   "Add · $42.70" plus Deck plus Binder came to 338px with the price already
+   nearly touching Deck, and a primary that also names the copy has no chance.
+   A 150px basis means the primary takes a line of its own exactly when the
+   three would have fought over one, and shares a line whenever they fit (a
+   search result's Add + Deck, a sealed product's Add + Binder).
+
+   `min-width: 0` under it so `.addbar__addlabel`'s ellipsis can engage at all:
+   a flex item defaults to `min-width: auto` and would otherwise push a sibling
+   off the edge rather than shorten itself. Between the two, this row can
+   neither clip a button nor truncate the label that says what it does. */
 .addbar__add {
-  flex: 1;
+  flex: 1 1 150px;
+  min-width: 0;
+}
+/* Set when the component is rendering two or more secondaries — the count is
+   what decides this, so it is computed there rather than guessed at here. */
+.addbar__add--wide {
+  flex-basis: 100%;
+}
+/* Adding another copy, once editing the one owned became the primary. It sits
+   where the add controls it opens will sit — above the action row, so the
+   primary stays the button nearest the thumb. */
+.addbar__another {
+  width: 100%;
+  justify-content: center;
+  gap: 6px;
+}
+/* Says which of the bar's two jobs is on screen, and offers the way back to the
+   other. Only rendered when the editor is the one it displaced. */
+.addbar__mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: 2px;
+}
+.addbar__modelabel {
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-3);
 }
 .deckpick {
   display: flex;
@@ -3631,7 +3718,7 @@ button {
   height: 64px;
   border-radius: 50%;
   background: var(--holo);
-  background-size: 240% 100%;
+  background-size: 200% 100%;
   animation:
     holoshift 9s linear infinite,
     orb 3.2s ease-in-out infinite;
@@ -4463,12 +4550,23 @@ button {
   gap: var(--s2);
   padding: 6px 0;
 }
+/* A button, not a label: this is the way into the copy editor (the pencil at the
+   end of the row is the same action, drawn). Full row height so the target is
+   the whole strip of identity rather than seven px of text. */
 .copyrow__id {
   display: flex;
   align-items: baseline;
   gap: 7px;
   flex: 1;
   min-width: 0;
+  text-align: left;
+  padding: 4px 0;
+  margin: -4px 0;
+  border-radius: var(--r-0);
+  transition: opacity var(--t-1) var(--ease-out);
+}
+.copyrow__id:active {
+  opacity: 0.6;
 }
 .copyrow__finish {
   font-size: 13.5px;

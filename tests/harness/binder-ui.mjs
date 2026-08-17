@@ -124,7 +124,7 @@ try {
 
   await page.goto(`http://127.0.0.1:${PORT}/index.html?welcome=0&nosw=1#/collection`)
   await page.waitForSelector('.cardcell', { timeout: 20_000 })
-  await page.click('.colltools .btn:has-text("Edit")')
+  await page.click('.colltools .btn:has-text("Select")')
   const cells = page.locator('.cardcell')
   await cells.nth(0).click()
   await cells.nth(1).click()

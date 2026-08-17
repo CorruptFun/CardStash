@@ -6,7 +6,7 @@
 | ------ | ---- | ------------ |
 | **Scan** | `views/ScanView.tsx` | The camera. Game filter chips, Packs (sealed) toggle, Collect toggle, torch. A reticle with live "sensing/locking" feedback, the result chip (name · set · price · finish cycler), the "what the scanner saw" diagnostics door, and the recent-scan tray. Also owns the start gate and the iOS permission explainer, the **photo upload** control (`UploadButton`) and the **Page** pill for binder/multi-card scanning — both entry points check `entitlement.ts`, and both land on a **review screen** where the user confirms every row before anything is written. A page files ~9 cards on one tap, so nothing is added silently; each row offers a full-budget re-read. The tray's **Review** button (pinned outside the strip's scroller) opens **batch add** (`components/ScanBatch.tsx`) — the same review shell over the scan log, for filing a whole stack in one confirm. |
 | **Search** | `views/SearchView.tsx` | Debounced multi-game search over the enabled games, by name or by the number printed on the card (`CODE_EXAMPLE` supplies the per-game example in the placeholder), accepting a prefill handed over from a failed scan. |
-| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, text filter, sort, an edit/multi-select mode with bulk quantity and delete, spare/for-trade summaries, deck assignment, **filing a selection into a binder**, price refresh, CSV import/export and JSON backup/restore. |
+| **Collection** | `views/CollectionView.tsx` | Portfolio header (value, count, 30-day delta), the insights panel, game filter, **subset chips** (All · Spares · For trade, with counts), text filter, sort, a **Select** (multi-select) mode with bulk quantity and delete, deck assignment, **filing a selection into a binder**, price refresh, CSV import/export and JSON backup/restore. |
 | **Decks** | `views/DecksView.tsx` | Deck list and deck detail: board grouping by type, mana curve / colour bar / type bars, owned-vs-missing costing, rules warnings, add-cards modal (search or from your collection), rename, cover, decklist copy. |
 | **AI builder** | `views/BuilderView.tsx` | The Gemini deck builder: game/format/style/budget, optional "build around these" seed cards, live-search-grounded meta research, parsed decklists that can be created as real decks. |
 | **Friends** | `views/FriendsView.tsx` | Your shareable binder (for-trade count and value), the friends list with want-match badges, the trades list, import/paste, the live-sync panel, and **Invite a friend** (`components/InvitePanel.tsx`) — a `?via=<handle>` link that credits the referral *and* makes the two of you friends when they claim a handle. |
@@ -21,6 +21,39 @@ and a sparkline, printings/variants, the finish + condition + quantity + cost
 basis add bar, copies you already own, deck membership and assignment, the want
 toggle, external links, and — for sealed products — the set's other products and
 everything that could be pulled from it.
+
+### The sheet edits first when you already own the card
+
+A sheet opened **from a collection row** is about a card the user owns and is
+looking after, not one they are acquiring, so it inverts the usual primary: the
+tapped copy's editor is **already open** when the sheet appears, the primary
+button is `Edit copy · <finish/condition>`, and adding sits behind a full-width
+secondary (`Add another copy · $x`) that reveals the old add controls and puts
+Add back as the primary. Everywhere else — a search result, a scan, a deck, a
+friend's binder — nothing changes; the sheet exists in order to add.
+
+Four things hold this up, and `npm run test:collection` is what proves them:
+
+- **`editingCopyId` lives on the sheet, seeded from `sheet.item?.id`.** Seeded,
+  not opened by an effect (which flashes), and held above the rows rather than
+  inside each one so two editors can never disagree about the same copy.
+- **`addOpen` is seeded from `sheet.item` too**, synchronously, because the
+  copies live-query has not answered on the first frame and the bar must not
+  flash the wrong primary.
+- **`editTarget` is re-read from the live query**, never trusted from the grid
+  cell: qty and the for-trade count move, and a save can merge a row away
+  entirely (`updateItem` returns a different id when it does).
+- **`.addbar__add`'s `flex: 1 1 150px` + `min-width: 0` is load-bearing.** The
+  owned sheet is the only one with three buttons (Edit/Add, Deck, Binder — a
+  friend's binder can want four), and three never fit the 341px a 375px phone
+  gives: the primary takes a line of its own exactly when they would have fought
+  over one. Without the `min-width` a flex item's `auto` minimum pushes Binder
+  off the edge instead of shortening the label. Both failures look like a missing
+  feature rather than a layout bug.
+
+`CopyEditForm` is a component rather than state on `CopyRow` so that opening the
+editor **mounts** it — every field then seeds from the row as a consequence,
+where the old version hand-rolled that with seven setters on the way in.
 
 When a scan couldn't read the printed code, the sheet says so under the set
 line ("Edition not read — check it's yours") and taps through to the printings
@@ -98,6 +131,44 @@ gradient and it is *data*: it marks a card as an actual foil printing, so it
 must stay rainbow. `--foil` is silver and it is *chrome*: it says "collectible"
 without claiming anything about the card under it. Reaching for `--holo` to
 decorate UI would make the app assert a card is foil when it isn't.
+
+That rule has one place it is easy to break from the inside: a **finish tag** in
+the collection grid (`.cardcell__finish`) is drawn for every finish that isn't
+`nonfoil`, and `firstEd` is in that set while being an *edition stamp* rather
+than a surface. It carried `--holo` and so claimed foil on cards whose own art
+correctly stayed matte — `isFoilFinish` excludes `firstEd` deliberately.
+`.cardcell__finish--stamp` gives it `--foil` instead, and the two now agree.
+
+### Why every holo shine is sized 200%
+
+`@keyframes holoshift` animates `background-position` from `0%` to `200%` and
+every surface riding it sets `background-size: 200% 100%`. **Both numbers are
+arithmetic, and changing either alone reintroduces a visible hard jump.**
+
+A percentage `background-position` resolves against `container - image`, not
+against the container: at position P with size S, the offset is
+`P × (1 - S) × width`. The gradient tiles every `S × width`, so the loop is
+seamless only when the travel is a whole number of tiles —
+`P × (S - 1) = N × S`, which at N = 1 gives `P = S / (S - 1)`. **S = 200% is the
+one size where that lands back on P = S**, which is why the end position and the
+size can be the same memorable number; any other size has to be computed.
+
+The 240%/240% these all used to carry travelled **1.4 tiles** and snapped back
+0.4 of a tile — nearly a full element width — every nine seconds, on every foil
+and 1st-edition tag in the collection grid. Because each tag starts its own
+clock, the jumps read as random rather than periodic. `.holotext` was worse: two
+layers at 260% and 240% under one `background-position` (which drives all layers
+together), so it snapped twice per cycle by two different amounts.
+
+`--holo` and `--foil` both open and close on the same colour, so one tile of
+travel is genuinely invisible. A gradient whose ends differ would still seam
+here however exact the arithmetic — check that first if a new one is added.
+
+`holodrift` and `glaresweep` are **not** affected and must not be "fixed" to
+match: `holodrift` ping-pongs (`0%,to` share a value) and `glaresweep` animates
+`transform`, crossing in the first 18% and waiting off-screen. `shimmer` restarts
+on purpose — it is a loading affordance, and both ends of its gradient are
+transparent.
 
 ### The holographic glare
 

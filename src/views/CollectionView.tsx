@@ -37,7 +37,7 @@ import {
 } from '../lib/prices'
 import { useSettings } from '../lib/settings'
 import type { CollectionItem, Deck, Game, PricePoint, Sport } from '../lib/types'
-import { money, ymd } from '../lib/util'
+import { haptic, money, ymd } from '../lib/util'
 import { guarded, useUi } from '../store/ui'
 import { InsightsPanel } from './InsightsPanel'
 
@@ -47,7 +47,21 @@ const HISTORY_DAYS = 32
 const FILTER_DEBOUNCE_MS = 120
 const PRICED_STALE_MS = 48 * 3_600_000
 
-type SortMode = 'value' | 'name' | 'newest' | 'spares' | 'trade'
+/**
+ * Ordering only. `spares` and `trade` used to live in here too, which made one
+ * control answer two questions and answer neither well: they FILTERED, so
+ * picking one silently threw rows away, and choosing an order for what was left
+ * was then impossible. They are `Subset` below.
+ */
+type SortMode = 'value' | 'name' | 'newest'
+/** Which rows are on screen at all — composes with any `SortMode`. */
+type Subset = 'all' | 'spares' | 'trade'
+
+const SORT_LABEL: Record<SortMode, string> = {
+  value: 'By value',
+  name: 'By name',
+  newest: 'Newest',
+}
 
 function unitPriceMap(items: CollectionItem[]): Map<string, number> {
   const map = new Map<string, number>()
@@ -88,8 +102,8 @@ function tradeSummary(items: CollectionItem[], units: Map<string, number>) {
   return summary
 }
 
-function exportScope(all: CollectionItem[], onScreen: CollectionItem[], editMode: boolean, selected: Set<string>) {
-  return editMode && selected.size > 0
+function exportScope(all: CollectionItem[], onScreen: CollectionItem[], selectMode: boolean, selected: Set<string>) {
+  return selectMode && selected.size > 0
     ? { rows: all.filter((item) => selected.has(item.id)), name: 'selection' as const }
     : { rows: onScreen, name: 'collection' as const }
 }
@@ -127,7 +141,9 @@ export function CollectionView() {
   const [filterText, setFilterText] = useState('')
   const [filter, setFilter] = useState('')
   const [sort, setSort] = useState<SortMode>('value')
-  const [editMode, setEditMode] = useState(false)
+  const [subset, setSubset] = useState<Subset>('all')
+  /** Multi-select, for the bulk bar. Not editing a card — see the Select chip. */
+  const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dataOpen, setDataOpen] = useState(false)
   const [busyText, setBusyText] = useState<string | null>(null)
@@ -156,18 +172,26 @@ export function CollectionView() {
       rows = rows.filter(
         (item) => item.name.toLowerCase().includes(needle) || item.setCode?.toLowerCase().includes(needle),
       )
-    if (sort === 'spares') rows = rows.filter((item) => item.qty > 1)
-    if (sort === 'trade') rows = rows.filter((item) => tradeQty(item) > 0)
+    if (subset === 'spares') rows = rows.filter((item) => item.qty > 1)
+    else if (subset === 'trade') rows = rows.filter((item) => tradeQty(item) > 0)
     const sorted = rows === all ? [...rows] : rows
-    if (sort === 'value') sorted.sort((a, b) => unitOf(b.id) * b.qty - unitOf(a.id) * a.qty)
-    else if (sort === 'spares')
-      sorted.sort((a, b) => spareValue(b, unitOf(b.id)) - spareValue(a, unitOf(a.id)) || b.qty - a.qty)
-    else if (sort === 'trade')
-      sorted.sort((a, b) => tradeValue(b, unitOf(b.id)) - tradeValue(a, unitOf(a.id)) || tradeQty(b) - tradeQty(a))
+    // "By value" means the value of what is actually on screen: in a subset the
+    // figure that matters is the spares' or the offered copies' worth, not the
+    // whole row's. Those two orderings were the old `spares`/`trade` sort modes,
+    // which is why they came with a filter welded on — now they are what By
+    // value MEANS inside a subset, and By name and Newest work there too.
+    if (sort === 'value')
+      sorted.sort(
+        subset === 'spares'
+          ? (a, b) => spareValue(b, unitOf(b.id)) - spareValue(a, unitOf(a.id)) || b.qty - a.qty
+          : subset === 'trade'
+            ? (a, b) => tradeValue(b, unitOf(b.id)) - tradeValue(a, unitOf(a.id)) || tradeQty(b) - tradeQty(a)
+            : (a, b) => unitOf(b.id) * b.qty - unitOf(a.id) * a.qty,
+      )
     else if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     else sorted.sort((a, b) => b.addedAt - a.addedAt)
     return sorted
-  }, [all, gameFilter, sportFilter, filter, sort, unitOf])
+  }, [all, gameFilter, sportFilter, filter, sort, subset, unitOf])
 
   const total = useMemo(() => collectionValue(all), [all])
   const count = useMemo(() => totalQty(all), [all])
@@ -180,7 +204,34 @@ export function CollectionView() {
   const spares = useMemo(() => sparesSummary(all, units), [all, units])
   const trades = useMemo(() => tradeSummary(all, units), [all, units])
   const priced = useMemo(() => pricedBadge(all), [all])
-  const window = useMemo(() => valueWindow(all, points), [all, points])
+  // Not `window`. This is a 700-line component and that name shadowed the global
+  // inside all of it, so the first line here to want `window.matchMedia` would
+  // have got a portfolio figure and a confusing error.
+  const valueWin = useMemo(() => valueWindow(all, points), [all, points])
+
+  /**
+   * Spares and for-trade as views with their own counts, beside the game chips.
+   * Both used to be options inside the Sort control, where they filtered without
+   * saying so and nothing announced there was anything to look at — a collector
+   * with 38 spares had to open a dropdown to find that out.
+   *
+   * A chip appears only once the collection actually has any, the same rule the
+   * game chips follow: no row of dead controls over a shelf of singles.
+   */
+  const subsetChips = useMemo(() => {
+    const chips: { key: Subset; label: string; meta: string }[] = [
+      { key: 'all', label: 'All', meta: `${count} ${count === 1 ? 'card' : 'cards'}` },
+    ]
+    if (spares.count > 0) chips.push({ key: 'spares', label: 'Spares', meta: `${spares.count} · ${money(spares.value)}` })
+    if (trades.count > 0) chips.push({ key: 'trade', label: 'For trade', meta: `${trades.count} · ${money(trades.value)}` })
+    return chips
+  }, [count, spares, trades])
+
+  // Trading away the last spare must not leave the grid filtered to nothing by a
+  // chip that is no longer on screen.
+  useEffect(() => {
+    if (subset !== 'all' && !subsetChips.some((chip) => chip.key === subset)) setSubset('all')
+  }, [subset, subsetChips])
 
   const toggleSelected = useCallback((id: string) => {
     setSelected((prev) => {
@@ -192,10 +243,10 @@ export function CollectionView() {
 
   const pick = useCallback(
     (item: CollectionItem) => {
-      if (editMode) toggleSelected(item.id)
+      if (selectMode) toggleSelected(item.id)
       else openSheet({ card: item.card, item, origin: 'collection' })
     },
-    [editMode, toggleSelected, openSheet],
+    [selectMode, toggleSelected, openSheet],
   )
 
   /**
@@ -216,6 +267,22 @@ export function CollectionView() {
   }, [ownedSports, sportFilter])
 
   const selectedItems = useMemo(() => all.filter((item) => selected.has(item.id)), [all, selected])
+
+  /**
+   * Select everything on screen, or drop it. Filing a shelf into a binder or
+   * exporting one game meant tapping every card, because the bulk bar only
+   * exists once something is picked — so there was no "all" to reach for.
+   *
+   * Scoped to `shown` and not to the whole collection, which is the same promise
+   * the CSV export makes ("what's on screen"): the filters above are how you say
+   * what you mean, and a button that quietly took the other 800 rows too would
+   * make them decoration.
+   */
+  const allShownSelected = shown.length > 0 && shown.every((item) => selected.has(item.id))
+  const toggleSelectAll = () => {
+    setSelected(allShownSelected ? new Set() : new Set(shown.map((item) => item.id)))
+    haptic(6)
+  }
 
   const bulkQty = async (direction: number) => {
     const rows = selectedItems
@@ -260,7 +327,7 @@ export function CollectionView() {
     if (!ids.length) return
     if (!(await guarded(async () => (await removeItems(ids), true), 'Remove'))) return
     setSelected(new Set())
-    setEditMode(false)
+    setSelectMode(false)
     toast(`Removed ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}`, 'success')
   }
 
@@ -305,7 +372,7 @@ export function CollectionView() {
   }
 
   const selectionLegend =
-    editMode && selected.size > 0
+    selectMode && selected.size > 0
       ? `${selected.size} selected ${selected.size === 1 ? 'row' : 'rows'}`
       : `${shown.length} ${shown.length === 1 ? 'row' : 'rows'} on screen`
 
@@ -320,7 +387,7 @@ export function CollectionView() {
    * A measurement can't drift from the bar the way a constant did, and it also
    * survives a longer label or another button being added to the row.
    */
-  const barUp = editMode && selected.size > 0
+  const barUp = selectMode && selected.size > 0
   const bulkRef = useRef<HTMLDivElement | null>(null)
   const [bulkHeight, setBulkHeight] = useState(0)
   useEffect(() => {
@@ -341,7 +408,7 @@ export function CollectionView() {
   } as CSSProperties
 
   const exportCsv = async () => {
-    const scope = exportScope(all, shown, editMode, selected)
+    const scope = exportScope(all, shown, selectMode, selected)
     downloadFile(`cardstock-${scope.name}-${ymd()}.csv`, collectionToCsv(scope.rows), 'text/csv')
     setDataOpen(false)
     toast(
@@ -532,7 +599,7 @@ export function CollectionView() {
 
   return (
     <div
-      className={`screen safe-top ${editMode ? 'screen--bulk' : ''}`}
+      className={`screen safe-top ${selectMode ? 'screen--bulk' : ''}`}
       style={bulkReserve}
     >
       <header className="collhead">
@@ -542,10 +609,10 @@ export function CollectionView() {
             <span className="collhead__total">
               <AnimatedNumber value={total} format={(v) => money(v)} />
             </span>
-            {window.ready && (
-              <span className={`collhead__delta collhead__delta--${window.delta >= 0 ? 'up' : 'down'}`}>
-                <em>30d</em> {window.delta >= 0 ? '▲' : '▼'} {money(Math.abs(window.delta))} (
-                {Math.abs(window.deltaPct).toFixed(1)}%)
+            {valueWin.ready && (
+              <span className={`collhead__delta collhead__delta--${valueWin.delta >= 0 ? 'up' : 'down'}`}>
+                <em>30d</em> {valueWin.delta >= 0 ? '▲' : '▼'} {money(Math.abs(valueWin.delta))} (
+                {Math.abs(valueWin.deltaPct).toFixed(1)}%)
               </span>
             )}
           </span>
@@ -585,8 +652,23 @@ export function CollectionView() {
             ))}
           </div>
         )}
+        {subsetChips.length > 1 && (
+          <div className="collhead__games">
+            {subsetChips.map((chip) => (
+              <button
+                key={chip.key}
+                className={`gamefilter ${subset === chip.key ? 'gamefilter--on' : ''}`}
+                onClick={() => setSubset(chip.key)}
+                aria-pressed={subset === chip.key}
+              >
+                <span>{chip.label}</span>
+                <em>{chip.meta}</em>
+              </button>
+            ))}
+          </div>
+        )}
       </header>
-      <InsightsPanel items={all} points={points} window={window} />
+      <InsightsPanel items={all} points={points} window={valueWin} />
       <div className="colltools">
         <div className="searchbox searchbox--slim">
           <Icon name="search" size={16} />
@@ -599,35 +681,42 @@ export function CollectionView() {
           />
         </div>
         <select className="select select--slim" value={sort} onChange={(event) => setSort(event.target.value as SortMode)} aria-label="Sort">
-          <option value="value">By value</option>
-          <option value="name">By name</option>
-          <option value="newest">Newest</option>
-          <option value="spares">Spares</option>
-          <option value="trade">For trade</option>
+          {(Object.keys(SORT_LABEL) as SortMode[]).map((mode) => (
+            <option key={mode} value={mode}>
+              {SORT_LABEL[mode]}
+            </option>
+          ))}
         </select>
+        {/* "Select", not "Edit". This enters multi-select for the bulk bar; it
+            has never edited anything, and tapping a card in the collection now
+            opens that copy's editor, so one screen cannot have two meanings for
+            the word. */}
         <button
-          className={`btn btn--ghost btn--sm ${editMode ? 'btn--on' : ''}`}
+          className={`btn btn--ghost btn--sm ${selectMode ? 'btn--on' : ''}`}
           onClick={() => {
-            setEditMode(!editMode)
+            setSelectMode(!selectMode)
             setSelected(new Set())
           }}
-          aria-pressed={editMode}
+          aria-pressed={selectMode}
         >
-          <Icon name="pencil" size={15} /> Edit
+          <Icon name="check" size={15} /> {selectMode ? 'Done' : 'Select'}
         </button>
+        {selectMode && (
+          <button className="btn btn--ghost btn--sm" onClick={toggleSelectAll} aria-pressed={allShownSelected}>
+            <Icon name="grid" size={15} /> {allShownSelected ? 'None' : `All ${shown.length}`}
+          </button>
+        )}
         <button className="btn btn--ghost btn--sm" onClick={() => setDataOpen(true)}>
           <Icon name="download" size={15} /> Data
         </button>
       </div>
       {busyBar}
-      {sort === 'spares' && spares.count > 0 && (
+      {/* The chip above carries the count and the value; what this adds is the
+          recourse, because a for-trade flag does nothing until a friend has the
+          binder it appears in. */}
+      {subset === 'trade' && trades.count > 0 && (
         <div className="sparesline">
-          {spares.count} SPARES · {money(spares.value)}
-        </div>
-      )}
-      {sort === 'trade' && trades.count > 0 && (
-        <div className="sparesline">
-          {trades.count} FOR TRADE · {money(trades.value)} ·{' '}
+          Offered to friends who have your binder ·{' '}
           <a className="sparesline__link" href="#/friends">
             share binder
           </a>
@@ -640,10 +729,10 @@ export function CollectionView() {
           body={
             filter.trim()
               ? `Nothing in the collection matches “${filter.trim()}”.`
-              : sort === 'spares'
-                ? 'No duplicates yet — spares are the copies past the first of each row.'
-                : sort === 'trade'
-                  ? 'Nothing marked for trade yet — select rows and tap Trade, or set a For-trade count on a card’s copies.'
+              : subset === 'spares'
+                ? 'No duplicates in this game — spares are the copies past the first of each row.'
+                : subset === 'trade'
+                  ? 'Nothing here marked for trade — select rows and tap Trade, or set a For-trade count on a card’s copies.'
                   : 'No cards in that game yet.'
           }
         />
@@ -653,7 +742,7 @@ export function CollectionView() {
           <CollectionCell
             key={item.id}
             item={item}
-            editMode={editMode}
+            selectMode={selectMode}
             selected={selected.has(item.id)}
             unit={unitOf(item.id)}
             onPick={pick}
@@ -760,19 +849,25 @@ export function CollectionView() {
 
 const CollectionCell = memo(function CollectionCell({
   item,
-  editMode,
+  selectMode,
   selected,
   unit,
   onPick,
 }: {
   item: CollectionItem
-  editMode: boolean
+  selectMode: boolean
   selected: boolean
   unit: number
   onPick: (item: CollectionItem) => void
 }) {
   return (
-    <button className={`cardcell ${selected ? 'cardcell--selected' : ''}`} onClick={() => onPick(item)}>
+    <button
+      className={`cardcell ${selected ? 'cardcell--selected' : ''}`}
+      onClick={() => onPick(item)}
+      // Only while selecting: the rest of the time this button opens a sheet,
+      // and a pressed state on it would claim a toggle that isn't there.
+      aria-pressed={selectMode ? selected : undefined}
+    >
       <CardImg card={item.card} foil={isFoilFinish(item.finish)} />
       {item.qty > 1 && <span className="cardcell__qty">×{item.qty}</span>}
       {tradeQty(item) > 0 && (
@@ -781,14 +876,21 @@ const CollectionCell = memo(function CollectionCell({
           {tradeQty(item) < item.qty ? ` ${tradeQty(item)}` : ''}
         </span>
       )}
-      {item.finish !== 'nonfoil' && <span className="cardcell__finish">{FINISH_LABEL[item.finish]}</span>}
+      {/* `firstEd` is an edition stamp and not a surface, so it gets the silver
+          treatment rather than the rainbow — `isFoilFinish` above refuses it for
+          the art for the same reason. */}
+      {item.finish !== 'nonfoil' && (
+        <span className={`cardcell__finish ${isFoilFinish(item.finish) ? '' : 'cardcell__finish--stamp'}`}>
+          {FINISH_LABEL[item.finish]}
+        </span>
+      )}
       <span className="cardcell__price">{money(unit * item.qty)}</span>
       <span className="cardcell__name">{item.name}</span>
       <span className="cardcell__set">
         {item.setCode}
         {item.opened != null ? ` · ${item.opened ? 'Opened' : 'Sealed'}` : item.condition !== 'NM' ? ` · ${item.condition}` : ''}
       </span>
-      {editMode && (
+      {selectMode && (
         <span className={`cardcell__check ${selected ? 'cardcell__check--on' : ''}`}>{selected && <Icon name="check" size={13} />}</span>
       )}
     </button>

@@ -25,6 +25,7 @@
     "test:photos": "node tests/harness/run-matrix.mjs --photos-only",
     "test:clips": "node tests/harness/run-matrix.mjs --clips-only --pages=1",
     "test:binder": "node tests/harness/binder-ui.mjs",
+    "test:collection": "node tests/harness/collection-ui.mjs",
     "test:misshelp": "node tests/harness/miss-help-ui.mjs",
     "test:install": "node tests/harness/install-prompt.mjs",
     "test:cloud": "node tests/harness/cloud-live.mjs",
