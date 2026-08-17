@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="holo" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#25b6d4"/>
+      <stop offset=".22" stop-color="#6250f2"/>
+      <stop offset=".44" stop-color="#cb4dbf"/>
+      <stop offset=".64" stop-color="#e8952f"/>
+      <stop offset=".82" stop-color="#3fc98a"/>
+      <stop offset="1" stop-color="#2ea3ee"/>
+    </linearGradient>
+    <!-- The specular band. Diffraction splits light into colour at the edge of
+         a highlight, so the band has cyan and rose shoulders; a purely white
+         one reads as glass. -->
+    <linearGradient id="spec" x1="0" y1="1" x2="1" y2="0">
+      <stop offset=".28" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".4" stop-color="#7ee7ff" stop-opacity=".16"/>
+      <stop offset=".47" stop-color="#fff" stop-opacity=".4"/>
+      <stop offset=".54" stop-color="#ffb0f3" stop-opacity=".18"/>
+      <stop offset=".64" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- The diffraction grating: real holo stock is a physically ruled
+         surface. It disappears below ~64px, which is correct — it is texture,
+         not silhouette. -->
+    <pattern id="grain" width="1.024" height="1.024"
+             patternTransform="rotate(-24)" patternUnits="userSpaceOnUse">
+      <rect width="1.024" height="0.307" fill="#fff" opacity=".06"/>
+    </pattern>
+    <radialGradient id="ground" cx=".5" cy=".42" r=".72">
+      <stop offset="0" stop-color="#191410"/>
+      <stop offset=".55" stop-color="#0a0807"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <radialGradient id="bloom" cx=".5" cy=".46" r=".5">
+      <stop offset="0" stop-color="#8ea6d8" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8ea6d8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="cardclip">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"/>
+    </clipPath>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.152" stdDeviation="1.792"
+                    flood-color="#000" flood-opacity=".55"/>
+    </filter>
+    <!-- The white specular band and the grating both desaturate what they lie
+         over, and a foil that has gone pastel reads as a plastic sleeve. This
+         puts the chroma back after those layers, not before. -->
+    <filter id="rich" x="-5%" y="-5%" width="110%" height="110%">
+      <feColorMatrix type="saturate" values="1.35"/>
+    </filter>
+  </defs>
+
+  <rect width="64" height="64" rx="14.976" fill="url(#ground)"/>
+  <rect width="64" height="64" rx="14.976" fill="url(#bloom)"/>
+
+  <g transform="rotate(-8 32 32)" filter="url(#lift)">
+    <g clip-path="url(#cardclip)" filter="url(#rich)">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#holo)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#grain)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#spec)"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="#0a0908" opacity=".62"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="none" stroke="#f4efe8" stroke-opacity=".28"
+            stroke-width="0.699"/>
+    </g>
+    <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"
+          fill="none" stroke="#f4efe8" stroke-width="1.664"/>
+  </g>
+</svg>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- maximum-scale=1 stops iOS auto-zooming the viewport when a sub-16px
+         input focuses (user pinch-zoom is unaffected since iOS 10). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    <title>Cardstock — TCG Scanner</title>
+    <meta
+      name="description"
+      content="Point your camera at any Magic, Pokémon, Yu-Gi-Oh, Riftbound, Lorcana, One Piece, Star Wars, Digimon or Gundam card. See what it's worth, add it to your collection, build decks."
+    />
+    <meta name="theme-color" content="#0a0908" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Cardstock" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <style>
+      /* Paint the shell instantly, before the bundle arrives: warm near-black
+         ground + the dock hairline, so first paint is already the design. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0908;
+        color: #f4efe8;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      #root::after {
+        content: '';
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+        height: 1px;
+        background: #221e1b;
+      }
+      #root:not(:empty)::after {
+        display: none;
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-pSisjx7L.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Dz4um2Fw.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
