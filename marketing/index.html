@@ -1,0 +1,620 @@
+<title>Cardstock</title>
+<style>
+/* The three faces this page sets, referenced out of node_modules the same way
+ * src/fonts.css does. `npm run build:marketing` inlines them as data URIs so the
+ * published page is self-contained — an Artifact CSP blocks every font CDN. */
+@font-face{font-family:"Archivo Variable";font-style:normal;font-display:swap;
+  font-weight:100 900;font-stretch:62% 125%;
+  src:url(../node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2) format("woff2-variations");}
+@font-face{font-family:"Inter Variable";font-style:normal;font-display:swap;font-weight:100 900;
+  src:url(../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2) format("woff2-variations");}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:500;
+  src:url(../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2) format("woff2");}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:600;
+  src:url(../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2) format("woff2");}
+
+:root{
+  /* Ground — warm near-black, lifted from the app's own --ink ramp. */
+  --ink-000:#0a0908; --ink-050:#121010; --ink-100:#1a1614; --ink-150:#231e1a;
+  --ink-200:#2d2723; --rule:#221e1b; --rule-2:#332d28;
+  /* Paper — warm off-white, the app's --paper ramp. */
+  --paper:#f4efe8; --paper-2:#a89f95; --paper-3:#867d73;
+  /* Chroma spine — the app's --holo spectrum, promoted from data to identity. */
+  --c-cyan:#4fc7dd; --c-violet:#7b6bf5; --c-magenta:#d072c9;
+  --c-amber:#eaa85f; --c-mint:#6fd49c; --c-blue:#5cb6f0;
+  /* Per-game hues, exactly as the app assigns them. */
+  --g-mtg:#e57a55; --g-pkm:#6aa8e5; --g-ygo:#b083d0; --g-rft:#3fbfae;
+  --g-lor:#d4a94a; --g-op:#e0606b; --g-swu:#d9c04b; --g-dgm:#eb8f4a;
+  --g-gcg:#6f97dd; --g-spt:#5fbf6a;
+
+  --holo:linear-gradient(112deg,#4fc7dd 0%,#7b6bf5 18%,#d072c9 34%,#eaa85f 50%,#6fd49c 66%,#5cb6f0 82%,#4fc7dd 100%);
+  /* The diffraction grating. Pitch is in px on purpose: it is a property of
+     the stock, not of the element it lies on. */
+  --grain:repeating-linear-gradient(98deg,
+    rgba(255,255,255,0) 0px, rgba(120,226,255,.16) 1.5px,
+    rgba(255,255,255,.22) 2.5px, rgba(255,168,240,.16) 3.5px,
+    rgba(255,255,255,0) 6px);
+
+  --font-display:"Archivo Variable",system-ui,sans-serif;
+  --font-body:"Inter Variable",system-ui,-apple-system,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --hue:var(--c-cyan);
+  --col:min(1080px,100% - 2.5rem);
+  --r-2:8px; --r-1:5px;
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  background:var(--ink-000);
+  color:var(--paper);
+  font-family:var(--font-body);
+  font-size:1.0625rem;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+
+.wrap{width:var(--col);margin-inline:auto}
+
+h1,h2,h3{
+  font-family:var(--font-display);
+  font-weight:750;
+  font-stretch:118%;
+  line-height:.98;
+  letter-spacing:-.018em;
+  text-wrap:balance;
+  margin:0;
+}
+
+p{margin:0;max-width:64ch}
+
+.eyebrow{
+  font-family:var(--font-mono); font-weight:600; font-size:.7rem;
+  letter-spacing:.19em; text-transform:uppercase;
+  color:var(--hue); margin:0 0 1rem;
+}
+
+/* ---- Foil-filled type. The app fills type with --holo to mean "foil"; here it
+   runs on exactly one phrase, because a page of gradients reads as decoration
+   rather than as material. ---- */
+.holotext{
+  background-image:linear-gradient(112deg,rgba(255,255,255,0) 36%,rgba(255,255,255,.42) 46%,rgba(255,255,255,0) 56%),var(--holo);
+  background-size:auto,240% 100%;
+  -webkit-background-clip:text; background-clip:text;
+  color:transparent;
+  filter:drop-shadow(0 0 6px rgba(150,190,255,.18));
+  animation:holoshift 9s linear infinite;
+}
+@keyframes holoshift{0%{background-position:0 0,0% 50%}100%{background-position:0 0,240% 50%}}
+
+/* ---- Hero ---- */
+.hero{
+  position:relative;
+  padding:clamp(3.5rem,9vw,6.5rem) 0 clamp(3rem,6vw,5rem);
+  overflow:hidden;
+}
+.hero::before{
+  content:""; position:absolute; inset:-40% -20% auto -20%; height:120%;
+  background:radial-gradient(60% 50% at 50% 0%,rgba(123,107,245,.16),transparent 70%),
+             radial-gradient(45% 40% at 78% 12%,rgba(79,199,221,.12),transparent 70%);
+  pointer-events:none;
+}
+.hero .wrap{position:relative;display:grid;gap:clamp(2.5rem,5vw,4rem);
+  grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); align-items:center}
+@media (max-width:880px){.hero .wrap{grid-template-columns:1fr}}
+
+h1{font-size:clamp(2.7rem,7.4vw,5rem)}
+.lede{margin-top:1.4rem;color:var(--paper-2);font-size:clamp(1.02rem,1.6vw,1.18rem);max-width:52ch}
+.lede strong{color:var(--paper);font-weight:600}
+
+.cta{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:2.1rem}
+.btn{
+  font-family:var(--font-mono);font-weight:600;font-size:.8rem;
+  letter-spacing:.1em;text-transform:uppercase;text-decoration:none;
+  padding:.85rem 1.35rem;border-radius:var(--r-1);
+  border:1px solid var(--rule-2); color:var(--paper);
+  transition:border-color .16s cubic-bezier(.2,.75,.3,1),color .16s,transform .16s;
+}
+.btn--go{
+  border-color:transparent; color:#0a0908; position:relative; overflow:hidden;
+  background:var(--holo); background-size:220% 100%;
+}
+.btn--go::after{
+  content:""; position:absolute; inset:0; background:var(--grain); opacity:.5;
+  mix-blend-mode:overlay; pointer-events:none;
+}
+.btn:hover{transform:translateY(-1px);border-color:var(--hue)}
+.btn--go:hover{border-color:transparent}
+a:focus-visible,button:focus-visible{outline:2px solid var(--c-cyan);outline-offset:3px}
+
+/* ---- The mark: the app's own icon, at size, still diffracting ---- */
+.mark{position:relative;width:min(320px,72%);margin-inline:auto;aspect-ratio:1}
+.mark svg{width:100%;height:100%;display:block;
+  filter:drop-shadow(0 24px 50px rgba(0,0,0,.75))}
+.mark::after{
+  content:""; position:absolute; inset:0; border-radius:23%;
+  background:linear-gradient(105deg,transparent 43%,rgba(150,130,255,.1) 45.5%,
+    rgba(126,231,255,.22) 47.5%,rgba(255,255,255,.42) 50%,rgba(255,176,243,.24) 52.5%,
+    rgba(255,214,130,.12) 54.5%,transparent 57%);
+  background-size:260% 100%; background-position:180% 0;
+  mix-blend-mode:screen; pointer-events:none;
+  animation:sweep 7s cubic-bezier(.4,0,.3,1) infinite;
+}
+@keyframes sweep{0%,62%{background-position:180% 0}100%{background-position:-80% 0}}
+
+/* ---- Readout: what a scan actually resolves to ---- */
+.readout{
+  margin-top:1.8rem;border:1px solid var(--rule);border-radius:var(--r-2);
+  background:var(--ink-050);overflow:hidden;font-family:var(--font-mono);
+  font-size:.775rem;
+}
+.readout__row{display:flex;justify-content:space-between;gap:1rem;
+  padding:.62rem .95rem;border-bottom:1px solid var(--rule)}
+.readout__row:last-child{border-bottom:0}
+.readout__k{color:var(--paper-3);letter-spacing:.09em;text-transform:uppercase}
+.readout__v{color:var(--paper);font-variant-numeric:tabular-nums;text-align:right}
+.readout__v em{font-style:normal;color:var(--c-mint)}
+.cap{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--paper-3);margin-top:.7rem}
+
+/* ---- Games: the codes actually printed on the cards, in the hue the app already
+   assigns each game. A set code is what a collector reads off a card, so it is
+   the honest label here — a dotted pill would be decoration wearing a hue. ---- */
+.games{padding:clamp(2.5rem,5vw,3.5rem) 0;border-block:1px solid var(--rule)}
+.gameline{
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:.2rem .6rem;
+  margin:1.1rem 0 0; padding:0; list-style:none;
+  font-family:var(--font-mono); font-size:.9rem; font-weight:600;
+  letter-spacing:.11em;
+}
+.gameline li{color:var(--c)}
+.gameline li+li::before{
+  content:"·"; margin-right:.6rem; color:var(--paper-3);
+  font-weight:500; letter-spacing:0;
+}
+.gamenames{margin-top:1rem;color:var(--paper-2);font-size:.95rem;max-width:72ch}
+
+/* ---- Sections ---- */
+section{padding:clamp(3.5rem,7vw,5.5rem) 0}
+.sec__head{max-width:60ch;margin-bottom:2.4rem}
+.sec__head h2{font-size:clamp(1.8rem,3.6vw,2.7rem)}
+.sec__head p{margin-top:.95rem;color:var(--paper-2)}
+
+/* ---- Features read as a spec sheet: a rule per entry, aligned across columns.
+   Boxed cards each carrying a coloured micro-label was decoration pretending to
+   be structure — the rule is doing the separating, so nothing else needs to. ---- */
+.list{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+  column-gap:clamp(2rem,5vw,4rem);
+}
+.item{padding:1.45rem 0;border-top:1px solid var(--rule)}
+.item h3{font-size:1.05rem;font-stretch:110%;letter-spacing:-.006em;margin-bottom:.45rem}
+.item p{color:var(--paper-2);font-size:.94rem;line-height:1.6}
+
+/* ---- Steps: a real sequence, so it gets numbers ---- */
+.steps{counter-reset:s;display:grid;gap:1.5rem;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.step{position:relative;padding-top:2.5rem;border-top:1px solid var(--rule)}
+.step::before{
+  counter-increment:s;content:counter(s) "/4";
+  position:absolute;top:.9rem;left:0;
+  font-family:var(--font-mono);font-size:.72rem;font-weight:600;
+  letter-spacing:.14em;color:var(--hue);
+}
+.step h3{font-size:1.05rem;margin-bottom:.5rem}
+.step p{color:var(--paper-2);font-size:.93rem}
+
+/* ---- Straight answers: a definition list, ruled like the spec sheet above. ---- */
+.qa{display:grid;gap:0;margin:0}
+.qa div{padding:1.3rem 0;border-top:1px solid var(--rule)}
+.qa dt{font-weight:600;font-size:1rem;margin-bottom:.4rem}
+.qa dd{margin:0;color:var(--paper-2);font-size:.94rem;max-width:70ch}
+
+footer{padding:3rem 0 4rem;border-top:1px solid var(--rule);color:var(--paper-3);
+  font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em}
+footer a{color:var(--paper-2)}
+
+/* ---- Reveal ---- */
+.rv{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.75,.3,1)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  .rv{opacity:1;transform:none;transition:none}
+  .mark::after{animation:none;background-position:60% 0}
+  .holotext{animation:none;background-position:0 0,50% 50%}
+  *{scroll-behavior:auto}
+}
+
+/* ---- Tiers: what you get free, what an account adds, what costs ---- */
+.tiers{width:100%;border-collapse:collapse;margin-top:1.5rem;font-size:.93rem}
+.tiers th,.tiers td{text-align:left;padding:.85rem 1rem;border-bottom:1px solid var(--rule);
+  vertical-align:top}
+.tiers thead th{
+  font-family:var(--font-mono);font-size:.66rem;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--paper-3);border-bottom-color:var(--rule-2);
+}
+.tiers thead th.is-key{color:var(--hue)}
+.tiers tbody th{font-weight:550;color:var(--paper);width:34%}
+.tiers td{color:var(--paper-2)}
+.tiers td.is-key{color:var(--paper)}
+.tiers tr:last-child th,.tiers tr:last-child td{border-bottom:0}
+.tierwrap{overflow-x:auto;border:1px solid var(--rule);border-radius:var(--r-2);
+  background:var(--ink-050);padding:0 .4rem}
+@media (max-width:640px){.tiers{min-width:540px}}
+.tiernote{margin-top:1.4rem;color:var(--paper-2);font-size:.94rem;line-height:1.6;max-width:70ch}
+.tiernote+.tiernote{margin-top:.8rem}
+.tiernote b{color:var(--paper);font-weight:600}
+
+/* ---- The account block inverts to paper. This is the page's one loud moment,
+   and it borrows the app's own emphasis: `.btn--primary` is warm white on
+   near-black, not a coloured fill. ---- */
+.acct{
+  border-radius:var(--r-2); background:var(--paper); color:#1c1815;
+  padding:clamp(1.9rem,4vw,3.2rem);
+}
+.acct .eyebrow{color:#6d635a}
+.acct h2{font-size:clamp(1.7rem,3.4vw,2.5rem); color:#12100e}
+.acct p{margin-top:1rem;color:#4b433c}
+.acctgrid{display:grid;gap:1.4rem 2rem;margin-top:2rem;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.acctgrid h3{font-size:1rem;margin-bottom:.4rem;font-stretch:110%;color:#12100e}
+.acctgrid p{margin-top:0;font-size:.92rem}
+.acct .cta{margin-top:2.2rem}
+.fineprint{margin-top:1.5rem;padding-top:1.2rem;border-top:1px solid rgba(28,24,21,.14);
+  font-size:.85rem;color:#5f564e;max-width:62ch}
+/* Buttons invert with the panel rather than keeping the dark-ground styling. */
+.acct .btn{border-color:rgba(28,24,21,.22);color:#1c1815}
+.acct .btn:hover{border-color:#1c1815}
+.acct .btn--go{background:#12100e;color:var(--paper);border-color:transparent}
+.acct .btn--go::after{opacity:.28}
+.acct a:focus-visible{outline-color:#12100e}
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Card scanner · Collection portfolio</p>
+      <h1>Scan your cards.<br><span class="holotext">Watch them add up.</span></h1>
+      <p class="lede">Point your phone at a card and it comes back named, priced and ready to
+      keep. What you own turns into <strong>a portfolio you can actually value</strong> — and a
+      binder you can share with the people you trade with.</p>
+      <div class="cta">
+        <a class="btn btn--go" href="https://corruptfun.github.io/CardStash/">Start your collection</a>
+        <a class="btn" href="#account">Why make an account</a>
+      </div>
+    </div>
+    <div>
+      <div class="mark"><svg aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="cs-holo" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#25b6d4"/>
+      <stop offset=".22" stop-color="#6250f2"/>
+      <stop offset=".44" stop-color="#cb4dbf"/>
+      <stop offset=".64" stop-color="#e8952f"/>
+      <stop offset=".82" stop-color="#3fc98a"/>
+      <stop offset="1" stop-color="#2ea3ee"/>
+    </linearGradient>
+    
+    <linearGradient id="cs-spec" x1="0" y1="1" x2="1" y2="0">
+      <stop offset=".28" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".4" stop-color="#7ee7ff" stop-opacity=".16"/>
+      <stop offset=".47" stop-color="#fff" stop-opacity=".4"/>
+      <stop offset=".54" stop-color="#ffb0f3" stop-opacity=".18"/>
+      <stop offset=".64" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    
+    <pattern id="cs-grain" width="1.024" height="1.024"
+             patternTransform="rotate(-24)" patternUnits="userSpaceOnUse">
+      <rect width="1.024" height="0.307" fill="#fff" opacity=".06"/>
+    </pattern>
+    <radialGradient id="cs-ground" cx=".5" cy=".42" r=".72">
+      <stop offset="0" stop-color="#191410"/>
+      <stop offset=".55" stop-color="#0a0807"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <radialGradient id="cs-bloom" cx=".5" cy=".46" r=".5">
+      <stop offset="0" stop-color="#8ea6d8" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8ea6d8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="cs-cardclip">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"/>
+    </clipPath>
+    <filter id="cs-lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.152" stdDeviation="1.792"
+                    flood-color="#000" flood-opacity=".55"/>
+    </filter>
+    
+    <filter id="cs-rich" x="-5%" y="-5%" width="110%" height="110%">
+      <feColorMatrix type="saturate" values="1.35"/>
+    </filter>
+  </defs>
+
+  <rect rx="14.976" fill="url(#cs-ground)"/>
+  <rect width="64" height="64" rx="14.976" fill="url(#cs-bloom)"/>
+
+  <g transform="rotate(-8 32 32)" filter="url(#cs-lift)">
+    <g clip-path="url(#cs-cardclip)" filter="url(#cs-rich)">
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-holo)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-grain)"/>
+      <rect x="15.047" y="8.32" width="33.905" height="47.36" fill="url(#cs-spec)"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="#0a0908" opacity=".62"/>
+      <rect x="19.285" y="13.293" width="25.429" height="21.312"
+            rx="1.823" fill="none" stroke="#f4efe8" stroke-opacity=".28"
+            stroke-width="0.699"/>
+    </g>
+    <rect x="15.047" y="8.32" width="33.905" height="47.36" rx="2.605"
+          fill="none" stroke="#f4efe8" stroke-width="1.664"/>
+  </g>
+</svg></div>
+      <div class="readout" role="img" aria-label="Illustration of a card being scanned and added">
+        <div class="readout__row"><span class="readout__k">Card</span><span class="readout__v">Lightning Bolt</span></div>
+        <div class="readout__row"><span class="readout__k">Printing</span><span class="readout__v">Double Masters · 129</span></div>
+        <div class="readout__row"><span class="readout__k">Finish</span><span class="readout__v">Foil · Near Mint</span></div>
+        <div class="readout__row"><span class="readout__k">Added</span><span class="readout__v"><em>+1 to your collection</em></span></div>
+      </div>
+      <p class="cap">Illustration</p>
+    </div>
+  </div>
+</header>
+
+<div class="games" style="--hue:var(--c-violet)">
+  <div class="wrap rv">
+    <p class="eyebrow">Nine games, plus sports cards</p>
+    <ul class="gameline">
+      <li style="--c:var(--g-mtg)">MTG</li>
+      <li style="--c:var(--g-pkm)">PKM</li>
+      <li style="--c:var(--g-ygo)">YGO</li>
+      <li style="--c:var(--g-rft)">RIFT</li>
+      <li style="--c:var(--g-lor)">LOR</li>
+      <li style="--c:var(--g-op)">OP</li>
+      <li style="--c:var(--g-swu)">SWU</li>
+      <li style="--c:var(--g-dgm)">DIGI</li>
+      <li style="--c:var(--g-gcg)">GCG</li>
+      <li style="--c:var(--g-spt)">SPT</li>
+    </ul>
+    <p class="gamenames">Magic: The Gathering, Pokémon, Yu-Gi-Oh!, Riftbound, Lorcana, One Piece,
+    Star Wars: Unlimited, Digimon and Gundam — plus sports cards, which no catalog covers, so
+    Cardstock reads those straight off the card.</p>
+  </div>
+</div>
+
+<section style="--hue:var(--c-cyan)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Scanning</p>
+      <h2>Point, price, collect.</h2>
+      <p>Hover the camera over a card and its price pops up live. Tap once and it’s yours —
+      the right printing, the right finish, the right condition.</p>
+    </div>
+    <div class="list rv">
+      <div class="item">
+        <h3>Camera to collection</h3>
+        <p>No typing, no set codes to look up. Scan a stack one after another and file the
+        whole lot in a single pass when you’re done.</p>
+      </div>
+      <div class="item">
+        <h3>Photograph a whole binder page</h3>
+        <p>Up to twelve cards from one photo. You review the list before anything is added,
+        and the app remembers which page each card came from.</p>
+      </div>
+      <div class="item">
+        <h3>Slabs and sealed product too</h3>
+        <p>Scan a PSA, BGS, SGC or CGC holder and the grade is read off the label. A PSA 10
+        is tracked as its own copy, never merged with your raw one. Sealed boxes and packs
+        count as themselves until you open them.</p>
+      </div>
+      <div class="item">
+        <h3>Cards no catalog has</h3>
+        <p>Regional promos, prereleases, error prints. Photograph it, type what it is, and it
+        lives in your collection like anything else.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-mint)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Your portfolio</p>
+      <h2>What it’s worth, what it cost, what moved.</h2>
+      <p>A collection is an asset whether or not you treat it like one. Cardstock treats it
+      like one.</p>
+    </div>
+    <div class="list rv">
+      <div class="item">
+        <h3>Priced the way you own it</h3>
+        <p>Foil and non-foil priced separately, then adjusted for condition — a played copy
+        isn’t counted at near-mint money.</p>
+      </div>
+      <div class="item">
+        <h3>Cost basis and profit &amp; loss</h3>
+        <p>Enter what you paid and see what it’s done since, per card and across everything.</p>
+      </div>
+      <div class="item">
+        <h3>A 30-day line and your movers</h3>
+        <p>Which cards gained, which slipped, and by how much in real money — not percentages
+        of a card worth forty cents.</p>
+      </div>
+      <div class="item">
+        <h3>Bring the collection you already have</h3>
+        <p>Import a CSV from your old tracker — only a name column is required — and export
+        everything back out whenever you like. It’s your list.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-magenta)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">Sharing &amp; trading</p>
+      <h2>Cards are for trading. So share them.</h2>
+      <p>Put up a binder of what you’ll part with, heart the cards you’re hunting, and let the
+      matching do the introductions.</p>
+    </div>
+    <div class="steps rv">
+      <div class="step">
+        <h3>Mark what’s for trade</h3>
+        <p>Say how many copies you’ll move. Keep the rest of your collection to yourself.</p>
+      </div>
+      <div class="step">
+        <h3>Share your binder</h3>
+        <p>Send it as a link to anyone, or print a QR label and stick it on the real binder’s
+        spine so the right list opens from a phone camera.</p>
+      </div>
+      <div class="step">
+        <h3>See both sides of the match</h3>
+        <p>Your want list travels with your binder, so you both see it at once: their cards
+        you’re after, your cards they’re after.</p>
+      </div>
+      <div class="step">
+        <h3>Book it and move on</h3>
+        <p>Trade card by card with both sides priced. When it’s done, both collections update
+        themselves.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="account" style="--hue:var(--c-violet)">
+  <div class="wrap">
+    <div class="acct rv">
+      <p class="eyebrow">Make an account</p>
+      <h2>One minute, and your collection stops living on a single phone.</h2>
+      <p>There is no sign-up form. Your email address <em>is</em> the account — we send a
+      six-digit code, you type it in, and you’re there. No password to invent, nothing to
+      confirm later.</p>
+      <div class="acctgrid">
+        <div>
+          <h3>It backs itself up as you go</h3>
+          <p>No switch to find, no passphrase to remember. Sign in on a second device and your
+          cards come down to it by themselves.</p>
+        </div>
+        <div>
+          <h3>A name people can trade with</h3>
+          <p>Claim an <span style="font-family:var(--font-mono)">@handle</span> and friends add
+          you by typing it. Their binders then refresh themselves, and offers land in the app
+          instead of in a file somebody has to remember to send.</p>
+        </div>
+        <div>
+          <h3>Find the card you’re hunting</h3>
+          <p>Your want list gets matched against every collector offering that card, in any
+          printing. That is the one thing a shared link can never do for you.</p>
+        </div>
+        <div>
+          <h3>Talk to the collector directly</h3>
+          <p>Message someone about a specific card and settle the whole trade between
+          yourselves. That costs nothing, and it always will.</p>
+        </div>
+      </div>
+      <div class="cta">
+        <a class="btn btn--go" href="https://corruptfun.github.io/CardStash/">Create your account</a>
+        <a class="btn" href="https://corruptfun.github.io/CardStash/">Try it without one first</a>
+      </div>
+      <p class="fineprint">Free. Scanning, your collection and your decks work exactly the same
+      signed out — an account is what makes them recoverable, and you findable. Two things worth
+      knowing before you start: your backup is encrypted on our server with a key we hold, so
+      treat it as a safety net rather than a secret; and a handle is claimed once and is yours
+      permanently, so pick the one you want to keep.</p>
+    </div>
+  </div>
+</section>
+
+<section style="--hue:var(--c-amber)">
+  <div class="wrap">
+    <div class="sec__head rv">
+      <p class="eyebrow">What you get, and when</p>
+      <h2>Nothing worth having is behind the account. It’s just better with one.</h2>
+    </div>
+    <div class="tierwrap rv">
+      <table class="tiers">
+        <thead>
+          <tr>
+            <th scope="col">&nbsp;</th>
+            <th scope="col">No account</th>
+            <th scope="col" class="is-key">Free account</th>
+            <th scope="col">Subscription</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Scanning, collection, decks, portfolio</th>
+            <td>Yes, offline</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">Binders, printed QR labels, CSV in and out</th>
+            <td>Yes</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">Share a binder by link or file</th>
+            <td>Yes</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">Backup and sync across your devices</th>
+            <td>Export a file yourself</td><td class="is-key">Automatic</td><td>Automatic</td></tr>
+          <tr><th scope="row">Friends by <span style="font-family:var(--font-mono)">@handle</span>, offers in the app</th>
+            <td>—</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">Global want matching</th>
+            <td>—</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">Messaging another collector</th>
+            <td>—</td><td class="is-key">Yes</td><td>Yes</td></tr>
+          <tr><th scope="row">AI deck builder</th>
+            <td>—</td><td class="is-key">Monthly allowance</td><td>Higher allowance</td></tr>
+          <tr><th scope="row">Cloud help on a card your phone can’t read</th>
+            <td>—</td><td class="is-key">Monthly allowance, off until you turn it on</td>
+            <td>Higher allowance, on from purchase — its switch turns it off any time</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiernote rv">The cloud rescue reads the cards a camera can’t — worn faces, glare,
+    foils, bad light. In our 282-photo test set it took identification from about
+    <b>7 in 10</b> cards to about <b>9 in 10</b>, and roughly doubled Pokémon reads. Ordinary
+    scanning is never metered and never leaves your phone.</p>
+    <p class="tiernote rv">A subscription is <b>$11.99 a year</b> — <b>$9.99 a year</b> through a
+    friend’s invite — and the first 100 referred collectors take a founding place instead:
+    <b>$6.99 once</b>, permanent, nothing to renew. It raises the two allowances above, and
+    everything else on this page stays free.</p>
+  </div>
+</section>
+
+<section style="--hue:var(--c-blue)">
+  <div class="wrap">
+    <div class="sec__head rv"><p class="eyebrow">Straight answers</p></div>
+    <dl class="qa rv">
+      <div>
+        <dt>Do I have to sign in?</dt>
+        <dd>No. Scanning, your collection, decks, binders and link sharing all work with
+        nothing signed in, and they work offline.</dd>
+      </div>
+      <div>
+        <dt>What does signing in change?</dt>
+        <dd>Your collection is copied to our server, so a lost phone isn’t a lost collection.
+        It’s encrypted at rest with a key we hold — that makes it protected storage, not
+        end-to-end encryption, and we’d rather say so than imply otherwise.</dd>
+      </div>
+      <div>
+        <dt>Does an account publish my cards?</dt>
+        <dd>No. Claiming a handle publishes nothing. Putting a binder up is a separate switch,
+        and you choose who can see it.</dd>
+      </div>
+      <div>
+        <dt>Can I get my collection out again?</dt>
+        <dd>Always. CSV and JSON export, whenever you like, account or not.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Cardstock · <a href="https://corruptfun.github.io/CardStash/">corruptfun.github.io/CardStash</a>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var els=document.querySelectorAll('.rv');
+  if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in')});return}
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})
+  },{rootMargin:'0px 0px -8% 0px',threshold:.08});
+  els.forEach(function(e){io.observe(e)});
+})();
+</script>
