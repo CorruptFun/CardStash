@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { bundleImport } from './bundle.mjs'
-import { scryfallToRows, dexSetToRows, ygoToRows, isPaperDexSet, parseBulkText } from '../../scripts/sync-catalog.mjs'
+import { scryfallToRows, dexSetToRows, ygoToRows, isPaperDexSet, parseBulkLine } from '../../scripts/sync-catalog.mjs'
 
 const { artHashFromGray, artHashDistance, ART_HASH_BITS } = await bundleImport('src/lib/vision.ts')
 const {
@@ -125,13 +125,18 @@ test('pickPrintingByArt: only a decisive winner among the SAME card moves the pi
   assert.equal(searched.distance, 40)
 })
 
-test('parseBulkText: a JSON array or JSON Lines, and a cut-off tail loses one row, not all', () => {
-  assert.deepEqual(parseBulkText('[{"a":1},{"a":2}]'), [{ a: 1 }, { a: 2 }])
-  assert.deepEqual(parseBulkText('{"a":1}\n{"a":2}\n'), [{ a: 1 }, { a: 2 }])
-  // A truncated final line is the download's problem, not the file's.
-  assert.deepEqual(parseBulkText('{"a":1}\n{"a":2}\n{"a":'), [{ a: 1 }, { a: 2 }])
-  assert.deepEqual(parseBulkText(''), [])
-  assert.deepEqual(parseBulkText('not json at all'), [])
+test('parseBulkLine: JSONL rows and array-element lines, one bad line loses itself only', () => {
+  assert.deepEqual(parseBulkLine('{"a":1}'), { a: 1 })
+  // The old pretty-printed array era: element lines carry trailing commas
+  // and the brackets stand alone.
+  assert.deepEqual(parseBulkLine('  {"a":2},'), { a: 2 })
+  assert.equal(parseBulkLine('['), null)
+  assert.equal(parseBulkLine(']'), null)
+  assert.equal(parseBulkLine(''), null)
+  // The classic cut-short final row.
+  assert.equal(parseBulkLine('{"a":'), null)
+  assert.equal(parseBulkLine('not json'), null)
+  assert.equal(parseBulkLine('42'), null)
 })
 
 test('scryfallToRows: en paper printings with the Scryfall uuid as api_id', () => {

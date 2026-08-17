@@ -29,8 +29,10 @@
  * story: on_conflict merges, updated_at moves, hashes stay.
  */
 
+import readline from 'node:readline'
+import { Readable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
-import { gunzipSync } from 'node:zlib'
+import { createGunzip } from 'node:zlib'
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? 'https://xvfuyvaehtdxroyzixak.supabase.co').replace(/\/+$/, '')
 const SECRET = process.env.SUPABASE_SECRET
@@ -78,32 +80,25 @@ function row(game, apiId, name, rest = {}) {
 }
 
 /**
- * A bulk payload as objects, whatever its era's format: a JSON array (the
- * download_uri shape), or JSON Lines (the jsonl_download_uri shape Scryfall
- * moved to — one object per line, where a truncated tail line is the
- * download's problem and not a reason to lose the rest).
+ * One line of a bulk download as an object, or null. Tolerant of both eras:
+ * a JSON Lines row (the jsonl_download_uri shape Scryfall ships now), and a
+ * pretty-printed array's element line with its trailing comma or bare
+ * brackets (the old download_uri shape). A malformed line — the classic cut
+ * short final row — loses itself, never the file. Line-wise ON PURPOSE:
+ * default_cards inflates past Node's maximum string length, so the whole
+ * payload can never be held as one string, only streamed.
  */
-export function parseBulkText(text) {
-  const t = String(text ?? '').trimStart()
-  if (t.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(t)
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
+export function parseBulkLine(line) {
+  let t = String(line ?? '').trim()
+  if (!t || t === '[' || t === ']') return null
+  if (t.endsWith(',')) t = t.slice(0, -1)
+  if (!t.startsWith('{')) return null
+  try {
+    const parsed = JSON.parse(t)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
   }
-  const out = []
-  for (const line of t.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      out.push(JSON.parse(trimmed))
-    } catch {
-      /* a cut-off final line */
-    }
-  }
-  return out
 }
 
 /** Scryfall default_cards: paper English printings with a picture. */
@@ -236,12 +231,29 @@ async function ingestMtg(dryRun) {
   const size = entry.size ?? entry.compressed_size ?? 0
   console.log(`mtg: downloading ${uri} (~${Math.round(size / 1e6)} MB)…`)
   const res = await fetch(uri, { headers: { 'User-Agent': UA } })
-  if (!res.ok) throw new Error(`scryfall default_cards: HTTP ${res.status}`)
-  // The JSONL file may itself be gzip BYTES (transfer decompression only
-  // covers Content-Encoding); sniff the magic rather than trusting a name.
-  let buf = Buffer.from(await res.arrayBuffer())
-  if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf)
-  const rows = scryfallToRows(parseBulkText(buf.toString('utf8')))
+  if (!res.ok || !res.body) throw new Error(`scryfall default_cards: HTTP ${res.status}`)
+  // Streamed, not buffered: the inflated file is bigger than the largest
+  // string Node can make (the third CI dry-run proved it the hard way), so
+  // gunzip and split as it arrives and keep only the mapped rows. A .gz
+  // SUFFIX means gzip bytes; a plain body's Content-Encoding is already
+  // undone by fetch itself.
+  const body = Readable.fromWeb(res.body)
+  const lines = readline.createInterface({
+    input: uri.endsWith('.gz') ? body.pipe(createGunzip()) : body,
+    crlfDelay: Infinity,
+  })
+  const rows = []
+  let batch = []
+  for await (const line of lines) {
+    const card = parseBulkLine(line)
+    if (!card) continue
+    batch.push(card)
+    if (batch.length >= 2000) {
+      rows.push(...scryfallToRows(batch))
+      batch = []
+    }
+  }
+  rows.push(...scryfallToRows(batch))
   console.log(`mtg: ${rows.length} printings`)
   await upsert(rows, dryRun)
   return rows.length
