@@ -99,6 +99,9 @@ signs you in, and `SignIn.tsx` must never grow a "Create account" branch.
 | Messaging a collector, and it stays free | `src/lib/messaging.ts`, decision 25 |
 | Claiming a handle publishes nothing | `socialConfigured()` vs `socialPublishing()` |
 | Export whenever you like, account or not | `src/lib/importexport.ts` |
+| The rescue's paired benchmark (282-photo set, ~7 in 10 → ~9 in 10, Pokémon roughly doubled) | `docs/scanning.md` ("Where the numbers actually stand"), scan-harness lesson 85, the same sentence in `README.md` and `Subscription.tsx` |
+| A subscription switches the rescue on at purchase; its switch turns it off any time | decision 2's auto-on amendment, `noteEntitlementSeen()` in `src/lib/billing.ts` |
+| $11.99 a year / $9.99 a year referred / $6.99 once for the first 100 founding places | `src/lib/billing.ts` (`YEARLY_PRICE`, `REFERRED_PRICE`, `FOUNDING_PRICE`), `supabase/migrations/0014` |
 
 ## Claims we do not make
 
@@ -110,10 +113,18 @@ one is a plausible sentence somebody will eventually try to write.
   (migration 0009, decision 15b). The approved phrasing is *encrypted at rest with
   a key held server-side; not end-to-end.* Note `docs/social.md`'s cloud-vault
   table is stale on this point and must not be used as a copy source.
-- **"No image ever leaves your device."** True only with the qualifier: cloud
-  rescue is opt-in and off by default, and sends one frame when a scan is stuck.
+- **"No image ever leaves your device."** True only with the qualifiers: the
+  cloud rescue sends one frame, only for a card this device couldn't settle, and
+  its switch is the sole authority over the image. Off by default on a free
+  account — but never write "strictly opt-in" or "never switched on for you":
+  **buying the subscription switches the rescue on**, once, the first time a
+  device sees the entitlement, and the switch turns it off any time after with
+  nothing flipping it back (decision 2's auto-on amendment, `noteEntitlementSeen()`
+  in `billing.ts`). The point-of-sale copy discloses the flip before the money
+  moves; the page must not contradict it in either direction.
 - **"Bring your own AI key."** There is no key field; the deck builder calls our
-  hosted function and requires a subscription.
+  hosted function, so it needs an account — a free monthly allowance of builds,
+  raised by a subscription, never a hard subscription gate.
 - **"Buy and sell cards."** Escrow ships off in the deployed build — both
   `VITE_MARKETPLACE` and `MARKETPLACE_ENABLED` (decision 19). Only Ask is live.
 - **"Public binder", implying the open web.** It means any signed-in collector.
@@ -132,16 +143,30 @@ one is a plausible sentence somebody will eventually try to write.
 
 Safe to quote, because they are counts of what is committed: **289** real
 photographs (44 MB) under `tests/harness/photos/`, **18** seeded camera
-degradations (`tests/harness/augment.mjs`), **395** unit test cases across **37**
-files, **19** npm test entry points, **6** upstream catalogs, **~200 KB** gzipped
-bundle, card-art cache capped at **480** images (`src/sw.js`).
+degradations (`tests/harness/augment.mjs`), **427** unit test cases across **41**
+files (the runner's own count), **20** npm test entry points, **6** upstream
+catalogs, **~265 KB** gzipped app bundle, card-art cache capped at **480** images
+(`src/sw.js`).
 
-**Do not quote a single identification rate.** Three batteries disagree on
-purpose — rendered fixtures 204/282 (72%) with zero wrong cards, hand-curated
-photographs 4/12, handheld clips 10 wrong in 40 — and `docs/scanning.md` states
-outright that a battery of stills cannot bound a live scanner's wrong-card rate.
-Quoting the flattering one is precisely the overstatement the docs name. The page
-therefore describes *what is measured* and points at the docs for rates.
+**One identification number is quotable, and in exactly one shape: the paired
+before/after, anchored to its test set.** "In our 282-photo test set the cloud
+rescue took identification from about 7 in 10 cards to about 9 in 10, and roughly
+doubled Pokémon reads" — scan-harness lesson 85, reproduced twice; the README and
+`Subscription.tsx` carry this sentence already, so reuse it verbatim rather than
+re-deriving or re-rounding it. The exact fractions of record are 196/282 →
+250 and 249 of 282, Pokémon 49/117 → 99–100/117 (`docs/scanning.md`, "Where the
+numbers actually stand") — rounded **down** when sold, a result on that test set
+and never a guarantee, and never upgraded to the collector-line door's higher
+pair (269–271/282): measured, but not the sold line. The pairing is what keeps
+it honest: both figures come from the same battery, so what is claimed is the
+*lift* the rescue adds, never a level the scanner hits. Detached from its anchor
+— "90% accurate", "identifies 9 in 10 cards" — it becomes a universal accuracy
+claim, and **a lone rate quoted as the app's accuracy stays banned**: the
+batteries disagree on purpose — rendered fixtures 197–198/282 (~70%) offline,
+hand-curated photographs 4/12, handheld clips 10 wrong in 40 — and
+`docs/scanning.md` states outright that a battery of stills cannot bound a live
+scanner's wrong-card rate. Quoting the flattering one alone is precisely the
+overstatement the docs name.
 
 There are no honest numbers for users, installs, retention, cards searchable, or
 scan latency. Budgets in `identify.ts` are ceilings, not measured times: "scans in
@@ -157,14 +182,23 @@ The page carries this as a table, and the wording matters in two places.
   survives the device, friends by handle, offers in the app, self-refreshing friend
   binders, global want matching, messaging, publishing binders, invite links — plus
   a monthly allowance of AI deck builds and cloud scan rescues.
-- **Subscription:** raises those two allowances. Nothing else moves.
+- **Subscription:** raises those two allowances, and switches the rescue on at
+  purchase — once, first sight of the entitlement; the switch under Scanning
+  turns it off any time and nothing flips it back (decision 2's auto-on
+  amendment). Nothing else moves.
 
-**Do not print the allowance figures or the prices on the page.** The allowances are
-defaulted environment variables on the deployed functions, and `billing.ts` says of
-its own price constants that Stripe holds the real ones and these are a copy that
-has to move whenever a price does. Both are unverifiable from this repository, so
-the page says "monthly allowance" and "higher allowance" and lets the app state the
-number. Escrowed purchase is not sold at all: it ships off in both switches.
+**Prices are printable; allowance figures are not.** The three prices are live in
+Stripe and mirrored exactly once in `src/lib/billing.ts` — `YEARLY_PRICE` $11.99,
+`REFERRED_PRICE` $9.99 a year for an account the server agrees was referred, and
+`FOUNDING_PRICE` $6.99 **once** for one of the first 100 founding places
+(referred accounts only; migration `0014` and `stripe-billing` decide it). Quote
+them from those constants and nowhere else — they move when Stripe's do — state
+the founding price as the one-off it is, and never print a seats-remaining
+count: that number is the server's, and only `Subscription.tsx`, which asks for
+it, may show one. The allowance figures stay **off the page**: they are
+defaulted environment variables on the deployed functions, so the page sells the
+idea — "monthly allowance", "higher allowance" — and Settings states the
+numbers. Escrowed purchase is not sold at all: it ships off in both switches.
 
 ## Copy sources that are stale
 
@@ -175,8 +209,6 @@ we have banned above:
   read" and "your passphrase, never uploaded". Superseded by decision 15b.
 - `src/lib/cloudconfig.ts`'s header comment — same passphrase claim.
 - `docs/decisions.md` §14 ("no cloud copy, no account") — superseded by 15b.
-- `src/views/SettingsView.tsx` on cloud rescue "needs an account and a
-  subscription" — stale since the free monthly allowance landed.
 - `src/components/Welcome.tsx`'s "Welcome back" step, which tells a returning user
   to restore from a backup in Settings and understates the automatic pull.
 
