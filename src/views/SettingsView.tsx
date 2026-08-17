@@ -10,6 +10,7 @@ import { weightOfChars } from '../lib/cardimage'
 import { DIAG_AVAILABLE } from '../lib/diagconfig'
 import { clearAllData, db, patchStorage } from '../lib/db'
 import { GAMES, GAME_LABEL, GAME_SHORT } from '../lib/games'
+import { readRescueMeter } from '../lib/rescuemeter'
 import { useSettings } from '../lib/settings'
 import { relativeAge } from '../lib/util'
 import { APP_VERSION } from '../lib/version'
@@ -134,7 +135,8 @@ export function SettingsView() {
             <em>
               Send a card this device can’t settle — or can’t tell which printing of — to be read in the cloud. One
               photo, only for that card; scans this device settles on its own never leave. In our 282-photo test set it
-              took identification from about 7 in 10 cards to about 9 in 10. Off by default.
+              took identification from about 7 in 10 cards to about 9 in 10. Off by default; a subscription switches it
+              on, and turning it off here always wins.
             </em>
           </div>
           <Toggle
@@ -143,6 +145,7 @@ export function SettingsView() {
             label="Cloud rescue"
           />
         </div>
+        <RescueAllowance />
         <p className="setsec__note">
           Scanning runs on this device: text recognition reads the card name and the collector line (so the exact
           edition autopopulates), and a pixel check spots foil sheen. No account or API key needed — the recognition
@@ -388,6 +391,34 @@ export function SettingsView() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+/**
+ * What is left of the month's cloud rescues, beside the switch that spends
+ * them. Rendered only when THIS month has a real sample — the number is the
+ * server's own `remaining`, cached off the last successful rescue
+ * (`settings.rescueMeter`), and a rolled-over month or an install that has
+ * never rescued shows nothing rather than a guess. This screen (and the
+ * subscription panel below) is where allowance talk belongs; the viewfinder
+ * never mentions it — scan-card's contract.
+ */
+function RescueAllowance() {
+  const meter = useSettings((s) => s.rescueMeter)
+  const now = readRescueMeter(meter)
+  if (!now) return null
+  const left = now.remaining.toLocaleString()
+  return (
+    <p className="setsec__note">
+      {now.remaining === 0
+        ? // Only reachable if the server ever answers 0 on a success — today it
+          // refuses first — but a meter that can't say "none left" would be
+          // the one dishonest state, so the words exist.
+          'You’ve used this month’s cloud rescues — scanning carries on locally until they reset.'
+        : now.cap > 0
+          ? `${left} of this month’s ${now.cap.toLocaleString()} cloud rescues ${now.remaining === 1 ? 'is' : 'are'} left.`
+          : `${left} cloud rescue${now.remaining === 1 ? ' is' : 's are'} left this month.`}
+    </p>
   )
 }
 

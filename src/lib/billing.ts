@@ -12,12 +12,18 @@
  * the features themselves. Being wrong here shows the wrong button for a moment.
  * Being wrong in `scan-card` would give away a paid API call.
  *
+ * One exception, and it is consent rather than enforcement: the first time an
+ * active subscription is seen, `noteEntitlementSeen()` switches the cloud
+ * rescue on for this device — once, and never again. See that function.
+ *
  * Dormant wherever the cloud is: no project configured, no subscription UI, and
  * the app behaves exactly as it did before any of this existed.
  */
 
 import { CloudError, freshToken, isSignedIn } from './authsession'
 import { CLOUD_AVAILABLE, SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
+import { noteCap } from './rescuemeter'
+import { settings } from './settings'
 
 /** Features one subscription buys. Mirrors FEATURES in `stripe-billing`. */
 const SUBSCRIPTION_FEATURES = ['cloud-scan', 'ai-builder'] as const
@@ -72,6 +78,45 @@ export const billingAvailable = (): boolean => CLOUD_AVAILABLE
 export const scanOfferAvailable = (): boolean => CLOUD_AVAILABLE && SCAN_OFFER_ON
 
 /**
+ * The one thing a subscription changes on the client by itself: the first time
+ * THIS DEVICE sees an active entitlement, the cloud rescue's switch comes on.
+ *
+ * The rescue is the thing being bought — the pitch names it, the price is
+ * justified by it — so the purchase is read as asking for it. But exactly
+ * once, recorded in `rescueAutoOnAt`: a subscriber who then turns the rescue
+ * off has answered, and no renewal, re-fetch, checkout return or later
+ * sign-in flips it back. The switch stays the authority over the image
+ * (settings.ts); the purchase throws it one time.
+ *
+ * Every path entitlement state lands through funnels here via
+ * `readEntitlement()` — `subscriptionState()`, the memoized `isSubscribed()`
+ * and the Stripe return's `?subscribed=1` re-ask included
+ * — rather than flipping the switch at its own call site. Yearly, founding
+ * and comped grants all pass through, because all three are the same
+ * entitlement row.
+ */
+export function noteEntitlementSeen(state: SubscriptionState): void {
+  if (!state.active) return
+  const config = settings()
+  if (config.rescueAutoOnAt) return
+  config.set({ cloudScanRescue: true, rescueAutoOnAt: Date.now() })
+}
+
+/**
+ * The other fact an entitlement answer settles: which allowance the rescue
+ * meter's `remaining` counts down from — 1,000 for a subscriber, 50 free.
+ * Only a REAL answer lands here (a row, or a definitive no-row); offline and
+ * server errors say nothing, for the same reason `subscriptionState()`
+ * returns `none` without concluding anything from them. `noteCap` hands back
+ * the same object when the cap already agrees, so this writes only on change.
+ */
+function noteRescueAllowance(active: boolean): void {
+  const config = settings()
+  const next = noteCap(config.rescueMeter, active)
+  if (next !== config.rescueMeter) config.set({ rescueMeter: next })
+}
+
+/**
  * What this account has. Read straight from `entitlements`, which users may
  * SELECT for themselves and nobody may write through PostgREST (migration
  * 0005) — so this is honest without being authoritative.
@@ -94,16 +139,24 @@ async function readEntitlement(): Promise<SubscriptionState | null> {
     if (!res.ok) return null
     const rows = (await res.json()) as { expires_at: string | null; source: string }[]
     const row = Array.isArray(rows) ? rows[0] : undefined
-    // No row IS an answer, and the only one that means "never had one".
-    if (!row) return NOT_SUBSCRIBED
+    // No row IS an answer, and the only one that means "never had one" —
+    // and a definitive answer is the only place the rescue meter's allowance
+    // may settle (offline and errors return null above and say nothing).
+    if (!row) {
+      noteRescueAllowance(false)
+      return NOT_SUBSCRIBED
+    }
     // A null expiry is a comped grant with no end — see 0005.
     const expiresAt = row.expires_at ? Date.parse(row.expires_at) : Number.POSITIVE_INFINITY
     if (!Number.isFinite(expiresAt) && row.expires_at) return NOT_SUBSCRIBED
-    return {
+    const state: SubscriptionState = {
       active: expiresAt > Date.now(),
       expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
       source: typeof row.source === 'string' ? row.source : '',
     }
+    noteEntitlementSeen(state)
+    noteRescueAllowance(state.active)
+    return state
   } catch {
     // Offline is not "unsubscribed" — say nothing rather than the wrong thing.
     return null

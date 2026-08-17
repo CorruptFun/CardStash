@@ -13,6 +13,8 @@ import {
 } from '../lib/billing'
 import { isSignedIn } from '../lib/authsession'
 import { foundingOffer, type FoundingOffer } from '../lib/referral'
+import { FREE_MONTHLY_RESCUES, readRescueMeter, SUBSCRIBER_MONTHLY_RESCUES } from '../lib/rescuemeter'
+import { useSettings } from '../lib/settings'
 import { money, relativeAge } from '../lib/util'
 import { useUi } from '../store/ui'
 import { Icon } from './Icon'
@@ -93,10 +95,11 @@ export function Subscription() {
           <span>
             Active
             {state.expiresAt ? <> — renews in {relativeAge(state.expiresAt).replace(' ago', '')}</> : ''}. Cloud rescue
-            and the AI deck builder are included; the rescue still runs only while its own switch, under Scanning, is
-            on.
+            and the AI deck builder are included — the rescue switched on with your subscription, and its switch under
+            Scanning turns it off any time.
           </span>
         </div>
+        <RescueUsed active />
         {state.source === 'manual' ? (
           <p className="setsec__note">This one was granted directly rather than bought, so there is nothing to manage.</p>
         ) : state.source === 'stripe-founding' ? (
@@ -146,7 +149,8 @@ export function Subscription() {
           <b>AI deck builder</b> are yours permanently. In our 282-photo test set the rescue took identification from
           about 7 in 10 cards to about 9 in 10. It is a single payment and not a subscription: it does not renew, it
           does not run out, and there is nothing to cancel later. Everyone else pays {YEARLY_PRICE} a year for the same
-          two things. Scanning, your collection, decks, trades and backup stay free either way.
+          two things. Paying switches the rescue on for you; its switch, under Scanning, turns it off any time.
+          Scanning, your collection, decks, trades and backup stay free either way.
         </p>
         <div className="setrow">
           <div className="setrow__text">
@@ -179,9 +183,11 @@ export function Subscription() {
       </p>
       <p className="setsec__note">
         The rescue reads the cards a camera can’t — worn faces, glare, foils, bad light. In our 282-photo test set it
-        took identification from about 7 in 10 cards to about 9 in 10, and roughly doubled Pokémon reads. Ordinary
-        scanning is never metered and never leaves this device.
+        took identification from about 7 in 10 cards to about 9 in 10, and roughly doubled Pokémon reads. Subscribing
+        switches the rescue on for you; its switch, under Scanning, turns it off any time. Ordinary scanning is never
+        metered and never leaves this device.
       </p>
+      <RescueUsed active={false} />
       {referredPrice && (
         <div className="audience audience--friends">
           <Icon name="heart" size={15} filled />
@@ -204,6 +210,57 @@ export function Subscription() {
       </div>
       {earned && <Earnings earned={earned} />}
     </section>
+  )
+}
+
+/** Under this many rescues left, the free panel names the subscriber number. */
+const LOW_RESCUES_LEFT = 10
+
+/**
+ * How much of the month's rescue allowance is gone — the used-of line.
+ *
+ * The count is the server's own `remaining`, cached off the last successful
+ * rescue (`settings.rescueMeter`); nothing is fetched here. It shows only when
+ * this month has a sample AND the cached cap agrees with the tier this panel
+ * is rendering — a `remaining` measured under the other tier's allowance
+ * would misstate usage, so a just-changed subscription says nothing until the
+ * next rescue reports in. Exhaustion lives here and in Settings by contract
+ * (scan-card's header): the viewfinder never explains billing to someone
+ * holding a card.
+ */
+function RescueUsed({ active }: { active: boolean }) {
+  const meter = useSettings((s) => s.rescueMeter)
+  const now = readRescueMeter(meter)
+  const cap = active ? SUBSCRIBER_MONTHLY_RESCUES : FREE_MONTHLY_RESCUES
+  if (!now || now.cap !== cap) return null
+  const used = (cap - now.remaining).toLocaleString()
+  if (active) {
+    return (
+      <p className="setsec__note">
+        You’ve used {used} of this month’s {cap.toLocaleString()} cloud rescues.
+      </p>
+    )
+  }
+  if (now.remaining === 0) {
+    return (
+      <p className="setsec__note">
+        You’ve used all {cap} of this month’s free cloud rescues — they reset next month. Subscribers get{' '}
+        {SUBSCRIBER_MONTHLY_RESCUES.toLocaleString()} a month.
+      </p>
+    )
+  }
+  return (
+    <p className="setsec__note">
+      You’ve used {used} of this month’s {cap} free cloud rescues
+      {now.remaining <= LOW_RESCUES_LEFT ? (
+        <>
+          {' '}
+          — <b>{now.remaining} left</b>. Subscribers get {SUBSCRIBER_MONTHLY_RESCUES.toLocaleString()} a month.
+        </>
+      ) : (
+        '.'
+      )}
+    </p>
   )
 }
 

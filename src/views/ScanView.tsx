@@ -32,6 +32,7 @@ import { gradeShort } from '../lib/slab'
 import { clearSportsRecall } from '../lib/sports'
 import { FINISH_LABEL, finishOptions, GAME_SHORT } from '../lib/games'
 import { isEntitled } from '../lib/entitlement'
+import { rescueMomentText } from '../lib/rescuemeter'
 import { identifyFrame, type IdentifyOutcome, type ScanMode } from '../lib/identify'
 import { MAX_PAGE_CARDS, PAGE_MAX_EDGE, scanPage, type PageCard, type PageScanProgress } from '../lib/multiscan'
 import { warmOcr } from '../lib/ocr'
@@ -351,23 +352,48 @@ function MissHelp({
  * for someone already using it, whose misses are the thing the subscription
  * actually changes.
  *
- * Nothing here renders for a signed-out user, and that is the free path being
- * kept free: scanning, the collection, decks and trades never ask for an
- * account, and the screen where scanning is failing is the last place to start.
+ * Signed out, nothing is SOLD here — the free path stays free: scanning, the
+ * collection, decks and trades never ask for an account. What a signed-out
+ * miss does get is the gap felt honestly (folded in from rescue-value-prop's
+ * chipslot line): the cloud rescue exists, this miss is one it was not
+ * allowed to try, and an account carries 50 free reads a month. A path
+ * named, never a price.
  */
 function MissOffer({
+  signedOut,
   rescueOff,
   busy,
+  onSignIn,
   onEnableRescue,
   onSubscribe,
   onSnooze,
 }: {
+  signedOut: boolean
   rescueOff: boolean
   busy: boolean
+  onSignIn: () => void
   onEnableRescue: () => void
   onSubscribe: () => void
   onSnooze: () => void
 }) {
+  if (signedOut) {
+    return (
+      <div className="scan__offer">
+        <p>
+          <b>Cloud rescue reads cards like this</b> — 50 a month free with an account. This miss is one it wasn’t
+          allowed to try.
+        </p>
+        <span className="scan__tipbtns">
+          <button className="chip__searchbtn chip__searchbtn--go" onClick={onSignIn}>
+            <Icon name="sparkle" size={13} /> Sign in
+          </button>
+          <button className="chip__searchbtn chip__searchbtn--quiet" onClick={onSnooze}>
+            Not now
+          </button>
+        </span>
+      </div>
+    )
+  }
   if (rescueOff) {
     return (
       <div className="scan__offer">
@@ -485,10 +511,16 @@ export function ScanView({ active }: { active: boolean }) {
       // one just scanned should be findable now rather than when the memo
       // happens to expire.
       if (hit.card.game === 'sports') clearSportsRecall()
+      // THE MOMENT the rescue earns its keep, said out loud — this card was a
+      // local miss, the cloud read it, and the month's meter moved. Passive
+      // (no action, info kind) and state-driven off `via`, never a status
+      // code; the number is the `remaining` the same 200 just cached into
+      // settings.rescueMeter (readCardHosted), so no second request is made.
+      if (hit.identification.via === 'cloud') toast(rescueMomentText(settings().rescueMeter), 'info')
       haptic(config.haptics ? [14, 60, 14] : 0)
       if (config.collectMode) collectRef.current!.hit(hit.card, finish, grade, scanId)
     },
-    [config.collectMode, config.haptics],
+    [config.collectMode, config.haptics, toast],
   )
   const scanner = useScanner(onHit, scanMode)
   /**
@@ -976,11 +1008,24 @@ export function ScanView({ active }: { active: boolean }) {
    * scanner's status: the retry loop flips that every second or so, and a
    * panel that came and went with it would be exactly the thing being fixed. */
   const missHelp = scanning && !iosHint && !pageMode && !uploadBusy && !missHelpOff && missRun >= MISSES_BEFORE_HELP
-  /* The cloud half, if there is one to show. Two different things, and the
-   * free one wins whenever both could apply: an account with rescue switched
-   * off is shown the switch, never the subscription that raises its ceiling. */
-  const rescueOff = billingAvailable() && isSignedIn() && !config.cloudScanRescue
-  const showOffer = missHelp && (rescueOff || (unsubscribed && missRun >= MISSES_BEFORE_OFFER))
+  /* The cloud half, if there is one to show. Three audiences, and a free one
+   * wins whenever it applies: signed OUT, the path is only NAMED — an
+   * account, 50 free reads, never a price; an account with rescue switched
+   * off is shown the switch, never the subscription that raises its ceiling.
+   * All of it only where the rescue could actually run — card mode (it never
+   * runs for slabs, sealed or sports), a build with a cloud at all, and never
+   * over a network-failure miss the rescue would share. This is
+   * rescue-value-prop's chipslot line folded into the panel: decision 29
+   * keeps the chip itself free of buttons, and the panel outlives the retry
+   * churn that made the chipslot unreachable. */
+  const signedIn = isSignedIn()
+  const hintedGame =
+    config.gameFilter !== 'auto' ? config.gameFilter : config.enabledGames.length === 1 ? config.enabledGames[0] : null
+  const rescueCouldRun =
+    billingAvailable() && scanMode === 'card' && hintedGame !== 'sports' && scanner.miss?.reason !== 'api'
+  const rescueOff = signedIn && !config.cloudScanRescue
+  const showOffer =
+    missHelp && rescueCouldRun && (!signedIn || rescueOff || (unsubscribed && missRun >= MISSES_BEFORE_OFFER))
 
   return (
     <div className="scan">
@@ -1213,8 +1258,12 @@ export function ScanView({ active }: { active: boolean }) {
               paid={
                 showOffer ? (
                   <MissOffer
+                    signedOut={!signedIn}
                     rescueOff={rescueOff}
                     busy={offerBusy}
+                    onSignIn={() => {
+                      location.hash = '#/settings'
+                    }}
                     onEnableRescue={() => {
                       config.set({ cloudScanRescue: true })
                       toast('Cloud rescue on — a frame that fails is sent to be read', 'success')

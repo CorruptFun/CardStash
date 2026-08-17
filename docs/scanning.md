@@ -14,8 +14,10 @@ the collector line; canvas pixel analysis finds the card, removes roll, reads
 foil sheen and hashes the frame. The card APIs are consulted only by *name*,
 *set* and *number*.
 
-An image leaves the device in exactly one circumstance: the user switched on
-`cloudScanRescue`, and this frame is one the local pipeline could not settle —
+An image leaves the device in exactly one circumstance: `cloudScanRescue` is on
+— switched by hand, or switched on once by the subscription that includes the
+rescue ([decisions.md](decisions.md) 2) — and this frame is one the local
+pipeline could not settle —
 either nothing identified it, or it identified the card but nothing pinned
 *which printing* it is (see the printing tie-break below). Our Gemini key is
 server-side and scoped to that rescue and the AI deck builder. With the switch
@@ -307,8 +309,9 @@ printing is never worth a lost card.
 
 ### The cloud rescue's timing
 
-`cloudScanRescue` (opt-in, and the switch is its own act — see
-[decisions.md](decisions.md) 1 and [privacy.md](privacy.md)) no longer waits
+`cloudScanRescue` (off for a free account, switched on once by a subscription,
+and the switch stays the authority — see [decisions.md](decisions.md) 2 and
+[privacy.md](privacy.md)) no longer waits
 for the local pipeline to exhaust itself. It starts on a **2.5s timer**
 (`CLOUD_HEADSTART_MS`, measured from the top of `identifyViaOcr` so a sideways
 frame's orientation probing counts) and runs alongside the remaining passes:
@@ -331,6 +334,45 @@ frame's orientation probing counts) and runs alongside the remaining passes:
 Entitlement is not checked here and shouldn't be: the hosted route is the
 server's call (decision 2a), and a client-side check only adds a way to be
 locally wrong about what someone paid for.
+
+### Seeing the rescue work — the meter and the offer
+
+The rescue used to be invisible: a card the cloud read looked exactly like a
+card the device read, and the 50-a-month free allowance never appeared
+anywhere. Three surfaces fix that, and all three are **state-driven, never
+status-code-driven** — `scan-card`'s contract stands: every non-200 is a plain
+local miss, and the viewfinder never explains billing to someone holding a
+card.
+
+- **The moment** (`ScanView.onHit`): a hit whose `identification.via` is
+  `'cloud'` gets a passive info toast — "Read in the cloud — 37 of 50 left
+  this month". The number is the `remaining` every successful `scan-card` 200
+  carries (now mapped onto `CloudCardRead`), cached by `readCardHosted` into
+  `settings.rescueMeter` before the name check can null the read — a 200 spent
+  a credit whatever the read was worth, tiebreak and page-scan calls included.
+- **The meter** (`lib/rescuemeter.ts`, pure and node-tested): month-keyed to
+  the server's own UTC bucket, so a rolled-over month reads as *no sample* and
+  every surface shows nothing rather than last month's figure. The cap is
+  derived, never guessed — a `remaining` ≥ 50 can only be the subscriber pool
+  (the free pool consumes before it counts, so it answers 49 at most);
+  below that it comes from a real entitlement answer
+  (`subscriptionState()` → `noteCap`), and a cap that CHANGES drops the sample
+  with it, because "49 left" measured under the free 50 must not render as
+  "used 951 of 1,000" the moment someone subscribes. Shown beside the rescue
+  toggle in Settings and as a used-of line on the subscription panel (the free
+  panel names the subscriber 1,000 only when ≤ 10 are left). Exhaustion talk
+  lives on those two screens and nowhere else.
+- **The offer** (folded into `MissOffer` on the miss-help panel — decision 29
+  keeps the chip itself free of anything to tap): when a run of misses earns
+  the panel and the rescue was *not allowed to try*, the panel's cloud slot
+  names the path. Signed out: "Cloud rescue reads cards like this — 50 a month
+  free with an account", a Sign in button and never a price. Switch off: the
+  free switch, turned on in place. It renders only where it is true: card mode
+  (never slabs, sealed or sports, which the rescue never runs for), a build
+  with a cloud configured, never over a network-failure miss, and the panel's
+  shared "no thanks" (`scanOfferAt`) quiets every offer audience for a
+  fortnight. When the rescue ran and ALSO failed, nothing new is said — that
+  miss looks exactly as it always did.
 
 ### Sideways cards
 
@@ -418,7 +460,7 @@ Guards, all narrowing:
 | The picked print must actually carry the seen frame | A model that says "borderless" about a card with no borderless printing changes nothing. |
 | 6s leash (`PRINTING_TIEBREAK_TIMEOUT_MS`), half the rescue's | The rescue's alternative is telling the user "no". This one already has a usable answer on screen. |
 | `budget.printingTiebreak`, false in `PAGE_SCAN_BUDGET` | Nine cards on a page would be nine uploads and nine credits. The review screen re-reads a row at full budget once a human is looking at it. |
-| `cloudScanRescue` + signed in | Same switch, same reason, as the rescue. Being signed in is not consent; paying is not consent. |
+| `cloudScanRescue` + signed in | Same switch, same reason, as the rescue. Being signed in is not consent; a subscription throws the switch once, and off afterwards is final. |
 
 Any refusal — off, unreachable, timed out, rejected — leaves the local answer
 standing. The worst case is what the app does today.

@@ -65,7 +65,7 @@ paths above. No analytics event carries a binder name or a page.
 | the Cardstock `ebay-comps` function | the user taps "Check eBay prices" on a sports card | the SEARCH TERMS for that one card — year, brand, player, number, grade — with the publishable key as `anon` and **no session token**, so what someone is pricing is not tied to their account. No collection data, no ids, nothing about the copy they own | user-initiated every time; there is no automatic or background lookup, and a build with no project configured shows the eBay link alone |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | the Cardstock `build-deck` function | AI deck builder run | the STRUCTURED request — game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"** — plus the session token. The prompt is assembled server-side and our key never reaches the browser | needs an account and a subscription |
-| the Cardstock `scan-card` function | the same rescue, and the MTG printing tie-break, for a signed-in subscriber | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default |
+| the Cardstock `scan-card` function | the same rescue, and the MTG printing tie-break, for a signed-in subscriber | that one camera frame as a JPEG, plus the session token; the model key stays server-side | off by default; a subscription switches it on once, and turning it off afterwards is final |
 | `accounts.google.com` | the user turns on Drive backup | the OAuth consent flow for `drive.appdata` only; the script is injected on first use and **never at boot** | fully opt-in |
 | `www.googleapis.com` (Drive) | Drive backup / restore | the backup JSON — the same object Settings → Export writes — into the user's **own** app-private Drive folder | fully opt-in |
 | a friend's hosted binder URL | friend refresh | a plain GET, `credentials: 'omit'` | user-initiated |
@@ -103,10 +103,13 @@ is self-hosted rather than CDN-loaded.
 
 The rescue is the one exception, and it is narrow by construction:
 
-- **It is off until the user turns it on.** Being signed in is not consent, and
-  neither is paying: `cloudScanRescue` gates the hosted route and the
-  bring-your-own-key route alike, because sending a camera frame somewhere is a
-  different act from subscribing to a tier.
+- **It is off until it is asked for.** Being signed in is not consent:
+  `cloudScanRescue` gates the hosted route and the bring-your-own-key route
+  alike. Buying the subscription IS read as asking — the rescue is the thing
+  being bought — so the first time a device sees an active entitlement it
+  switches the rescue on, exactly once (`noteEntitlementSeen` in billing.ts,
+  one-shot per device via `rescueAutoOnAt`). Turning it off afterwards is
+  final: no renewal, re-fetch or later sign-in flips it back on.
 - **It uploads one frame, and only from a scan that is already in trouble.**
   Four shapes qualify. Every local pass failed; or the local answer is one of
   the specific shapes known to be confidently wrong (a bare Pokémon species

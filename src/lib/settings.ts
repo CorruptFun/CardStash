@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { GAMES } from './games'
 import { sanitizeSocialLinks } from './profilelinks'
+import { sanitizeRescueMeter, type RescueMeter } from './rescuemeter'
 import type { Game, ShareScope, SocialLink } from './types'
 
 /**
@@ -86,13 +87,17 @@ export interface Settings {
    * Send a frame the local pipeline FAILED on to be read in the cloud, as a
    * last resort.
    *
-   * OFF BY DEFAULT, and it stays a switch even though the key is now ours.
-   * Being signed in is not consent and neither is paying: uploading a camera
-   * frame is a different act from subscribing to a tier, so entitlement gates
-   * the BILL and this gates the IMAGE. Leave it off and the promise is
-   * unchanged — scanning is on-device, works offline and on first launch, and
-   * no image ever leaves. Turning it on elects to send only the frames that
-   * already missed, never the ones that succeeded.
+   * OFF BY DEFAULT on a free account, and it stays a switch even though the
+   * key is now ours. Being signed in is not consent — but buying the
+   * subscription is read as asking for the rescue, because the rescue is the
+   * thing being bought: the first time this device sees an active
+   * entitlement, `noteEntitlementSeen()` (billing.ts) switches this on, once,
+   * and stamps `rescueAutoOnAt`. The switch still gates the IMAGE where
+   * entitlement gates the BILL: turned off, nothing is uploaded, subscriber
+   * or not, and no later entitlement check flips it back. Leave it off and
+   * the promise is unchanged — scanning is on-device, works offline and on
+   * first launch, and no image ever leaves. On, it elects to send only the
+   * frames that already missed, never the ones that succeeded.
    */
   cloudScanRescue: boolean
   /**
@@ -105,6 +110,28 @@ export interface Settings {
    * app to reproduce accidentally.
    */
   scanOfferAt: number
+  /**
+   * When a subscription first switched the rescue on for THIS device — 0
+   * until one has. One-shot by design: `noteEntitlementSeen()` flips
+   * `cloudScanRescue` the first time an active entitlement is seen and never
+   * again, so a subscriber who then turns the rescue off has answered, and no
+   * renewal, re-fetch or later sign-in overrules them. Per-device like every
+   * setting — a second phone auto-enables once too, then obeys its own switch
+   * — and deliberately NOT cleared on sign-out: this device has had its one
+   * flip, whoever caused it.
+   */
+  rescueAutoOnAt: number
+  /**
+   * What the server last said was left of the month's cloud rescues — a CACHE
+   * of `scan-card`'s `remaining`, written by `readCardHosted` on every
+   * successful rescue and never counted locally (another device draws on the
+   * same allowance). Month-keyed to the server's own UTC bucket; a rolled-over
+   * month reads as "no sample" and the meter surfaces show nothing rather than
+   * last month's number. `cap` is 50, 1000, or 0 = unknown — derived from a
+   * real entitlement answer or from a `remaining` only the subscriber pool
+   * could return, never assumed (see lib/rescuemeter.ts).
+   */
+  rescueMeter: RescueMeter
   /**
    * pokemontcg.io key. NOT user-editable any more — there is no field, and the
    * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
@@ -250,6 +277,8 @@ export const useSettings = create<Settings>()(
       cloudAuto: true,
       cloudScanRescue: false,
       scanOfferAt: 0,
+      rescueAutoOnAt: 0,
+      rescueMeter: { month: '', remaining: 0, cap: 0 },
       pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK
@@ -310,6 +339,9 @@ export const useSettings = create<Settings>()(
         // up as `<a href>`s in other people's apps. Rehydration is the door,
         // so it gets the same sanitizer a pasted link does.
         merged.profileLinks = sanitizeSocialLinks(merged.profileLinks) ?? []
+        // Same door, smaller stakes: the meter's digits render as UI text, so
+        // junk collapses to "no sample" and the cap to a value that exists.
+        merged.rescueMeter = sanitizeRescueMeter(merged.rescueMeter)
         if (persisted && typeof (persisted as Partial<Settings>).diagConsentAt !== 'number') {
           merged.diagShare = false
           merged.diagConsentAt = 0
