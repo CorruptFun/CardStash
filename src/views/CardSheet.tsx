@@ -82,6 +82,18 @@ function deckAddLabel(qty: number, deckName?: string): string {
   return deckName ? `Add ${count}to ${deckName}` : `Add ${count}to deck`
 }
 
+/**
+ * How one copy names itself inside a button label — short, because it rides
+ * behind "Edit copy · " on the sheet's primary. A slab's grade wins over its
+ * condition: that IS its identity, and a graded card's condition field is not
+ * what anyone reads.
+ */
+function copyLabel(row: CollectionItem): string {
+  if (row.opened != null || row.card.sealed) return row.opened ? 'opened' : 'sealed'
+  if (row.grade) return gradeShort(row.grade)
+  return `${row.finish === 'nonfoil' ? '' : `${FINISH_LABEL[row.finish]} `}${row.condition}`
+}
+
 function sortCopies(rows: CollectionItem[]): CollectionItem[] {
   return [...rows].sort(
     (a, b) =>
@@ -141,6 +153,26 @@ function CardSheet() {
   const [didAdd, setDidAdd] = useState(false)
   const [deckPickOpen, setDeckPickOpen] = useState(false)
   const [binderPickOpen, setBinderPickOpen] = useState(false)
+  /**
+   * Which owned copy has its editor open. The sheet owns this rather than each
+   * row, for two reasons: arriving from the collection grid means arriving to
+   * change ONE row, so that row's editor is already down when the sheet opens
+   * (seeded here, not opened by an effect) — and one editor at a time means the
+   * Save buttons can never disagree about what the copy is.
+   */
+  const [editingCopyId, setEditingCopyId] = useState<string | null>(sheet.item?.id ?? null)
+  const copiesRef = useRef<HTMLElement | null>(null)
+  /**
+   * Whether the add controls are showing.
+   *
+   * A card reached from the collection is one the user already owns and is
+   * looking after, so the primary action is editing that copy and adding
+   * another sits one tap behind a secondary. Everywhere else — a search result,
+   * a scan, a deck, a friend's binder — the sheet exists in order to add, and
+   * the controls open with it. Seeded synchronously from `sheet.item` so the
+   * bar never flashes the wrong primary while the copies query answers.
+   */
+  const [addOpen, setAddOpen] = useState(!sheet.item)
   const [allPrintings, setAllPrintings] = useState(false)
   const printingsRef = useRef<HTMLElement | null>(null)
   const [variants, setVariants] = useState<Card[] | null>(null)
@@ -232,6 +264,21 @@ function CardSheet() {
 
   const comps = useMemo(() => groupComps(card.prices.entries), [card.prices.entries])
   const sortedCopies = useMemo(() => sortCopies(copies ?? []), [copies])
+  /**
+   * The copy this sheet is *about*, re-read from the live query rather than
+   * trusted: qty, price and the for-trade count can all have moved since the
+   * grid cell rendered, and a save can merge a row away entirely (`updateItem`
+   * returns a different id when it does — see `mergeToast`). When that happens
+   * and one copy is left, it is unambiguously the one meant.
+   *
+   * Until the query answers, the row the grid handed over stands in, so the
+   * action bar opens with the right primary rather than flashing Add.
+   */
+  const editTarget = useMemo(() => {
+    if (!sheet.item) return null
+    if (!copies) return sheet.item
+    return copies.find((row) => row.id === sheet.item!.id) ?? (sortedCopies.length === 1 ? sortedCopies[0] : null)
+  }, [copies, sortedCopies, sheet.item])
   const copiesValue = useMemo(() => collectionValue(sortedCopies), [sortedCopies])
   const copiesCount = sortedCopies.reduce((sum, row) => sum + row.qty, 0)
   const trend = useMemo(() => cardTrend(history ?? []), [history])
@@ -372,6 +419,37 @@ function CardSheet() {
     }
   }
 
+  /**
+   * Edit-first, and only where it is honestly the point: the sheet was opened
+   * on a row the user owns. A search result or a scan has nothing to edit yet,
+   * and a deck sheet's whole job is the deck's own quantity.
+   */
+  const ownedEntry = !sheet.deckId && !!sheet.item
+  const showEdit = ownedEntry && !addOpen && (editTarget != null || sortedCopies.length > 0)
+
+  /** Open the copy's editor and put it on screen, wherever the sheet is scrolled. */
+  const editOwnedCopy = () => {
+    if (editTarget) setEditingCopyId(editTarget.id)
+    copiesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    haptic(6)
+  }
+
+  /*
+   * Which secondaries sit beside the primary, hoisted out of the JSX because how
+   * MANY there are decides the primary's width.
+   *
+   * Two or more and it takes a line of its own: three buttons do not fit the
+   * 341px a 375px phone gives (and a friend's binder can want four — Deck, Buy
+   * and Ask), so sharing meant either clipping the last one off the edge or
+   * truncating the primary's own label. One secondary fits beside it, which is
+   * the search result and the sealed product, and those rows are unchanged.
+   */
+  const showDeck = !sheet.deckId && !sealed
+  const showBinder = !sheet.deckId && !!sheet.item
+  const showBuy = canBuy && !!seller
+  const showAsk = !!seller && messagingReady()
+  const widePrimary = [showDeck, showBinder, showBuy, showAsk].filter(Boolean).length > 1
+
   const addPrice = addLabelPrice(card, finish, condition)
   /* Finishes this printing exists in — plus the current pick, so the control
    * never strands the user (their physical copy beats incomplete API data). */
@@ -486,7 +564,7 @@ function CardSheet() {
         </div>
       </section>
       {sortedCopies.length > 0 && (
-        <section className="copies">
+        <section className="copies" ref={copiesRef}>
           <div className="copies__head">
             <span className="copies__legend">Your copies</span>
             <span className="copies__count">
@@ -495,7 +573,13 @@ function CardSheet() {
             </span>
           </div>
           {sortedCopies.map((row) => (
-            <CopyRow key={row.id} row={row} game={card.game} />
+            <CopyRow
+              key={row.id}
+              row={row}
+              game={card.game}
+              editing={editingCopyId === row.id}
+              onToggleEdit={() => setEditingCopyId(editingCopyId === row.id ? null : row.id)}
+            />
           ))}
         </section>
       )}
@@ -685,8 +769,37 @@ function CardSheet() {
         </section>
       )}
       <section className="addbar">
-        {!sheet.deckId && (
+        {/* The secondary that used to be the primary. Full-width and above the
+            action row so the thumb still lands on the primary at the bottom,
+            and priced, because "another copy at today's price" is the question
+            it answers. */}
+        {!sheet.deckId && !addOpen && (
+          <button
+            className="btn btn--ghost addbar__another"
+            onClick={() => {
+              setAddOpen(true)
+              haptic(6)
+            }}
+          >
+            <Icon name="plus" size={16} />
+            {sealed ? 'Add another sealed copy' : 'Add another copy'}
+            {addPrice != null ? ` · ${money(addPrice)}` : ''}
+          </button>
+        )}
+        {!sheet.deckId && addOpen && (
           <div className="addbar__opts">
+            {/* Only when adding is the second-class action: it replaced the
+                editor's primary slot, so it has to say so and offer the way
+                back. On a search result these controls ARE the sheet's point
+                and a header over them would be noise. */}
+            {ownedEntry && (
+              <div className="addbar__mode">
+                <span className="addbar__modelabel">Adding another copy</span>
+                <button className="iconbtn" onClick={() => setAddOpen(false)} aria-label="Stop adding another copy">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            )}
             {!sealed && (
               <Seg
                 ariaLabel="Finish"
@@ -732,15 +845,38 @@ function CardSheet() {
           </div>
         )}
         <div className="addbar__actions">
-          <button className={`btn btn--primary addbar__add ${didAdd ? 'btn--did' : ''}`} onClick={add}>
-            {didAdd ? <Icon name="check" size={18} /> : <Icon name="plus" size={18} />}
-            <span className="addbar__addlabel">
-              {sheet.deckId
-                ? deckAddLabel(qty, targetDeck?.name)
-                : `Add ${qty > 1 ? `${qty}× ` : ''}· ${money(addPrice)}`}
-            </span>
-          </button>
-          {!sheet.deckId && !sealed && (
+          {/* The primary follows why the sheet is open. Reached from the
+              collection grid, that is the copy already owned — its editor is
+              open further up, and this puts it back on screen from wherever the
+              sheet has been scrolled to. Reached from anywhere else, adding is
+              still the point and this is still Add. */}
+          {showEdit ? (
+            <button
+              className={`btn btn--primary addbar__add ${widePrimary ? 'addbar__add--wide' : ''}`}
+              onClick={editOwnedCopy}
+              // Naming the copy is what makes this unambiguous with several of
+              // them owned, and it fits because `.addbar__add`'s flex basis
+              // hands the primary its own line as soon as Deck and Binder would
+              // have crowded it. Squeezed onto one row it became "Edit · Hol…",
+              // which lost the only part worth saying.
+              aria-label={editTarget ? `Edit your ${copyLabel(editTarget)} copy` : 'Edit your copies'}
+            >
+              <Icon name="pencil" size={18} />
+              <span className="addbar__addlabel">
+                {editTarget ? `Edit copy · ${copyLabel(editTarget)}` : 'Edit your copies'}
+              </span>
+            </button>
+          ) : (
+            <button className={`btn btn--primary addbar__add ${widePrimary ? 'addbar__add--wide' : ''} ${didAdd ? 'btn--did' : ''}`} onClick={add}>
+              {didAdd ? <Icon name="check" size={18} /> : <Icon name="plus" size={18} />}
+              <span className="addbar__addlabel">
+                {sheet.deckId
+                  ? deckAddLabel(qty, targetDeck?.name)
+                  : `Add ${qty > 1 ? `${qty}× ` : ''}· ${money(addPrice)}`}
+              </span>
+            </button>
+          )}
+          {showDeck && (
             <button className="btn btn--ghost" onClick={() => setDeckPickOpen(true)}>
               <Icon name="decks" size={16} /> Deck
             </button>
@@ -749,12 +885,12 @@ function CardSheet() {
               of physical cards, and the row is what carries the finish, the
               condition and the grade. From a search result the honest answer
               is the Add button beside this one. */}
-          {!sheet.deckId && sheet.item && (
+          {showBinder && (
             <button className="btn btn--ghost" onClick={() => setBinderPickOpen(true)}>
               <Icon name="cards" size={16} /> Binder
             </button>
           )}
-          {canBuy && seller && (
+          {showBuy && seller && (
             <button className="btn btn--ghost addbar__buy" onClick={buy} disabled={buying}>
               <Icon name="cart" size={16} />{' '}
               {buying ? 'Opening…' : `Buy · ${money((seller.row.price ?? 0) * conditionFactor(seller.row.condition))}`}
@@ -765,7 +901,7 @@ function CardSheet() {
               verification, where a conversation needs neither. Most of what
               happens between two collectors is agreeing a swap, and that must
               not be gated behind a payments feature that ships off. */}
-          {seller && messagingReady() && (
+          {showAsk && seller && (
             <button
               className="btn btn--ghost"
               onClick={() => {
@@ -833,10 +969,89 @@ function SportsFacts({ card }: { card: Card }) {
   )
 }
 
-function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
-  const toast = useUi((s) => s.toast)
+function CopyRow({
+  row,
+  game,
+  editing,
+  onToggleEdit,
+}: {
+  row: CollectionItem
+  game: Game
+  editing: boolean
+  onToggleEdit: () => void
+}) {
   const sealed = row.opened != null || !!row.card.sealed
-  const [editing, setEditing] = useState(false)
+  const unit = itemUnitPrice(row)
+  const editLabel = sealed ? 'Edit sealed copies' : `Edit ${FINISH_LABEL[row.finish]} ${row.condition} copies`
+
+  return (
+    <div className={`copyrow ${editing ? 'copyrow--open' : ''}`}>
+      <div className="copyrow__main">
+        {/* The identity is the control. A 36px pencil at the far end of the row
+            was the only way into the one thing a collection tap came here to
+            change, and it sat past a stepper the thumb has to miss. */}
+        <button className="copyrow__id" onClick={onToggleEdit} aria-expanded={editing} aria-label={editLabel}>
+          {sealed ? (
+            <span className="copyrow__finish">{row.opened ? 'Opened' : 'Sealed'}</span>
+          ) : (
+            <>
+              <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
+              <span className="copyrow__cond">{row.condition}</span>
+            </>
+          )}
+          {row.grade && <span className="gradechip">{gradeShort(row.grade)}</span>}
+          {(row.forTrade ?? 0) > 0 && (
+            <span className="tradechip">
+              <Icon name="swap" size={11} /> {row.forTrade}
+            </span>
+          )}
+        </button>
+        <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>
+        <Stepper
+          value={row.qty}
+          onChange={(qty) => {
+            guarded(async () => (await setItemQty(row.id, qty), true), 'Quantity')
+          }}
+        />
+        {/* Redundant, and deliberately invisible to assistive tech: the button
+            above is the real control, while this is the affordance that SAYS
+            the row is editable. Anyone who taps the thing that looks like a
+            button must not find it dead, but nobody should hear it twice. */}
+        <button
+          className={`iconbtn ${editing ? 'iconbtn--on' : ''}`}
+          onClick={onToggleEdit}
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <Icon name="pencil" size={16} />
+        </button>
+      </div>
+      {editing && <CopyEditForm row={row} game={game} sealed={sealed} onClose={onToggleEdit} />}
+    </div>
+  )
+}
+
+/**
+ * One owned copy's editable fields.
+ *
+ * Its own component so that opening the editor MOUNTS it, and every field seeds
+ * from the row being edited as a consequence — which is what the old version
+ * hand-rolled with seven setters on the way in, and what it would have had to
+ * grow an eighth of for every field added since. Closing unmounts and discards,
+ * exactly as before.
+ */
+function CopyEditForm({
+  row,
+  game,
+  sealed,
+  onClose,
+}: {
+  row: CollectionItem
+  game: Game
+  sealed: boolean
+  onClose: () => void
+}) {
+  const toast = useUi((s) => s.toast)
   const [finish, setFinish] = useState<Finish>(row.finish)
   const [condition, setCondition] = useState<Condition>(row.condition)
   const [opened, setOpened] = useState(row.opened ?? false)
@@ -845,24 +1060,10 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   const [value, setValue] = useState(row.marketValue != null ? String(row.marketValue) : '')
   const [note, setNote] = useState(row.note ?? '')
   const [saving, setSaving] = useState(false)
-  const unit = itemUnitPrice(row)
   const paidValue = parseMoney(paid)
   const hasPaid = paid.trim().length > 0
   const marketValue = parseMoney(value)
   const hasValue = value.trim().length > 0
-
-  const toggleEdit = () => {
-    if (!editing) {
-      setFinish(row.finish)
-      setCondition(row.condition)
-      setOpened(row.opened ?? false)
-      setForTrade(row.forTrade ?? 0)
-      setPaid(row.purchasePrice != null ? String(row.purchasePrice) : '')
-      setValue(row.marketValue != null ? String(row.marketValue) : '')
-      setNote(row.note ?? '')
-    }
-    setEditing(!editing)
-  }
 
   const save = async () => {
     setSaving(true)
@@ -886,7 +1087,7 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
       // flow is usually "price this one, open the next" — well inside the
       // corpus memo's life. Drop it so the estimate does not lag a card behind.
       clearEstimateCorpus()
-      setEditing(false)
+      onClose()
       if (result === null) {
         toast('That copy is no longer in your collection', 'info')
         return
@@ -896,139 +1097,100 @@ function CopyRow({ row, game }: { row: CollectionItem; game: Game }) {
   }
 
   return (
-    <div className={`copyrow ${editing ? 'copyrow--open' : ''}`}>
-      <div className="copyrow__main">
-        <span className="copyrow__id">
-          {sealed ? (
-            <span className="copyrow__finish">{row.opened ? 'Opened' : 'Sealed'}</span>
-          ) : (
-            <>
-              <span className="copyrow__finish">{FINISH_LABEL[row.finish]}</span>
-              <span className="copyrow__cond">{row.condition}</span>
-            </>
-          )}
-          {row.grade && <span className="gradechip">{gradeShort(row.grade)}</span>}
-          {(row.forTrade ?? 0) > 0 && (
-            <span className="tradechip">
-              <Icon name="swap" size={11} /> {row.forTrade}
-            </span>
-          )}
-        </span>
-        <span className="copyrow__unit">{sealed && row.opened ? 'opened' : money(unit)}</span>
-        <Stepper
-          value={row.qty}
-          onChange={(qty) => {
-            guarded(async () => (await setItemQty(row.id, qty), true), 'Quantity')
-          }}
+    <div className="copyedit">
+      {sealed ? (
+        <div className="copyedit__opened">
+          <span className="copyedit__openedtext">
+            <strong>Opened</strong>
+            <em>Opened packs stop counting at the sealed price — scan the pulls in as singles</em>
+          </span>
+          <Toggle on={opened} onChange={setOpened} label="Opened" />
+        </div>
+      ) : (
+        <Seg
+          ariaLabel="Finish"
+          size="sm"
+          options={GAME_FINISHES[game].map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
+          value={finish}
+          onChange={setFinish}
         />
-        <button
-          className={`iconbtn ${editing ? 'iconbtn--on' : ''}`}
-          onClick={toggleEdit}
-          aria-expanded={editing}
-          aria-label={sealed ? 'Edit sealed copies' : `Edit ${FINISH_LABEL[row.finish]} ${row.condition} copies`}
-        >
-          <Icon name="pencil" size={16} />
-        </button>
+      )}
+      <div className="copyedit__row">
+        {!sealed && (
+          <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
+            {CONDITIONS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+        <input
+          className="input"
+          type="text"
+          inputMode="decimal"
+          value={paid}
+          onChange={(e) => setPaid(moneyInput(e.target.value))}
+          placeholder="Paid $ each"
+          aria-label="Paid per card"
+        />
+        <input
+          className="input"
+          type="text"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => setValue(moneyInput(e.target.value))}
+          placeholder="Worth $ each"
+          aria-label="Market value per card"
+        />
       </div>
-      {editing && (
-        <div className="copyedit">
-          {sealed ? (
-            <div className="copyedit__opened">
-              <span className="copyedit__openedtext">
-                <strong>Opened</strong>
-                <em>Opened packs stop counting at the sealed price — scan the pulls in as singles</em>
-              </span>
-              <Toggle on={opened} onChange={setOpened} label="Opened" />
-            </div>
-          ) : (
-            <Seg
-              ariaLabel="Finish"
-              size="sm"
-              options={GAME_FINISHES[game].map((f) => ({ value: f, label: FINISH_LABEL[f] }))}
-              value={finish}
-              onChange={setFinish}
-            />
-          )}
-          <div className="copyedit__row">
-            {!sealed && (
-              <select className="select" value={condition} onChange={(e) => setCondition(e.target.value as Condition)} aria-label="Condition">
-                {CONDITIONS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            )}
-            <input
-              className="input"
-              type="text"
-              inputMode="decimal"
-              value={paid}
-              onChange={(e) => setPaid(moneyInput(e.target.value))}
-              placeholder="Paid $ each"
-              aria-label="Paid per card"
-            />
-            <input
-              className="input"
-              type="text"
-              inputMode="decimal"
-              value={value}
-              onChange={(e) => setValue(moneyInput(e.target.value))}
-              placeholder="Worth $ each"
-              aria-label="Market value per card"
-            />
-          </div>
-          {hasValue && (
-            <span className={`copyedit__echo ${marketValue != null ? '' : 'copyedit__echo--bad'}`}>
-              {marketValue != null
-                ? 'Your value — used as-is, not adjusted for condition'
-                : 'Enter an amount like 12.50'}
-            </span>
-          )}
-          {/* Grade-aware on purpose: a PSA 10 and a raw copy are different
-              markets, and the grade lives on the COPY (decision 18), which is
-              why the check belongs here rather than only up in the comp
-              section. Accepting a figure fills the field — it does not save;
-              the user still presses Save, and can still type over it. */}
-          <PriceCheck card={row.card} grade={row.grade} onUse={(amount) => setValue(amount.toFixed(2))} />
-          {!(sealed && opened) && (
-            <div className="copyedit__trade">
-              <span className="copyedit__tradetext">
-                <strong>For trade</strong>
-                <em>Flagged copies show up in your shared binder — friends can ask for them</em>
-              </span>
-              <Stepper value={Math.min(forTrade, row.qty)} onChange={setForTrade} min={0} max={row.qty} />
-            </div>
-          )}
-          <input
-            className="input"
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Note (binder, trade, grade…)"
-            aria-label="Note"
-          />
-          {hasPaid && (
-            <span className={`copyedit__echo ${paidValue != null ? '' : 'copyedit__echo--bad'}`}>
-              {paidValue != null ? `Cost basis ${costBasisEcho(paidValue)} each` : 'Enter an amount like 12.50'}
-            </span>
-          )}
-          <div className="copyedit__actions">
-            <button className="btn btn--ghost btn--sm" onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn btn--primary btn--sm"
-              onClick={() => {
-                save()
-              }}
-              disabled={saving}
-            >
-              Save
-            </button>
-          </div>
+      {hasValue && (
+        <span className={`copyedit__echo ${marketValue != null ? '' : 'copyedit__echo--bad'}`}>
+          {marketValue != null ? 'Your value — used as-is, not adjusted for condition' : 'Enter an amount like 12.50'}
+        </span>
+      )}
+      {/* Grade-aware on purpose: a PSA 10 and a raw copy are different markets,
+          and the grade lives on the COPY (decision 18), which is why the check
+          belongs here rather than only up in the comp section. Accepting a
+          figure fills the field — it does not save; the user still presses
+          Save, and can still type over it. */}
+      <PriceCheck card={row.card} grade={row.grade} onUse={(amount) => setValue(amount.toFixed(2))} />
+      {!(sealed && opened) && (
+        <div className="copyedit__trade">
+          <span className="copyedit__tradetext">
+            <strong>For trade</strong>
+            <em>Flagged copies show up in your shared binder — friends can ask for them</em>
+          </span>
+          <Stepper value={Math.min(forTrade, row.qty)} onChange={setForTrade} min={0} max={row.qty} />
         </div>
       )}
+      <input
+        className="input"
+        type="text"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Note (binder, trade, grade…)"
+        aria-label="Note"
+      />
+      {hasPaid && (
+        <span className={`copyedit__echo ${paidValue != null ? '' : 'copyedit__echo--bad'}`}>
+          {paidValue != null ? `Cost basis ${costBasisEcho(paidValue)} each` : 'Enter an amount like 12.50'}
+        </span>
+      )}
+      <div className="copyedit__actions">
+        <button className="btn btn--ghost btn--sm" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn btn--primary btn--sm"
+          onClick={() => {
+            save()
+          }}
+          disabled={saving}
+        >
+          Save
+        </button>
+      </div>
     </div>
   )
 }
