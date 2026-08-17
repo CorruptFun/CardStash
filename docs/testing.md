@@ -11,6 +11,7 @@ Layered, each covering something the others structurally cannot.
 | Install banner | `npm run test:install` | headless Chromium, seconds | no |
 | Scan UI (upload + page review) | `npm run test:scanui` | headless Chromium, ~2 min | **yes** |
 | Batch add | `npm run test:batch` | headless Chromium, ~30s | no |
+| Miss chip + help panel | `npm run test:misshelp` | headless Chromium, ~90s | **yes** |
 | Invite links | `npm run test:invite` | headless Chromium, ~30s | no |
 
 ## The rule
@@ -306,6 +307,31 @@ request. The invariant is that what the screen shows and what gets filed are
 the same set in both directions — an unticked row must not land, and a row
 already filed by Collect mode must not arrive ticked again. Run it after
 touching the scan tray, `ScanBatch`, or `db.scans`.
+
+## The miss surfaces (`test:misshelp`)
+
+The one harness whose subject is a **lifetime** rather than an outcome. When a
+card will not read, the chip states and the panel acts (see `ui.md`); what has
+to hold is that the panel is still there — and still clickable — after the
+scanner has flipped status underneath it, because the bug this replaced was
+buttons that were gone before a thumb could land on them. Nothing about that is
+visible to a type, a unit test or a screenshot.
+
+Misses are manufactured, not waited for: chromium's fake camera device is a
+rolling test pattern, so every identification of it fails, and the viewfinder's
+own tap-to-scan forces the attempts rather than hoping the motion gate lets one
+through. It runs three passes because the offer's whole design is that three
+users see different things — signed out (never asked for money), signed in with
+cloud rescue off (offered the **free** switch, no price quoted at all), and
+signed in with it on (offered the discounted year). The checkout is answered
+with the 503 a deployment with no offer price configured would send, which both
+keeps the browser on the page and exercises the refusal that exists so a panel
+quoting $10.99 can never end at a $11.99 till.
+
+Run it after touching `ScanChip`, `MissHelp`, `MissOffer`, `missRun`, or
+anything in `lib/billing.ts`. It needs the matrix fixtures and starts vite with
+`VITE_SCAN_OFFER=on` itself — the deployed build has that switch off, so the
+money half of the panel is not otherwise reachable.
 
 ## Binders and the printed label (`test:binder`)
 

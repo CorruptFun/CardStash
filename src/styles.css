@@ -1958,13 +1958,34 @@ button {
 .scan__ioshint svg {
   vertical-align: -1px;
 }
-/* The upload offer reuses the iOS hint's panel — the two share one slot over
-   the viewfinder and never show together — and only adds a row of actions
-   where that one has a single Got it. */
-.scan__uploadtip .scan__tipbtns {
+/* The miss-help panel reuses the iOS hint's panel — the two share one slot over
+   the viewfinder and never show together — and only adds rows of actions
+   where that one has a single Got it. It is capped and scrolls because its
+   tallest form (actions + the cloud offer) must never reach the top of the
+   viewfinder on a small phone; the panel is help, not a takeover. */
+.scan__misshelp {
+  max-height: min(46vh, 340px);
+  overflow-y: auto;
+}
+.scan__misshelp .scan__tipbtns {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+/* The paid half, fenced off from the free advice above it by a rule — what
+   costs money should never read as one more troubleshooting step. */
+.scan__offer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  width: 100%;
+}
+.scan__offer p {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--paper-2);
 }
 /* Install nudge — floats just above the tab bar on every screen but the
  * camera, so it never covers the scan chip or the viewfinder. */
@@ -4081,6 +4102,16 @@ button {
   white-space: normal;
   line-height: 1.35;
 }
+/* The advice under the miss. Quieter than the label above it: what happened is
+   the news, what to do about it is the footnote — and the panel below says the
+   same thing with buttons on it, for anyone who wants to act rather than
+   re-aim. */
+.chip__misshint {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--paper-3);
+  white-space: normal;
+}
 .chip__searchbtn {
   display: inline-flex;
   align-items: center;
@@ -4108,6 +4139,22 @@ button {
 .chip__searchbtn--icon {
   padding: 5px 7px;
   color: var(--paper-2);
+}
+/* The two modifiers live HERE, after the base rule rather than beside the
+   panel that uses them: same specificity, so the later declaration wins and a
+   `--go` defined earlier in the file is silently a plain button. */
+.chip__searchbtn--go {
+  border-color: var(--signal-rule);
+  background: var(--signal-fill);
+  color: var(--paper);
+}
+.chip__searchbtn--go:disabled {
+  opacity: 0.6;
+}
+.chip__searchbtn--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--paper-3);
 }
 .scandebug {
   position: absolute;

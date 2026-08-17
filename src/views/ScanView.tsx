@@ -8,6 +8,16 @@ import { ScanModes } from '../components/ScanModes'
 import { ScanDebugPanel } from '../components/ScanDebug'
 import { ACTIVE_SCAN_STATUSES, useScanner, type ScannerStatus } from '../hooks/useScanner'
 import { track } from '../lib/analytics'
+import { isSignedIn } from '../lib/authsession'
+import {
+  billingAvailable,
+  isSubscribed,
+  scanOfferAvailable,
+  SCAN_OFFER_PRICE,
+  SCAN_OFFER_SAVING,
+  startSubscriptionCheckout,
+  YEARLY_PRICE,
+} from '../lib/billing'
 import { cardImageFromCanvas, IMAGE_MAX_EDGE } from '../lib/cardimage'
 import {
   CAMERA_REPROMPTS_EACH_ACQUIRE,
@@ -63,16 +73,30 @@ const IOS_PWA = CAMERA_REPROMPTS_EACH_ACQUIRE
 const REPEAT_WINDOW_MS = 2500
 
 /**
- * Misses in a row before the screen offers the photo path.
+ * Misses in a row before the screen stops narrating and starts helping.
  *
- * Three, because one miss is a card that wasn't in frame yet and two is a hand
- * still settling — a run of three is the phone, not the user: a lens that
- * won't focus this close, a sleeve throwing the shop's ceiling light back, a
- * frame that is never still. A still photo is a better read than a moving one,
- * and the upload control is already right there but reads as an obscure icon.
- * Any hit resets the run, so a scanner that works never says this.
+ * TWO, because one miss is a card that wasn't in frame yet — a hand still
+ * settling reads as a miss and fixes itself. Two in a row is the phone rather
+ * than the moment: a lens that won't focus this close, a sleeve throwing the
+ * shop's ceiling light back, a frame that is never still. This is also where
+ * every action the miss chip used to carry now lives, so it must arrive early
+ * enough that "the catalog doesn't have this card" is still reachable in the
+ * flow it happens in. Any hit resets the run, so a scanner that works never
+ * says any of it.
  */
-const MISSES_BEFORE_UPLOAD_TIP = 3
+const MISSES_BEFORE_HELP = 2
+/**
+ * And before the panel mentions money.
+ *
+ * One further miss than the help itself, deliberately. What is being sold —
+ * cloud rescue — is a real answer to what is happening on screen, which is
+ * precisely why it must not arrive dressed as the first answer: "hold it
+ * still" and "upload a photo" are free, work offline, and fix most of these.
+ * An offer that shows up before them is an advert wearing a diagnosis.
+ */
+const MISSES_BEFORE_OFFER = 3
+/** How long "no thanks" holds the offer off. Persisted — see `scanOfferAt`. */
+const SCAN_OFFER_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000
 
 class CollectQueue {
   private recent: { cardId: string; at: number } | null = null
@@ -135,10 +159,6 @@ function ScanChip({
   onCycleFinish,
   onOpen,
   detail,
-  onSearch,
-  onAdd,
-  onRetry,
-  onDetails,
 }: {
   status: ScannerStatus
   hit: Extract<IdentifyOutcome, { ok: true }> | null
@@ -148,11 +168,6 @@ function ScanChip({
   onCycleFinish: () => void
   onOpen: () => void
   detail: string | null
-  onSearch: (() => void) | null
-  /** Keep the frame and describe the card by hand — see the button's comment. */
-  onAdd: () => void
-  onRetry: () => void
-  onDetails: () => void
 }) {
   if (status === 'found' && hit && finish) {
     const card = hit.card
@@ -196,31 +211,25 @@ function ScanChip({
     )
   }
   if (status === 'nomatch') {
+    /**
+     * A STATEMENT, NOT A MENU. This chip is transient by construction — the
+     * scanner re-attempts about a second and a half later, and any real
+     * movement of the phone throws the whole loop back to 'searching' — so it
+     * is on screen for roughly as long as it takes to read it.
+     *
+     * It used to carry four buttons, and they were unreachable in practice:
+     * the thumb arrived after the chip had already been replaced by
+     * "Identifying…". Worse, reaching for one moves the phone, which is
+     * itself what dismisses it. Every action moved to `MissHelp`, which stays
+     * put across the retry churn; what is left here is the one thing this
+     * moment is good for, which is saying what happened and what usually
+     * fixes it.
+     */
     return (
       <div className="chip chip--nomatch">
         <span className="chip__missbody">
-          <span className="chip__label">{detail ?? 'No match — try filling the frame'}</span>
-          <span className="chip__missactions">
-            <button className="chip__searchbtn" onClick={onRetry}>
-              <Icon name="refresh" size={13} /> Try again
-            </button>
-            {onSearch && (
-              <button className="chip__searchbtn" onClick={onSearch}>
-                <Icon name="search" size={13} /> Search it instead
-              </button>
-            )}
-            {/* The honest possibility nobody offers: the card is real and the
-                catalog does not have it. Promos, prereleases and regional
-                prints fail here every time, and retrying reads the same card
-                the same way forever. This keeps the frame already on screen
-                and lets the user say what it is. */}
-            <button className="chip__searchbtn" onClick={onAdd}>
-              <Icon name="plus" size={13} /> Add it myself
-            </button>
-            <button className="chip__searchbtn chip__searchbtn--icon" onClick={onDetails} aria-label="What did the scanner see?">
-              <Icon name="eye" size={14} />
-            </button>
-          </span>
+          <span className="chip__label">{detail ?? 'No match'}</span>
+          <span className="chip__misshint">Hold steady and try again, or upload a photo.</span>
         </span>
       </div>
     )
@@ -250,6 +259,150 @@ function UploadButton({ busy, onPick, wide = false }: { busy: boolean; onPick: (
     <button className="iconbtn iconbtn--glass" onClick={onPick} disabled={busy} aria-label="Scan a photo from your library">
       {busy ? <span className="chip__spinner" /> : <Icon name="upload" size={18} />}
     </button>
+  )
+}
+
+/**
+ * What to do about a card that will not read — the durable half of a miss.
+ *
+ * The chip says what happened and is gone in about a second; this stays until
+ * a card reads or the user hides it, because every one of these is a decision
+ * rather than a reflex. Splitting them that way is the whole fix: the actions
+ * used to ride the chip, where they were unreachable in practice, and reaching
+ * for one moved the phone, which dismissed the chip.
+ *
+ * Free things first, and that ordering is not cosmetic. Holding still, a still
+ * photo, searching by name and describing the card by hand cost nothing, work
+ * offline and between them fix most misses. `paid` is whatever the offer
+ * section decided to say, appended underneath — never in front.
+ */
+function MissHelp({
+  onRetry,
+  onUpload,
+  onSearch,
+  onAdd,
+  onDetails,
+  onHide,
+  paid,
+}: {
+  onRetry: () => void
+  /** Null when the entitlement seam has upload switched off. */
+  onUpload: (() => void) | null
+  /** Null until the pipeline actually read a name to search for. */
+  onSearch: (() => void) | null
+  onAdd: () => void
+  onDetails: () => void
+  onHide: () => void
+  paid: React.ReactNode
+}) {
+  return (
+    <div className="scan__ioshint scan__misshelp" role="status">
+      <p>
+        Still no match? Hold the card still and fill the frame — or <b>upload a photo</b>, which reads better than a
+        moving one.
+      </p>
+      <span className="scan__tipbtns">
+        <button className="chip__searchbtn" onClick={onRetry}>
+          <Icon name="refresh" size={13} /> Try again
+        </button>
+        {onUpload && (
+          <button className="chip__searchbtn" onClick={onUpload}>
+            <Icon name="upload" size={13} /> Upload a photo
+          </button>
+        )}
+        {onSearch && (
+          <button className="chip__searchbtn" onClick={onSearch}>
+            <Icon name="search" size={13} /> Search it instead
+          </button>
+        )}
+        {/* The honest possibility nobody offers: the card is real and the
+            catalog does not have it. Promos, prereleases and regional prints
+            fail here every time, and retrying reads the same card the same way
+            forever. This keeps the frame already on screen and lets the user
+            say what it is. */}
+        <button className="chip__searchbtn" onClick={onAdd}>
+          <Icon name="plus" size={13} /> Add it myself
+        </button>
+        <button
+          className="chip__searchbtn chip__searchbtn--icon"
+          onClick={onDetails}
+          aria-label="What did the scanner see?"
+        >
+          <Icon name="eye" size={14} />
+        </button>
+        <button className="chip__searchbtn chip__searchbtn--quiet" onClick={onHide}>
+          Hide
+        </button>
+      </span>
+      {paid}
+    </div>
+  )
+}
+
+/**
+ * The cloud half of a miss: the free switch the user hasn't turned on, or the
+ * subscription that raises its ceiling.
+ *
+ * TURNING ON A FREE THING IS NOT AN UPSELL, and the two must not be collapsed.
+ * Cloud rescue's monthly allowance is free for 50 reads; selling a
+ * subscription to someone who has never used the free version of the feature
+ * would be selling them a bigger version of nothing. So an account with the
+ * switch off is only ever shown the switch — the offer is what comes after,
+ * for someone already using it, whose misses are the thing the subscription
+ * actually changes.
+ *
+ * Nothing here renders for a signed-out user, and that is the free path being
+ * kept free: scanning, the collection, decks and trades never ask for an
+ * account, and the screen where scanning is failing is the last place to start.
+ */
+function MissOffer({
+  rescueOff,
+  busy,
+  onEnableRescue,
+  onSubscribe,
+  onSnooze,
+}: {
+  rescueOff: boolean
+  busy: boolean
+  onEnableRescue: () => void
+  onSubscribe: () => void
+  onSnooze: () => void
+}) {
+  if (rescueOff) {
+    return (
+      <div className="scan__offer">
+        <p>
+          <b>Cloud rescue is off.</b> It sends the frames that fail — only those — to be read for you, and 50 a month
+          are free.
+        </p>
+        <span className="scan__tipbtns">
+          <button className="chip__searchbtn chip__searchbtn--go" onClick={onEnableRescue}>
+            <Icon name="sparkle" size={13} /> Turn it on
+          </button>
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="scan__offer">
+      <p>
+        Cloud rescue reads the cards this phone can’t — worn faces, glare, foils. In our 282-photo test set it took
+        identification from about <b>7 in 10</b> cards to about <b>9 in 10</b>. Free covers 50 reads a month; a
+        subscription raises it to 1,000.
+      </p>
+      <p>
+        Because this one wouldn’t read, <b>{SCAN_OFFER_SAVING} off</b>: <b>{SCAN_OFFER_PRICE} a year</b> instead of{' '}
+        {YEARLY_PRICE}. Card handled by Stripe, cancel any time.
+      </p>
+      <span className="scan__tipbtns">
+        <button className="chip__searchbtn chip__searchbtn--go" onClick={onSubscribe} disabled={busy}>
+          {busy ? 'Opening…' : `Get it for ${SCAN_OFFER_PRICE}`}
+        </button>
+        <button className="chip__searchbtn chip__searchbtn--quiet" onClick={onSnooze}>
+          No thanks
+        </button>
+      </span>
+    </div>
   )
 }
 
@@ -298,9 +451,20 @@ export function ScanView({ active }: { active: boolean }) {
   /** The batch-add screen: the whole scan tray, with a tick beside every row. */
   const [batchOpen, setBatchOpen] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
-  /** Consecutive misses, and whether the user has waved off the tip they earn. */
+  /** Consecutive misses, and whether the user has waved off the help they earn. */
   const [missRun, setMissRun] = useState(0)
-  const [uploadTipOff, setUploadTipOff] = useState(false)
+  const [missHelpOff, setMissHelpOff] = useState(false)
+  /**
+   * The server answered, and the answer was "no subscription". Only an
+   * affirmative no opens the offer: `isSubscribed()` says `null` when it could
+   * not ask, and a failed request must not become an advert shown to somebody
+   * who has already paid.
+   */
+  const [unsubscribed, setUnsubscribed] = useState(false)
+  const [offerBusy, setOfferBusy] = useState(false)
+  /** Asked once per visit to this screen — a run of misses is not a reason to
+   * re-ask a question whose answer changes at most once a year. */
+  const offerAskedRef = useRef(false)
   const pageAbortRef = useRef<AbortController | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
@@ -631,12 +795,50 @@ export function ScanView({ active }: { active: boolean }) {
     if (visible) warmOcr()
   }, [visible])
 
-  /* The run behind the upload tip. The dep is the status itself, so each entry
+  /* The run behind the help panel. The dep is the status itself, so each entry
    * into 'nomatch' counts once however long the scanner sits there. */
   useEffect(() => {
     if (scanner.status === 'nomatch') setMissRun((run) => run + 1)
     else if (scanner.status === 'found') setMissRun(0)
   }, [scanner.status])
+
+  /* Whether there is an offer to make. Asked of the server only once a run of
+   * misses has earned the question — a scanner that is working never costs a
+   * request, and a signed-out user never causes one either (`isSubscribed`
+   * answers null without asking). The snooze is checked BEFORE the request for
+   * the same reason: somebody who said no thanks last week is not a question. */
+  useEffect(() => {
+    if (offerAskedRef.current || !scanOfferAvailable()) return
+    if (missRun < MISSES_BEFORE_OFFER || !config.cloudScanRescue) return
+    if (Date.now() - config.scanOfferAt < SCAN_OFFER_SNOOZE_MS) return
+    offerAskedRef.current = true
+    void isSubscribed().then((sub) => setUnsubscribed(sub === false))
+  }, [missRun, config.cloudScanRescue, config.scanOfferAt])
+
+  /**
+   * Buy the year at the offered price.
+   *
+   * The `offer` is a request rather than a price: the function re-derives the
+   * tier from the caller's own token and sells whichever is cheaper, so a
+   * referred or founding buyer who lands here keeps the better price. A
+   * full-page redirect, like every other checkout in the app — an iOS
+   * Home-Screen install has no useful popup.
+   */
+  const buyOffer = async () => {
+    setOfferBusy(true)
+    try {
+      const { url } = await startSubscriptionCheckout({ offer: 'scan-miss' })
+      location.href = url
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not open the payment page', 'error')
+      setOfferBusy(false)
+    }
+  }
+
+  const snoozeOffer = () => {
+    setUnsubscribed(false)
+    config.set({ scanOfferAt: Date.now() })
+  }
 
   /* The scanner lit the torch itself (sustained dark scene) — say so, once
    * per lighting, so the sudden light isn't a mystery. */
@@ -767,18 +969,18 @@ export function ScanView({ active }: { active: boolean }) {
    * allows the site permanently, per launch (unfixably) for Home-Screen
    * apps. Say so once, with whatever recourse the context actually has. */
   const iosHint = scanning && (IOS_BROWSER || IOS_PWA) && !config.iosCameraHintShown
-  /* The photo offer, earned by a run of misses. It shares the iOS hint's slot,
+  /* The help panel, earned by a run of misses. It shares the iOS hint's slot,
    * so it waits its turn rather than stacking two panels over the viewfinder,
-   * and it stays off the screen entirely when upload isn't on offer (page mode
-   * has its own shutter, and the entitlement seam may switch upload off). */
-  const uploadTip =
-    scanning &&
-    !iosHint &&
-    !pageMode &&
-    !uploadBusy &&
-    !uploadTipOff &&
-    missRun >= MISSES_BEFORE_UPLOAD_TIP &&
-    isEntitled('photo-upload')
+   * and it stays off in page mode, which has its own shutter and its own
+   * review screen to fix a bad read on. Unlike the chip it is not tied to the
+   * scanner's status: the retry loop flips that every second or so, and a
+   * panel that came and went with it would be exactly the thing being fixed. */
+  const missHelp = scanning && !iosHint && !pageMode && !uploadBusy && !missHelpOff && missRun >= MISSES_BEFORE_HELP
+  /* The cloud half, if there is one to show. Two different things, and the
+   * free one wins whenever both could apply: an account with rescue switched
+   * off is shown the switch, never the subscription that raises its ceiling. */
+  const rescueOff = billingAvailable() && isSignedIn() && !config.cloudScanRescue
+  const showOffer = missHelp && (rescueOff || (unsubscribed && missRun >= MISSES_BEFORE_OFFER))
 
   return (
     <div className="scan">
@@ -997,39 +1199,33 @@ export function ScanView({ active }: { active: boolean }) {
                   })
                 }
                 detail={scanner.detail}
-                onSearch={scanner.miss?.readName ? searchInstead : null}
-                onAdd={addByHand}
-                onRetry={tapRescan}
-                onDetails={() => setDebugOpen(true)}
               />
             </div>
           )}
-          {uploadTip && (
-            <div className="scan__ioshint scan__uploadtip" role="status">
-              <p>
-                Not locking on? A still photo reads better than a moving frame — <b>upload one</b> and it goes through
-                the same reader.
-              </p>
-              <span className="scan__tipbtns">
-                <button
-                  className="chip__searchbtn"
-                  onClick={() => {
-                    setUploadTipOff(true)
-                    fileRef.current?.click()
-                  }}
-                >
-                  <Icon name="upload" size={13} /> Upload a photo
-                </button>
-                <button
-                  className="chip__searchbtn"
-                  onClick={() => {
-                    setUploadTipOff(true)
-                  }}
-                >
-                  Not now
-                </button>
-              </span>
-            </div>
+          {missHelp && (
+            <MissHelp
+              onRetry={tapRescan}
+              onUpload={isEntitled('photo-upload') ? () => fileRef.current?.click() : null}
+              onSearch={scanner.miss?.readName ? searchInstead : null}
+              onAdd={addByHand}
+              onDetails={() => setDebugOpen(true)}
+              onHide={() => setMissHelpOff(true)}
+              paid={
+                showOffer ? (
+                  <MissOffer
+                    rescueOff={rescueOff}
+                    busy={offerBusy}
+                    onEnableRescue={() => {
+                      config.set({ cloudScanRescue: true })
+                      toast('Cloud rescue on — a frame that fails is sent to be read', 'success')
+                      scanner.rescan()
+                    }}
+                    onSubscribe={buyOffer}
+                    onSnooze={snoozeOffer}
+                  />
+                ) : null
+              }
+            />
           )}
           {iosHint && (
             <div className="scan__ioshint">

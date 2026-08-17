@@ -96,6 +96,16 @@ export interface Settings {
    */
   cloudScanRescue: boolean
   /**
+   * When the scan screen's subscription offer was last waved off, epoch ms.
+   *
+   * Persisted rather than held in the view's state because the offer is made at
+   * a bad moment by definition — the user is trying to scan a card and it is
+   * not working — and "not now" that lasts until the next app launch is not an
+   * answer, it is a delay. A run of misses is also the easiest thing in this
+   * app to reproduce accidentally.
+   */
+  scanOfferAt: number
+  /**
    * pokemontcg.io key. NOT user-editable any more — there is no field, and the
    * value comes from the build (`VITE_POKEMON_KEY`), the same way the PSA token
    * does. It stays on this object rather than becoming a bare import because
@@ -239,6 +249,7 @@ export const useSettings = create<Settings>()(
       cloudSyncedAt: 0,
       cloudAuto: true,
       cloudScanRescue: false,
+      scanOfferAt: 0,
       pokemonKey: POKEMON_KEY,
       // On for a NEW install, and honest because `diagConsentAt` gates the
       // actual upload until the disclosure has been shown. In the EU/EEA/UK
