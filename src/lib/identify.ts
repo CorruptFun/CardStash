@@ -1688,6 +1688,18 @@ const RAW_BOTTOM_BANDS: OcrRect[] = [
   { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },
 ]
 /**
+ * The modern full-art collector line, as a NARROW sliver of the raw frame.
+ * The wide bands above straddle it — their top edge clips the line and their
+ * width spends the OCR's pixel cap on rules text beside it, so a Rayquaza
+ * VMAX's "218/203" came back as garbage from the very rect that contained
+ * it, under every polarity variant (probed; polarity was not the lever).
+ * Narrower is what reads: 0.35 wide leaves the cap's 1600px to the line's
+ * own glyphs, and starting at 0.885 keeps the line whole. Probed clean on
+ * the fixture that motivated it; tried FIRST so a hit costs one pass and
+ * skips both wide bands.
+ */
+const RAW_LINE_SLIVER: OcrRect = { x: 0, y: 0.885, w: 0.35, h: 0.05 }
+/**
  * The raw bands get their OWN budget rather than whatever the mapped-region
  * loops leave behind — which is nothing. Measured on `charizard-base`: two
  * variants over four regions is eight passes against a budget of four or five,
@@ -1857,7 +1869,7 @@ async function readCornerInfo(
     // the flavour text instead of the number. Measured on `charizard-base`:
     // the crop ended at 0.93 of the frame and "4/102" prints at 0.96.
     budget = RAW_BAND_PASSES
-    for (const rect of RAW_BOTTOM_BANDS) await pass(rect, { variant: 'normal' })
+    for (const rect of [RAW_LINE_SLIVER, ...RAW_BOTTOM_BANDS]) await pass(rect, { variant: 'normal' })
   }
   return read
 }
