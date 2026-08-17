@@ -57,7 +57,7 @@ paths above. No analytics event carries a binder name or a page.
 | `db.ygoprodeck.com` | Yu-Gi-Oh | a name or passcode | as above |
 | `api.lorcast.com` | Lorcana | a query | as above |
 | `tcgcsv.com` | catalog games, sealed products | nothing but the path (static files) | as above |
-| `api.psacard.com` | a slab scan whose label carried a cert number | the cert number, and **our** token as a bearer header — no user data of any kind | not opt-in, but only ever fires on a deliberate slab scan; dormant entirely if the build ships no token, and slab scanning still works without it |
+| the Cardstock `psa-proxy` function → `api.psacard.com` | a slab scan whose label carried a cert number | the cert number alone, as a bare keyless GET — no session token, not even the publishable key, so which cert someone scanned is never tied to an account; **our** PSA token is attached server-side and never exists in the page | not opt-in, but only ever fires on a deliberate slab scan; dormant entirely if the build ships no endpoint (and no token), and slab scanning still works without it. A dev build with `VITE_PSA_TOKEN` set calls `api.psacard.com` directly instead, adding our token as a bearer header |
 | the Cardstock `ebay-comps` function | the user taps "Check eBay prices" on a sports card | the SEARCH TERMS for that one card — year, brand, player, number, grade — with the publishable key as `anon` and **no session token**, so what someone is pricing is not tied to their account. No collection data, no ids, nothing about the copy they own | user-initiated every time; there is no automatic or background lookup, and a build with no project configured shows the eBay link alone |
 | card image CDNs | `<img>` rendering | standard image requests | — |
 | the Cardstock `build-deck` function | AI deck builder run | the STRUCTURED request — game, format, style, budget, seed card names, **and the collection card list if the user enabled "use my collection"** — plus the session token. The prompt is assembled server-side and our key never reaches the browser | needs an account and a subscription |
@@ -135,7 +135,7 @@ text stays on-device (see below), and analytics never learn what was scanned.
 | --- | ------ | ------- | -------- |
 | Gemini API key | **ours, server-side only** — held as a Supabase secret by `scan-card` and `build-deck`, never in the bundle | Google only, from our edge functions | the AI deck builder and the scan rescue |
 | pokemontcg.io key | **ours, compiled in** from `VITE_POKEMON_KEY` — no Settings field | pokemontcg.io only, as `X-Api-Key` | higher rate limits |
-| PSA API token | **ours, compiled in** from `VITE_PSA_TOKEN` — not stored per user, no Settings field | psacard.com only, as a bearer token | resolving a scanned slab's cert to the exact card |
+| PSA API token | **ours, server-side only** — the `PSA_TOKEN` Supabase secret held by `psa-proxy`; deployed builds point `VITE_PSA_ENDPOINT` at the proxy and ship no token (a dev build may still compile one in from `VITE_PSA_TOKEN`). Not stored per user, no Settings field | psacard.com only, as a bearer header from our edge function (or from a dev build directly) | resolving a scanned slab's cert to the exact card |
 | Google Drive access token | **memory only — never stored** | Google only, as a bearer token | writing/reading the app-private backup folder |
 | Google OAuth client id | compiled in from `VITE_GOOGLE_CLIENT_ID` | Google only | identifying the app during consent |
 

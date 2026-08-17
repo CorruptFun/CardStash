@@ -224,31 +224,51 @@ would fork the catalog and break every price lookup.
 
 ### PSA cert lookup
 
-`psa.ts` calls PSA's free public API (`GetByCertNumber`, bearer token, ~100
-calls/day) to resolve a scanned cert to the exact card. It is an enhancement
-and never a dependency:
+`psa.ts` resolves a scanned cert to the exact card through PSA's free public
+API (`GetByCertNumber`, ~100 calls/day for the whole account). It is an
+enhancement and never a dependency:
 
-- **The token is ours**, compiled in from `VITE_PSA_TOKEN`, so cert lookup works
-  with nothing for the user to configure. There is no Settings field. A build
-  with an empty value is dormant and **never contacts PSA at all** — the same
-  shape `drive.ts` uses for its OAuth client id.
-- **The token is not safe in a bundle, and the quota is the reason.** Unlike the
-  Google client id (origin-allowlisted) and the Supabase publishable key (RLS),
-  a bearer token has no backstop behind it: it is readable in the static bundle
-  and the ~100/day free tier is now shared across every user rather than
-  per-person. Certs cache for months and a 429 stands lookups down for hours,
-  but neither changes the arithmetic. Point `VITE_PSA_ENDPOINT` at a proxy that
-  holds the token server-side to fix it properly — `ENDPOINT` is the only thing
-  that changes.
+- **Two build shapes, and the proxy is the deployed one.**
+  `supabase/functions/psa-proxy` holds our token server-side; a build learns
+  the proxy's URL from `VITE_PSA_ENDPOINT` and ships **no token at all**,
+  calling it keyless — a bare `GET {endpoint}/{cert}` with no headers, so the
+  request stays a CORS simple request and nothing secret exists in the page.
+  The legacy shape compiles the token in from `VITE_PSA_TOKEN` and talks to
+  PSA directly — fine for dev, unwise deployed: a bearer token has no backstop
+  (unlike the origin-allowlisted Google client id and the RLS-backed
+  publishable key) and is readable by anyone in the static bundle. If both
+  values are set the endpoint wins and psa.ts never sends the token to the
+  proxy host. With neither, the module is dormant and **never contacts anyone
+  at all** — the same shape `drive.ts` uses for its OAuth client id. There is
+  no Settings field either way.
+- **Bringing it live takes two values and no code.** Set the server secret:
+  `supabase secrets set PSA_TOKEN=<token> --project-ref xvfuyvaehtdxroyzixak`,
+  then point builds at the deployed function: `gh variable set
+  VITE_PSA_ENDPOINT --body
+  "https://xvfuyvaehtdxroyzixak.supabase.co/functions/v1/psa-proxy"`, then
+  re-run the deploy workflow (or push to `main`). Until the secret exists the
+  function answers 503 "not configured" and the client treats lookup as
+  unavailable — the standard dormant posture. Leave the `VITE_PSA_TOKEN`
+  Actions secret unset; it is the legacy shape only.
+- **The quota arithmetic does not change — the exposure does.** ~100/day is
+  still one shared allowance across every user. The proxy validates certs to
+  bare bounded digits (nothing arbitrary rides upstream under our bearer),
+  caches found certs long (a cert is immutable — PSA issues a new number
+  rather than regrade an old one) and empty answers briefly (certs are minted
+  every day), and forwards PSA's 429 honestly so the client's six-hour
+  stand-down still engages. What nobody can do any more is read the
+  credential out of the bundle.
 - Every failure is non-fatal — the label alone already yields the grade, the
   cert and usually the whole card, so a refused, rate-limited or unreachable
   API downgrades the scan instead of breaking it.
 - Slab scanning is **not** sports-only: with a TCG selected, the label is
   matched against that game's catalog and the grade is attached to the result.
-- **CORS is the known risk.** PSA does not document the endpoint as
-  CORS-enabled for browser origins; if the header is absent the call fails in
-  the page regardless of the token. That is why `PsaOutcome` makes every
-  failure mode a first-class value rather than a thrown error.
+- **CORS was the known risk of the direct shape, and the proxy retires it.**
+  PSA does not document its endpoint as CORS-enabled for browser origins; if
+  the header is absent a direct call fails in the page regardless of the
+  token. The proxy answers with explicit CORS headers of its own. Either way,
+  `PsaOutcome` keeps every failure mode a first-class value rather than a
+  thrown error.
 
 ## Cards the catalogs got wrong, and cards they never had
 

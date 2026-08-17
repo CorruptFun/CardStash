@@ -30,14 +30,18 @@
  * exhausted by abuse. Two mitigations live here — certs are cached for months
  * (`CERT_TTL_MS`) so a re-scan is free, and a 429 stops all further calls for
  * `QUOTA_COOLDOWN_MS` instead of hammering a dead quota — but neither changes
- * the arithmetic. Moving the token behind a proxy that holds it server-side
- * and rate-limits per user is the real fix; this module is written so that is
- * a one-constant change to `ENDPOINT`.
+ * the arithmetic. The real fix exists: `supabase/functions/psa-proxy` holds
+ * the token server-side (the `PSA_TOKEN` secret), and a build with
+ * `VITE_PSA_ENDPOINT` pointed at it ships **no token at all** — this module
+ * then calls the proxy with no headers whatsoever. The quota stays one shared
+ * allowance either way; the proxy changes who can read the credential, not
+ * the arithmetic.
  *
- * One more caveat for debugging in the wild: the API is not documented as
- * CORS-enabled for browser origins. If PSA does not send the header, the call
- * fails in the page no matter how valid the token is. That is why the failure
- * path is a first-class outcome here — see `PsaOutcome`.
+ * One more caveat for debugging in the wild: PSA's own API is not documented
+ * as CORS-enabled for browser origins. If PSA does not send the header, a
+ * direct call fails in the page no matter how valid the token is — the proxy
+ * sends explicit CORS headers, which is the other problem it solves. That is
+ * why the failure path is a first-class outcome here — see `PsaOutcome`.
  */
 
 import { db, kvGet, kvPut } from './db'
@@ -49,19 +53,25 @@ import type { Sport } from './types'
 const env = (import.meta.env ?? {}) as Record<string, string | undefined>
 
 /**
- * Our PSA token, compiled in at build time. Empty means the build ships
- * without cert lookup and this module never contacts PSA at all.
+ * Our PSA token, compiled in at build time. Only the direct-to-PSA shape
+ * needs it; the proxy shape below ships without one. With neither value set,
+ * this module never contacts anyone at all.
  */
 const PSA_TOKEN: string = (env.VITE_PSA_TOKEN ?? '').trim()
 
-/** Whether this build can resolve certs. */
-export const PSA_AVAILABLE: boolean = Boolean(PSA_TOKEN)
-
 /**
- * Swap this for a proxy of ours that holds the token server-side and the
- * exposure problem in the module comment goes away — nothing else changes.
+ * Our proxy (`supabase/functions/psa-proxy`), when the build sets one. The
+ * proxy holds the real token server-side, so with this set no
+ * `VITE_PSA_TOKEN` needs to exist — and none is sent: the request goes out
+ * with no headers at all, which keeps this module ignorant of what hosts the
+ * endpoint and keeps the GET a CORS simple request.
  */
-const ENDPOINT = (env.VITE_PSA_ENDPOINT ?? 'https://api.psacard.com/publicapi/cert/GetByCertNumber').replace(/\/+$/, '')
+const PSA_PROXY: string = (env.VITE_PSA_ENDPOINT ?? '').trim().replace(/\/+$/, '')
+
+/** Whether this build can resolve certs — a token of its own, or a proxy holding ours. */
+export const PSA_AVAILABLE: boolean = Boolean(PSA_TOKEN) || Boolean(PSA_PROXY)
+
+const ENDPOINT = PSA_PROXY || 'https://api.psacard.com/publicapi/cert/GetByCertNumber'
 
 /** A cert's grade never changes, so a hit is good essentially forever. */
 const CERT_TTL_MS = 180 * 86_400_000
@@ -198,7 +208,7 @@ function cacheKey(cert: string): string {
 export async function psaLookup(cert: string, signal?: AbortSignal): Promise<PsaOutcome> {
   const trimmed = cert.replace(/\D/g, '')
   if (!trimmed) return { ok: false, reason: 'not-found', message: 'No certification number to look up' }
-  if (!PSA_TOKEN) return { ok: false, reason: 'not-configured', message: 'This build has no PSA cert lookup' }
+  if (!PSA_AVAILABLE) return { ok: false, reason: 'not-configured', message: 'This build has no PSA cert lookup' }
 
   const cached = await kvGet<PsaCert>(cacheKey(trimmed), CERT_TTL_MS).catch(() => null)
   if (cached) return { ok: true, cert: cached }
@@ -213,7 +223,10 @@ export async function psaLookup(cert: string, signal?: AbortSignal): Promise<Psa
 
   try {
     const payload = await fetchJson(`${ENDPOINT}/${encodeURIComponent(trimmed)}`, {
-      headers: { Authorization: `bearer ${PSA_TOKEN}` },
+      // Direct PSA needs the bearer. The proxy must NOT get it: the point of
+      // the proxy build is that no token ships, and even when both values are
+      // configured a credential does not belong in requests to another host.
+      headers: PSA_PROXY ? undefined : { Authorization: `bearer ${PSA_TOKEN}` },
       timeoutMs: 10_000,
       signal,
     })

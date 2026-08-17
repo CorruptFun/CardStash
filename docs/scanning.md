@@ -516,10 +516,12 @@ cert**. A card can easily mention a number; only a slab says PSA and 10 in the
 same breath. A company name with no grade at all is refused outright — that is
 a sleeve or a shop logo. The company is never inferred from cert length.
 
-When the label carries a cert and the user has supplied a PSA token, `psa.ts`
-resolves it to the exact card and that answer replaces the OCR read
-(confidence 1). Without a token, nothing is sent anywhere and the label's own
-text is parsed like any other sports read. The grade survives either way.
+When the label carries a cert and the build can resolve certs
+(`PSA_AVAILABLE` — the `psa-proxy` endpoint in deployed builds, or a
+compiled-in token in dev), `psa.ts` resolves it to the exact card and that
+answer replaces the OCR read (confidence 1). With neither configured, nothing
+is sent anywhere and the label's own text is parsed like any other sports
+read. The grade survives either way.
 
 **A slab is not always a sports card.** With a TCG selected, the label's text is
 treated as an ordinary name read and matched against that game's real catalog

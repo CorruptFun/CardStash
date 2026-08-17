@@ -546,14 +546,19 @@ whichever cue lands first; `describeBasis` is unit-tested for that reason.
 Grades live on `CollectionItem`, never on `Card`, for every game — see decision
 18. `slab.ts` owns `sanitizeGrade`, reused by the backup and social paths.
 
-**`psa.ts` uses our key, not the user's.** It is compiled in from
-`VITE_PSA_TOKEN` and there is no Settings field. Two things follow that are
-easy to forget: the token is READABLE in the static bundle (unlike the Google
-client id and Supabase key, nothing else backstops it), and its ~100/day free
-quota is now shared across all users rather than per-person. Certs cache for
-months and a 429 stands lookups down for hours. The real fix is a proxy holding
-the token server-side — point `VITE_PSA_ENDPOINT` at one and nothing else
-changes.
+**`psa.ts` uses our key, not the user's — and the key lives server-side.**
+`supabase/functions/psa-proxy` holds it (the `PSA_TOKEN` Supabase secret; 503
+"not configured" without one), and the `VITE_PSA_ENDPOINT` repo Actions
+VARIABLE points builds at it, so the bundle ships **no token at all**; the
+client calls the proxy keyless — not even the publishable key — and the pin
+comment in `supabase/config.toml` says why. The ~100/day free quota is still
+shared across all users (the proxy changes who can read the credential, not
+the arithmetic): certs cache for months on the device, the proxy caches its
+own answers, and a forwarded 429 stands lookups down for hours. The legacy
+shape — `VITE_PSA_TOKEN` compiled in, READABLE in the static bundle — remains
+for dev/direct builds only; when both are set the endpoint wins and psa.ts
+never sends the token to the proxy host. There is no Settings field either
+way.
 
 ## Binders are also objects on a shelf
 
