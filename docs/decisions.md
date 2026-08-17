@@ -1432,3 +1432,71 @@ rather than the main answer. Short of that, the failure mode to watch is the
 tempting one: adding "just one" attribute adjustment, or widening the tiers
 until a comparable is anything vaguely similar. Both convert a traceable
 summary into a guess wearing its clothes.
+
+---
+
+### 29. Being signed out was a bug, and "remember me" is a different feature
+
+**Context.** Users reported being signed out. The obvious request — add a
+"remember me" checkbox — was checked against the code before it was built, and
+it would have shipped a control that did nothing: sessions were already
+persisted in localStorage indefinitely, with no expiry, no idle timeout and no
+cleanup path. Ticking the box would have changed no behaviour at all, and the
+sign-outs would have continued underneath a UI now claiming to prevent them.
+
+**What was actually happening.** `signOut()` had exactly one automatic caller:
+the refresh path, on a 400/401 whose body named the token. Refresh tokens
+rotate, and this app's project sets `refresh_token_reuse_interval = 10`, so a
+token redeemed twice more than ten seconds apart is rejected with "Already
+Used". v0.15.x had already fixed the same-tick version of that race with an
+in-flight latch — but the latch is a module variable, so it latches one
+**document**. Two tabs have two latches and one shared localStorage. The second
+tab to wake spent a token the first had rotated, got the rejection, could not
+tell it from a revoked session, and signed the user out of both.
+
+A memoized session made it worse and made it durable: `loadSession()` cached
+the first read for the life of the page, so a tab open since before another
+tab's refresh held a dead token *permanently* and re-earned the sign-out on
+every wake.
+
+**Decision.** Fix the sign-outs where they happen, and ship the checkbox as
+the smaller, honest feature it actually is.
+
+- **A refresh spends the token storage holds**, never a memoized one.
+- **A rejection is a question, not a verdict.** `redeem()` re-reads storage
+  before believing one: if the stored refresh token has moved, the other tab
+  succeeded and left a live session there — adopt it. Only a rejection of the
+  token storage *still holds* ends a session, and there is exactly one retry,
+  because two rejections of two different tokens is no longer a race.
+- **Tabs share what they learn.** A `storage` event drops the memo, and a
+  session that vanished fires the sign-out hooks locally, so the vault key goes
+  with it.
+- **The token is warmed on resume**, before the app's own pollers ask, so a
+  wake-up failure is invisible rather than a red toast on the first tap.
+- **The checkbox is a FORGET-me switch.** Ticked by default; ticking it changes
+  nothing. Unticking moves the tokens to `sessionStorage` for a shared or
+  borrowed machine — a real need, and the only thing in the vicinity a
+  checkbox can honestly do.
+
+**Why the copy matters as much as the code.** The sub-copy states what
+unticking *does* and never what ticking protects you from. This is the same
+standard the connect nudges are held to (decision 21's "a warning users can
+disprove gets dismissed reflexively"): a box labelled "stay signed in", beside
+a bug that signs people out anyway, teaches users the control is a lie — and
+they are right, and they never trust it again. Naming it correctly costs
+nothing and keeps the checkbox meaning something on the day somebody genuinely
+needs a shared-device session.
+
+**What it does not fix, and does not claim to.** Storage eviction. Safari caps
+script-writable storage at seven days without interaction and iOS clears it
+under pressure; that is what took a real user's collection on 2026-08-15
+(decision 15b) and no token handling reaches it. `requestPersistence()` is the
+whole available defence and the Backup copy already says so. If sign-out
+reports continue from iOS users specifically, eviction — not the refresh path
+— is the place to look next.
+
+**What would reopen it.** A third context sharing the session (a service
+worker redeeming tokens, or a second origin), which would need a real
+cross-context lock rather than the read-retry-adopt pattern here; or GoTrue
+dropping the reuse interval to zero, which would make the retry the *only*
+thing standing between two tabs and a sign-out rather than the second line.

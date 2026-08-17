@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { IS_IOS, IS_STANDALONE } from '../lib/camera'
 import { useUi } from '../store/ui'
 
@@ -17,6 +17,14 @@ import { useUi } from '../store/ui'
  * two doors to one room is how people convince themselves they need a second
  * email, and a second email is a second collection.
  *
+ * **"Keep me signed in" is a forget-me switch, not a remember-me one.** Sessions
+ * have always persisted and the box is ticked by default; unticking it puts the
+ * tokens in `sessionStorage`, so a borrowed laptop or a library machine loses
+ * them when the tab closes. It is deliberately not sold as the fix for being
+ * signed out unexpectedly — that was a token-refresh race, fixed in
+ * `authsession.ts`, and a checkbox implying otherwise would be a promise this
+ * component cannot keep.
+ *
  * An iOS Home Screen app is the one place the Google button cannot be trusted:
  * the OAuth round trip has a long history of surfacing in Safari rather than
  * returning to the app, and a session that lands in Safari lands in a
@@ -32,6 +40,23 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [remember, setRemember] = useState(true)
+
+  // Read back rather than assumed: someone who unticked this last time must
+  // find it unticked, or the screen quietly re-promises what storage refuses.
+  useEffect(() => {
+    void import('../lib/authsession').then((auth) => setRemember(auth.rememberMe()))
+  }, [])
+
+  /**
+   * Banked the moment it is tapped, not at sign-in. The Google route leaves
+   * the page entirely and comes back to a fresh one, so a choice held only in
+   * this component's state would not survive the round trip.
+   */
+  const chooseRemember = useCallback((on: boolean) => {
+    setRemember(on)
+    void import('../lib/authsession').then((auth) => auth.setRememberMe(on))
+  }, [])
 
   const run = useCallback(
     async (work: () => Promise<void>) => {
@@ -94,6 +119,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
             {busy ? 'Checking…' : 'Sign in'}
           </button>
         </div>
+        <RememberBox on={remember} onChange={chooseRemember} />
         <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => setSent(false)}>
           Use a different email
         </button>
@@ -131,6 +157,29 @@ export function SignIn({ onSignedIn }: { onSignedIn: (email: string) => void }) 
           </button>
         </div>
       )}
+      <RememberBox on={remember} onChange={chooseRemember} />
     </>
+  )
+}
+
+/**
+ * Shown on both steps, because the choice is about the device rather than
+ * about which button you pressed — and someone on a shared machine works it
+ * out while waiting for the email as often as before asking for it.
+ *
+ * The sub-copy says what unticking DOES, not what ticking protects you from.
+ * "Stay signed in" would read as a fix for the sign-outs this release also
+ * fixes, and users who kept it ticked and still hit a bug once would never
+ * trust the box again.
+ */
+function RememberBox({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="checkrow">
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        Keep me signed in
+        <em>{on ? 'Stays signed in on this device until you sign out' : 'Signs you out when you close this tab — for a shared or borrowed device'}</em>
+      </span>
+    </label>
   )
 }

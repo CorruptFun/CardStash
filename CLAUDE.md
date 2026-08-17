@@ -267,6 +267,22 @@ dismissed reflexively for the rest of the product's life.
 
 - `lib/authsession.ts` — sign-in, shared by the vault and social. `cloud.ts`
   re-exports it so existing call sites keep one import site.
+
+**Being signed out was never an expiry** (decision 29). Sessions persist
+indefinitely and always did, so nothing here is a "session length" knob. The
+sign-outs were the refresh path destroying good sessions, and four rules in
+`authsession.ts` now stand in the way — don't erode any of them: concurrent
+callers share ONE refresh; a refresh spends the token **storage** holds, never
+a memoized one; a rejection is re-checked against storage before it is
+believed (another tab's rotation leaves a live session there, and only a
+rejection of the token storage *still holds* may call `signOut()`); and tabs
+share what they learn via the `storage` event. `tests/unit/authsession.test.mjs`
+pins all four plus the older rule that a 500, a 429 or a dropped connection
+never ends a session. **"Keep me signed in" is a forget-me switch** — ticked by
+default, ticking it changes nothing, unticking moves the tokens to
+`sessionStorage` for a shared machine. Never re-word it into a promise to fix
+sign-outs, and never move the choice into settings: it decides which storage
+holds the token key, and a setting would ride the backup and the CSV export.
 - `lib/socialcloud.ts` — the hosted transport. Everything it receives still
   goes through `social.ts`'s sanitizers.
 - `components/SignIn.tsx` — the one sign-in UI; `SocialPanel.tsx` — the front

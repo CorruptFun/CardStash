@@ -9,6 +9,8 @@ key, and nothing else.
 | `cardstock-analytics` | IndexedDB (Dexie) | Local diagnostics events + flush bookkeeping. Separate DB so "erase everything" and analytics clearing are independent. |
 | `cardstock-settings` | localStorage | zustand-persisted preferences (see below). |
 | `cardstock-version` | localStorage | Last seen `APP_VERSION`, for the "Updated to vX" toast. |
+| `cardstock-cloud-session` | localStorage **or** sessionStorage | The GoTrue access/refresh token pair (`lib/authsession.ts`). Which store holds it is the whole of "Keep me signed in": localStorage by default, sessionStorage when the user unticked it. Never both at once. |
+| `cardstock-remember` | localStorage | `'0'` = don't keep me signed in. Absent means remember, so the default costs no write. Durable even when the answer is "no", because the Google round trip destroys the page that held the choice. |
 
 ## Identity conventions
 
@@ -319,10 +321,12 @@ Persisted to localStorage under `cardstock-settings`. Defaults in parentheses.
 | `cardSourceShare` (`false`) | May the pictures and details this user fills in be contributed back? Off by default, and the switch that matters: a photo of a card is a photo the user took, and publishing it is a decision. The editor asks again per card on top of this. |
 
 **Session tokens are deliberately NOT here.** They live under their own
-`cardstock-cloud-session` localStorage key so they can never be swept into a
-settings export. The vault passphrase and derived key are never persisted at
-all — a reload asks again, which is the cost of the server being unable to
-read the vault.
+`cardstock-cloud-session` key so they can never be swept into a settings
+export. Nor is the remember-me choice a setting: it decides which *storage*
+holds that key, and a preference that rode the settings blob would ride the
+backup and the CSV export with it. The vault passphrase and derived key are
+never persisted at all — a reload asks again, which is the cost of the server
+being unable to read the vault.
 
 **Rehydration is sanitized** (`merge` in the persist config): installs predating
 `enabledGames` get the full list, stored lists drop games this build doesn't

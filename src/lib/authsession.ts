@@ -13,13 +13,38 @@
  * the deciding one — doing it by hand keeps precise control of the redirect
  * behaviour, which is exactly what breaks in iOS Home Screen web apps.
  *
- * **Session tokens live in their own localStorage key**, NOT in the settings
- * store, so they are never swept into a settings export or a backup file.
+ * **Session tokens live in their own storage key**, NOT in the settings store,
+ * so they are never swept into a settings export or a backup file. Which
+ * storage — localStorage, or sessionStorage when the user asked not to be
+ * remembered — is the whole of what the "Keep me signed in" checkbox controls.
+ *
+ * ## Staying signed in
+ *
+ * People reported being signed out, and a checkbox was never going to fix it:
+ * sessions have always persisted. Three things did, and all three live below —
+ * concurrent callers share one refresh (`refreshing`), a rejected token is
+ * re-checked against storage before it ends a session (`redeem`), and tabs
+ * share what they learn (`watchOtherTabs`). The checkbox is the smaller, real
+ * feature that rides along: a way to say *don't*.
  */
 
 import { SUPABASE_KEY, SUPABASE_URL } from './cloudconfig'
 
 const SESSION_KEY = 'cardstock-cloud-session'
+/**
+ * "Keep me signed in", stored as its OPPOSITE: `'0'` means don't. Absent —
+ * which is every install that has never touched the checkbox — means remember,
+ * so the default costs no write and an unreadable storage still defaults to
+ * staying signed in.
+ *
+ * It lives in localStorage even when the answer is "don't remember me", and
+ * that is deliberate in two ways. It has to outlive the tab, because the
+ * Google round trip destroys the page that held the choice (the same problem
+ * `captureReferral()` solves for `?via=`), and it errs toward forgetting: a
+ * lingering "no" on a shared machine is the safe direction for a stale
+ * preference to fail.
+ */
+const REMEMBER_KEY = 'cardstock-remember'
 
 export interface CloudSession {
   accessToken: string
@@ -34,25 +59,89 @@ export class CloudError extends Error {}
 
 let session: CloudSession | null = null
 
-function loadSession(): CloudSession | null {
-  if (session) return session
+/**
+ * Reaching a Storage can THROW, not just return null — Safari with cookies
+ * blocked raises on the property itself, before any get. Every access goes
+ * through here so no caller has to remember that.
+ */
+function store(kind: 'local' | 'session'): Storage | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as CloudSession
-    if (typeof parsed?.accessToken !== 'string' || typeof parsed?.refreshToken !== 'string') return null
-    session = parsed
-    return session
+    return kind === 'local' ? localStorage : sessionStorage
   } catch {
     return null
   }
 }
 
+/**
+ * Is this device one the session should outlive the tab on?
+ *
+ * Note what this is NOT: it is not a switch that turns persistence on. Sessions
+ * have always persisted and still do — the checkbox exists so somebody on a
+ * borrowed or shared machine can say *don't*, and it defaults to remembering
+ * because that is what the overwhelming majority want and already had.
+ */
+export function rememberMe(): boolean {
+  return store('local')?.getItem(REMEMBER_KEY) !== '0'
+}
+
+/**
+ * Record the choice and MOVE any live session to the storage it now belongs
+ * in, so the answer takes effect on the session already in hand rather than
+ * only on the next sign-in.
+ */
+export function setRememberMe(on: boolean): void {
+  const current = loadSession()
+  try {
+    if (on) store('local')?.removeItem(REMEMBER_KEY)
+    else store('local')?.setItem(REMEMBER_KEY, '0')
+  } catch {
+    /* private mode — the choice lasts for this run only */
+  }
+  if (current) saveSession(current)
+}
+
+/**
+ * The session as STORAGE has it, ignoring the in-memory copy.
+ *
+ * The preferred store is read first, the other as a fallback, because the
+ * preference can change between a save and a read — flipping the checkbox must
+ * not look like being signed out while `setRememberMe` is mid-move.
+ */
+function readStored(): CloudSession | null {
+  const order = rememberMe() ? (['local', 'session'] as const) : (['session', 'local'] as const)
+  for (const kind of order) {
+    try {
+      const raw = store(kind)?.getItem(SESSION_KEY)
+      if (!raw) continue
+      const parsed = JSON.parse(raw) as CloudSession
+      if (typeof parsed?.accessToken !== 'string' || typeof parsed?.refreshToken !== 'string') continue
+      return parsed
+    } catch {
+      /* corrupt or unreadable — try the other store */
+    }
+  }
+  return null
+}
+
+function loadSession(): CloudSession | null {
+  if (session) return session
+  session = readStored()
+  return session
+}
+
+/**
+ * Write to the store the preference names and clear the other one, so a
+ * session never exists in both — a leftover copy in localStorage after the
+ * user asked us to forget them is the whole thing the checkbox promises not
+ * to do.
+ */
 function saveSession(next: CloudSession | null): void {
   session = next
+  const keep = rememberMe() ? 'local' : 'session'
   try {
-    if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-    else localStorage.removeItem(SESSION_KEY)
+    store(keep === 'local' ? 'session' : 'local')?.removeItem(SESSION_KEY)
+    if (next) store(keep)?.setItem(SESSION_KEY, JSON.stringify(next))
+    else store(keep)?.removeItem(SESSION_KEY)
   } catch {
     /* private mode — the session simply won't survive a reload */
   }
@@ -85,14 +174,76 @@ export function onSignOut(fn: () => void): void {
   signOutHooks.add(fn)
 }
 
-export function signOut(): void {
-  saveSession(null)
+function fireSignOutHooks(): void {
   for (const fn of signOutHooks) {
     try {
       fn()
     } catch {
       /* a hook must never block signing out */
     }
+  }
+}
+
+export function signOut(): void {
+  saveSession(null)
+  // Belt and braces: `saveSession` clears the store the preference names and
+  // the other one, but a session written before the preference last changed
+  // could sit in either, and signing out must leave nothing behind anywhere.
+  try {
+    store('local')?.removeItem(SESSION_KEY)
+    store('session')?.removeItem(SESSION_KEY)
+  } catch {
+    /* nothing readable to clear */
+  }
+  fireSignOutHooks()
+}
+
+/**
+ * Other tabs of the same origin share this storage, and until this existed
+ * they did not share the session.
+ *
+ * A `storage` event fires in every tab EXCEPT the one that wrote, which is
+ * exactly the set that would otherwise be holding a refresh token the writer
+ * has already spent. Dropping the memo makes the next read pick up what they
+ * wrote; a session that vanished means they signed out, and this tab has to
+ * let go of the same derived state a local sign-out would.
+ */
+function watchOtherTabs(): void {
+  const target = typeof window !== 'undefined' ? window : undefined
+  if (typeof target?.addEventListener !== 'function') return
+  target.addEventListener('storage', (event: StorageEvent) => {
+    // `key === null` is `storage.clear()` — everything went, ours included.
+    if (event.key !== null && event.key !== SESSION_KEY && event.key !== REMEMBER_KEY) return
+    const had = session !== null
+    session = readStored()
+    if (had && !session) fireSignOutHooks()
+  })
+}
+
+watchOtherTabs()
+
+/**
+ * Refresh on the way back in, before the app's own pollers ask.
+ *
+ * A phone left on the Friends screen overnight wakes with an hour-dead access
+ * token and fires every poller at once. One quiet refresh here means the burst
+ * finds a live token, and a refresh that fails because the platform has not
+ * finished reconnecting fails invisibly here instead of as a red toast on
+ * whatever the user tapped first.
+ */
+export function installSessionKeepalive(): void {
+  const warm = (): void => {
+    const current = loadSession()
+    if (!current || Date.now() < current.expiresAt) return
+    void freshToken().catch(() => {})
+  }
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') warm()
+    })
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('online', warm)
   }
 }
 
@@ -137,6 +288,9 @@ function sessionFrom(body: Record<string, unknown>): CloudSession {
  * got a 400, and the 400 handler below called `signOut()`. A perfectly good
  * session was destroyed by its own app being busy, and the user was asked for
  * their email again as if they had never signed up.
+ *
+ * It latches this DOCUMENT, which is why it is not the whole answer — see
+ * `redeem()` for the other half of the same race, between tabs.
  */
 let refreshing: Promise<string> | null = null
 
@@ -154,37 +308,71 @@ function isTokenRejection(status: number, body: string): boolean {
   return /invalid|expired|revoked|not_found|already/i.test(body)
 }
 
+/**
+ * Spend a refresh token, and — the load-bearing part — do not believe a
+ * rejection until storage has been re-read.
+ *
+ * The latch above dedupes callers within one document. Two TABS have two
+ * latches and one shared localStorage, so the second tab to wake redeems a
+ * token the first already rotated. GoTrue forgives that for
+ * `refresh_token_reuse_interval` (10s on this project) and rejects it flatly
+ * after, with "Already Used" — indistinguishable, to the old code, from a
+ * revoked session. It called `signOut()`, and a user with the app open in two
+ * places was signed out of both for the crime of having two tabs.
+ *
+ * So a rejection is a QUESTION now: has the stored token moved since we sent
+ * ours? If it has, the other tab succeeded and left us a good session sitting
+ * in storage — adopt it. Only a rejection of the token storage still holds is
+ * the end of a session. One retry, because two rejections of two different
+ * tokens is no longer a race.
+ */
+async function redeem(current: CloudSession, retried = false): Promise<string> {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: current.refreshToken }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    if (!isTokenRejection(res.status, detail)) {
+      // Transient. Leave the session alone so the next call can try again;
+      // whatever asked for a token simply fails this once.
+      throw new CloudError('Could not reach your account — check your connection')
+    }
+    const stored = readStored()
+    if (!retried && stored && stored.refreshToken !== current.refreshToken) {
+      // Another tab rotated it while this request was in flight. Their session
+      // is the live one.
+      session = stored
+      if (Date.now() < stored.expiresAt) return stored.accessToken
+      return redeem(stored, true)
+    }
+    // Genuinely over: the server has rejected the token storage still holds.
+    signOut()
+    throw new CloudError('Your session expired — sign in again')
+  }
+  const next = sessionFrom((await res.json()) as Record<string, unknown>)
+  saveSession({ ...next, email: next.email || current.email, userId: next.userId || current.userId })
+  return next.accessToken
+}
+
 /** A valid access token, refreshing first if this one is close to expiry. */
 export async function freshToken(): Promise<string> {
-  const current = loadSession()
+  // From STORAGE, not the memo. Another tab may have refreshed since this one
+  // last looked, and spending a token it has already rotated is what the
+  // retry in `redeem()` exists to survive — better not to need it. A stored
+  // session wins; nothing stored leaves the memo alone, because a browser that
+  // refuses storage entirely still has a working session for this run.
+  const stored = readStored()
+  if (stored) session = stored
+  const current = session
   if (!current) throw new CloudError('Not signed in')
   if (Date.now() < current.expiresAt) return current.accessToken
   // Everyone who arrives while a refresh is in flight waits on that one rather
   // than starting a second and invalidating the first.
   if (refreshing) return refreshing
 
-  refreshing = (async () => {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: current.refreshToken }),
-    })
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      if (isTokenRejection(res.status, detail)) {
-        // Genuinely over: the server has rejected the token itself.
-        signOut()
-        throw new CloudError('Your session expired — sign in again')
-      }
-      // Transient. Leave the session alone so the next call can try again;
-      // whatever asked for a token simply fails this once.
-      throw new CloudError('Could not reach your account — check your connection')
-    }
-    const next = sessionFrom((await res.json()) as Record<string, unknown>)
-    saveSession({ ...next, email: next.email || current.email, userId: next.userId || current.userId })
-    return next.accessToken
-  })()
-
+  refreshing = redeem(current)
   try {
     return await refreshing
   } finally {

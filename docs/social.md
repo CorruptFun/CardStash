@@ -373,6 +373,70 @@ serves the vault and social both, and neither module owns the other's state.
 | `matchWants` | `match_wants` over the local want keys |
 | `sendToInbox` / `requestFriend` / `answerRequest` / `eraseSocial` | thin RPC wrappers |
 
+### Staying signed in
+
+Users kept reporting being signed out, and the honest first finding was that
+**nothing was expiring them**. Sessions have always persisted, so a
+"remember me" checkbox could not have been the fix — the sign-outs were the
+refresh path destroying good sessions. Four things now stand between a user
+and a spurious sign-out, and the first three are the actual fix:
+
+1. **One in-flight refresh per document** (`refreshing`). Refresh tokens
+   rotate; opening Friends fires three calls in one tick, and without the latch
+   two of them redeem a token the third already spent. This landed first, in
+   v0.15.x, and was necessary but not sufficient.
+2. **A refresh spends the token STORAGE holds**, not a memoized one.
+   `freshToken()` re-reads before deciding, because another tab may have
+   rotated since this one last looked.
+3. **A rejection is re-checked before it is believed** (`redeem()`). Two tabs
+   have two latches and one shared localStorage, so the second to wake spends
+   an already-rotated token. GoTrue forgives that for
+   `refresh_token_reuse_interval` (10s on this project) and then rejects it
+   flatly with "Already Used" — which the old code could not tell from a
+   revoked session, so it called `signOut()` and **signed the user out of both
+   tabs for having two open**. Now a rejection asks a question: has the stored
+   refresh token moved since we sent ours? If it has, the other tab succeeded
+   and left a live session in storage — adopt it. Only a rejection of the token
+   storage *still holds* ends a session. One retry; two rejections of two
+   different tokens is no longer a race.
+4. **Tabs share what they learn** (`watchOtherTabs()`), and a due token is
+   refreshed quietly when the app comes back to the foreground
+   (`installSessionKeepalive()`, wired in `boot()`), so a phone waking with an
+   hour-dead token does not fail on whatever the user tapped first.
+
+`tests/unit/authsession.test.mjs` pins all four, plus the rules that outlast
+them: a 500, a 429 or a dropped connection **never** ends a session, because a
+train tunnel must not become a re-signup.
+
+**What this still cannot fix.** Storage eviction is not a session bug and no
+amount of token handling touches it — Safari caps script-writable storage at
+seven days without interaction, and iOS clears it under pressure.
+`requestPersistence()` in `boot()` is the whole available defence, and the
+Backup copy says so rather than pretending otherwise.
+
+### "Keep me signed in" is a forget-me switch
+
+The checkbox in `SignIn.tsx` exists, and it is deliberately the *opposite* of
+what the name suggests. It is ticked by default and ticking it changes nothing
+— that is what every install already had. Unticking it puts the tokens in
+`sessionStorage`, so a borrowed laptop or a library machine loses them when the
+tab closes. Three things about it are load-bearing:
+
+- **It is not sold as the fix for being signed out.** The sub-copy says what
+  unticking *does*, never what ticking protects you from. A box promising
+  "stay signed in" next to a bug that signs people out anyway is a promise the
+  component cannot keep, and one broken promise costs the control its
+  credibility for good.
+- **The choice is banked on tap, not at sign-in** (`chooseRemember`). The
+  Google round trip returns to `origin + pathname` with the page that held the
+  state gone — the same problem `captureReferral()` solves for `?via=`. So
+  `cardstock-remember` is written the moment it is tapped, and it lives in
+  localStorage even when the answer is "no": a stale preference should fail
+  toward forgetting.
+- **A session never exists in both stores.** `saveSession()` clears the loser
+  every time and `signOut()` clears both regardless, or the box leaves behind
+  exactly the durable copy it promised not to keep.
+
 ### Two switches, not one
 
 `socialConfigured()` (signed in + handle) and `socialPublishing()`

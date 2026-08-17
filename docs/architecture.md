@@ -144,6 +144,7 @@ Two behaviours worth knowing:
 | `useSettings` (`lib/settings.ts`) | localStorage `cardstock-settings` via zustand `persist` | forever | Preferences, API keys, profile identity, sync config. Rehydration is **sanitized** (see [data-model.md](data-model.md)). |
 | `uiStore` (`store/ui.ts`) | memory (vanilla zustand store + `useStore`) | tab session | Bottom-sheet request, toasts, search prefill, AI-builder seed cards. |
 | Dexie live queries | IndexedDB `cardstock` | forever | Everything the user owns. Views subscribe with `useLiveQuery`, so any write anywhere re-renders every dependent screen. |
+| The session (`lib/authsession.ts`) | localStorage `cardstock-cloud-session`, or sessionStorage when the user unticked "Keep me signed in" | until sign-out, or the tab closes | The GoTrue token pair, in its own key so it never rides a settings export. Memoized in the module, but re-read from storage before every refresh and dropped on another tab's `storage` event — two tabs share one rotating refresh token, and a stale memo is how they used to sign each other out. |
 
 There is no global app reducer and no context provider tree; screens read what
 they need directly.
