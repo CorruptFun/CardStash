@@ -1,5 +1,6 @@
 // Sync + tiny: just reads whether a session exists in localStorage. The cloud
 // modules it would otherwise pull in stay behind the dynamic import below.
+import { artRectFor, captureArtHashes, pickPrintingByArt } from './arthash'
 import { isSignedIn } from './authsession'
 import { type FrameCapture } from './camera'
 import { bestMatchAcrossGames, matchGame } from './cardsearch'
@@ -11,7 +12,9 @@ import {
   looksLikeCollectorLine,
   parseCornerInfo,
   parsePasscode,
+  parsePokemonMega,
   parsePokemonVariant,
+  pokemonNameMega,
   pokemonNameSuffix,
   sameYgoCode,
   SOLE_EVIDENCE_REGIONS,
@@ -1088,22 +1091,41 @@ async function identifyViaOcr(
       // when it does not, refuse rather than answer with the species: the
       // frame says the two disagree, and a confident wrong card is the
       // costlier way to be wrong (wrong price, auto-collected in collect
-      // mode). Strictly narrowing — it only ever fires when the matched name
-      // carries no suffix at all, so a name band that DID read one is left
-      // alone.
-      if (best.card.game === 'pokemon' && !pokemonNameSuffix(best.card.name)) {
-        const declared = parsePokemonVariant(await cornerText)
-        if (declared) {
-          const wanted = `${best.card.name} ${declared}`
-          const variant = await matchPokemon(wanted, undefined, undefined, config.pokemonKey).catch(() => null)
-          const ok = variant && normalizeName(variant.name) === normalizeName(wanted)
+      // mode). Strictly narrowing — the suffix half only ever fires when the
+      // matched name carries no suffix at all, so a name band that DID read
+      // one is left alone.
+      //
+      // Mega is the same trap on a PREFIX. "Mega Darkrai ex" is a third card
+      // beside "Darkrai" and "Darkrai ex", and a name read that drops the
+      // leading word lands on either sibling exactly — including through this
+      // very guard, which used to answer the ex sibling because the right
+      // name was not in its vocabulary. The frame declares Mega in the same
+      // strip ("Mega Evolution ex rule"), so a declared Mega must resolve to
+      // a name that carries it — under the modern word or the XY-era "M" —
+      // or the match is refused.
+      if (best.card.game === 'pokemon') {
+        const strip = await cornerText
+        const suffix = pokemonNameSuffix(best.card.name)
+        const declared = suffix ? null : parsePokemonVariant(strip)
+        const mega = parsePokemonMega(strip) && !pokemonNameMega(best.card.name)
+        if (declared || mega) {
+          const base = declared ? `${best.card.name} ${declared}` : best.card.name
+          const wanteds = mega ? [`Mega ${base}`, `M ${base}`] : [base]
+          let variant: Card | null = null
+          for (const wanted of wanteds) {
+            const hit = await matchPokemon(wanted, undefined, undefined, config.pokemonKey).catch(() => null)
+            if (hit && normalizeName(hit.name) === normalizeName(wanted)) {
+              variant = hit
+              break
+            }
+          }
           traceEvent('variant-declared', {
             read: name,
             card: best.card.name,
-            declared,
-            resolved: ok ? variant.name : null,
+            declared: mega ? ['Mega', declared].filter(Boolean).join(' ') : declared,
+            resolved: variant ? variant.name : null,
           })
-          if (!ok) continue
+          if (!variant) continue
           best = { ...best, card: variant }
         }
       }
@@ -1134,16 +1156,52 @@ async function identifyViaOcr(
         const better = await mtgMatchTraits(card.name, null, { foil: true }).catch(() => null)
         if (better) card = better
       }
-      // Nothing printed pinned the EDITION — the collector line was never read,
-      // or read without a number — so the card on screen is whatever a fuzzy
-      // name match defaulted to. On a card with more than one frame that is a
-      // coin toss the user pays for, in the wrong art and the wrong price. Ask
-      // the cloud read which printing this is, if the user switched it on.
-      if (!refined?.read.number) {
-        const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
-        if (settled) {
-          traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
-          card = settled
+      // Nothing printed pinned the EDITION — so the card on screen is whatever
+      // a fuzzy name match defaulted to. On a card with more than one frame
+      // that is a coin toss the user pays for, in the wrong art and the wrong
+      // price. Ask the cloud read which printing this is, if the user
+      // switched it on.
+      //
+      // The condition is `pinned`, NOT "was a number read", and the difference
+      // is the whole point. `linePinnedPrinting` requires the chosen card's own
+      // number to AGREE with the read; a number that read and then resolved to
+      // nothing is precisely the case it was written to catch — `matchMtg`
+      // carries a fuzzy fallback, so a borderless print whose line read "PRM 2"
+      // resolves to no card under that set, falls back to the name, and returns
+      // the base printing while a refinement has technically happened.
+      //
+      // Gating on `read.number` therefore SKIPPED the tie-break on exactly the
+      // frames it exists for: the scan reported an unconfirmed edition and
+      // simultaneously declined the one mechanism that could confirm it.
+      // Measured on the standard matrix, `borderless-any` reads "PRM 2" on 5 of
+      // its 12 cells and answers the base printing on all 12.
+      const pinned = linePinnedPrinting(refined)
+      if (!pinned) {
+        // Free before paid: printings that differ only by ARTWORK — basic
+        // lands, alternate-art commons — are invisible to the treatment
+        // tie-break (its own guard exits when the frames match), and the
+        // artwork is the one discriminator already in hand. Candidates come
+        // from the same exact-name printings list, so a different card is
+        // not a reachable answer; a decisive art win settles the edition
+        // without spending the cloud credit, and every way of declining —
+        // offline, one art, incumbent winning, thin margin — falls through
+        // to the tie-break with nothing changed.
+        const byArt = await artRepick(card, canvas, mapRect, signal).catch(() => null)
+        if (byArt) {
+          traceEvent('art-pick', {
+            from: card.number ?? null,
+            to: byArt.card.number ?? null,
+            edition: byArt.card.setCode ?? null,
+            d: byArt.distance,
+            margin: byArt.margin,
+          })
+          card = byArt.card
+        } else {
+          const settled = await printingTiebreak(card, canvas, foil).catch(() => null)
+          if (settled) {
+            traceEvent('tiebreak', { from: card.number ?? null, to: settled.number ?? null, edition: settled.setCode ?? null })
+            card = settled
+          }
         }
       }
       return {
@@ -1159,7 +1217,7 @@ async function identifyViaOcr(
           confidence: refined?.viaCollector ? CORNER_CONFIDENCE : best.score,
           via: 'ocr',
           foil: foil ? true : undefined,
-          pinned: linePinnedPrinting(refined),
+          pinned,
         },
       }
     }
@@ -1479,7 +1537,29 @@ async function identifyViaOcr(
         confidence: CLOUD_CONFIDENCE,
         via: 'cloud',
         foil: detectFoil(reading.canvas) ? true : undefined,
-        pinned: !!read.number,
+        // NEVER pinned, however confidently the model transcribed a number.
+        //
+        // `pinned` means the PRINTED LINE chose this printing, and it is what
+        // the sheet believes when it stops offering the picker. A model's
+        // number is not that: it is one reading of the whole card, and it is
+        // the part measured to be least reliable. `!!read.number` also could
+        // not be repaired by verifying the number against the card, the way
+        // `linePinnedPrinting` does for OCR — the card was SELECTED by that
+        // number, so the two agree circularly.
+        //
+        // Measured: on the `worst` degradation the model answered Arceus VSTAR
+        // as BRS 176 when the card is BRS 184, and Lugia VSTAR as SIT 202 when
+        // it is SIT 211 — in both cases the base printing's number for an
+        // alt-art card, both sharing the alt art's printed total, so even
+        // corroborating on `printedTotal` would have agreed. Those two arrived
+        // as "wrong printing while claiming the code was read", the one class
+        // the user has no way to catch, and they are the whole reason this is
+        // false rather than clever.
+        //
+        // The card itself still stands: these were MISSES before the rescue
+        // read them. Identifying the card and pinning the edition are separate
+        // achievements and are reported separately.
+        pinned: false,
       },
     }
   }
@@ -1630,6 +1710,18 @@ const RAW_BOTTOM_BANDS: OcrRect[] = [
   { x: 0.45, y: 0.9, w: 0.55, h: 0.1 },
 ]
 /**
+ * The modern full-art collector line, as a NARROW sliver of the raw frame.
+ * The wide bands above straddle it — their top edge clips the line and their
+ * width spends the OCR's pixel cap on rules text beside it, so a Rayquaza
+ * VMAX's "218/203" came back as garbage from the very rect that contained
+ * it, under every polarity variant (probed; polarity was not the lever).
+ * Narrower is what reads: 0.35 wide leaves the cap's 1600px to the line's
+ * own glyphs, and starting at 0.885 keeps the line whole. Probed clean on
+ * the fixture that motivated it; tried FIRST so a hit costs one pass and
+ * skips both wide bands.
+ */
+const RAW_LINE_SLIVER: OcrRect = { x: 0, y: 0.885, w: 0.35, h: 0.05 }
+/**
  * The raw bands get their OWN budget rather than whatever the mapped-region
  * loops leave behind — which is nothing. Measured on `charizard-base`: two
  * variants over four regions is eight passes against a budget of four or five,
@@ -1639,6 +1731,30 @@ const RAW_BOTTOM_BANDS: OcrRect[] = [
  * line, because every pass short-circuits on a finished read.
  */
 const RAW_BAND_PASSES = 3
+
+/**
+ * The art-hash re-pick, packaged for the one call site: printings list, the
+ * capture's shift-grid hashes, the argmin-with-margin decision. Every
+ * failure returns null and the caller's answer stands — see arthash.ts for
+ * the guards and the measurements behind them.
+ */
+async function artRepick(
+  card: Card,
+  canvas: HTMLCanvasElement,
+  mapRect: (rect: OcrRect) => OcrRect,
+  signal?: AbortSignal,
+): Promise<{ card: Card; distance: number; margin: number } | null> {
+  const art = artRectFor(card.game)
+  if (!art) return null
+  const raws = await mtgRawPrintings(card.name).catch(() => [] as any[])
+  if (raws.length < 2) return null
+  const hashes = captureArtHashes(canvas, art, mapRect)
+  const pick = await pickPrintingByArt(card, raws, hashes, signal)
+  if (!pick) return null
+  const chosen = mtgCardFromRaw(pick.raw)
+  if (chosen.apiId === card.apiId) return null
+  return { card: chosen, distance: pick.distance, margin: pick.margin }
+}
 
 function collectorEq(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false
@@ -1799,7 +1915,7 @@ async function readCornerInfo(
     // the flavour text instead of the number. Measured on `charizard-base`:
     // the crop ended at 0.93 of the frame and "4/102" prints at 0.96.
     budget = RAW_BAND_PASSES
-    for (const rect of RAW_BOTTOM_BANDS) await pass(rect, { variant: 'normal' })
+    for (const rect of [RAW_LINE_SLIVER, ...RAW_BOTTOM_BANDS]) await pass(rect, { variant: 'normal' })
   }
   return read
 }

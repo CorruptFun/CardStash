@@ -94,7 +94,7 @@ export function ScanBatch({
   onForget,
 }: {
   onClose: () => void
-  onOpenCard: (card: Card, finish: Finish) => void
+  onOpenCard: (card: Card, finish: Finish, printingUnconfirmed: boolean) => void
   onAdded: (added: number, itemIds: string[], scanIds: string[]) => void
   /** Hold a dropped card back, the same way the tray's own × does. */
   onForget: (cardId: string) => void
@@ -219,7 +219,7 @@ export function ScanBatch({
             scan={scan}
             picked={!!picked?.has(scan.id)}
             onToggle={() => toggle(scan.id)}
-            onOpen={() => onOpenCard(scan.card, scanRowFinish(scan))}
+            onOpen={() => onOpenCard(scan.card, scanRowFinish(scan), scan.pinned === false)}
             onDrop={() => void drop(scan)}
           />
         ))}

@@ -211,8 +211,30 @@ re-identifying the same card sitting on the table. Rules that matter:
      "4/102" printed at 0.96. Two bands (left for modern, right for vintage
      Pokémon and MTG) with `RAW_BAND_PASSES` reserved for them, because on the
      shared budget the region loops spend everything before reaching them.
-9. **Printing tie-break** (MTG, opt-in) — see below. Only when step 8 pinned no
-   collector number, so the edition is still a fuzzy match's default guess.
+9. **Art-hash re-pick** (`lib/arthash.ts`, MTG, free) — only when step 8 left
+   the edition unpinned. Printings that differ only by ARTWORK — basic lands,
+   alternate-art commons, a borderless reprint — are invisible to everything
+   above and to the tie-break below (its own guard exits when the frames
+   match); the artwork is the one discriminator in hand. The captured art
+   region is hashed at a ±4% shift grid (`frameHash`, min-over-shifts —
+   single-rect comparison dies at 2% detector jitter) against candidate
+   printings' small images, grouped by `illustration_id`, newest sixteen
+   arts with the incumbent always kept. A swap needs a DIFFERENT art to win
+   argmin by ≥10 bits at ≤40 absolute, and the incumbent's own art must have
+   been scored — every weaker footing declines and nothing changes hands.
+   Candidates come from the same exact-name printings list as the tie-break,
+   so a different card is never reachable. Images load via `fetch()`
+   (CORS-checked, so the canvas never taints; offline or a 404 is a decline,
+   not an error). Measured: seven wrong-printing cells recovered (six
+   borderless, one retro), distances 15–26 at margins 11–24, zero wrong
+   swaps, declines landing exactly on the hash-hostile degradations
+   (soft-focus, glare, perspective). A swap stays **unpinned** — pixels chose
+   the printing, not the printed line.
+10. **Printing tie-break** (MTG, opt-in) — see below. Only when the art
+   re-pick declined and the edition is still unpinned, so what is on screen
+   is still a fuzzy match's default guess. "Unpinned" is
+   `linePinnedPrinting`, not "no number was read" — see below for why those
+   differ. Free before paid: a decisive art win spends no cloud credit.
 
 ### Budgets
 
@@ -356,6 +378,22 @@ single-block segmentation, one polarity, ≤3 passes. The 5×/sparse/mixed-polar
 ladder and the raw-frame bottom-band rescue only run on the sole-evidence path,
 which is reached only when no name was readable. So the card that most needs the
 strong reader is exactly the card that never gets it.
+
+**The trigger is `pinned`, not "was a number read", and the difference is the
+whole point.** `linePinnedPrinting(refined)` asks whether the chosen card's own
+number AGREES with what the line read; `refined?.read.number` only asks whether
+the line produced digits. A line that reads and then resolves to nothing sits
+in the gap, and that is exactly the case this feature exists for: a borderless
+print whose line reads "PRM 2" finds no card under that set, `matchMtg` falls
+back to the name, and the base printing comes back with a refinement having
+technically happened. The call site was gated on the number until v0.7.x, which
+meant the scan reported an unconfirmed edition and simultaneously declined the
+one mechanism that could confirm it — measured on the standard matrix,
+`borderless-any` reads "PRM 2" on 5 of its 12 cells and answered the base
+printing on all 12. It now gates on `!pinned`, the same expression the card
+sheet reads. After a tie-break swap `pinned` stays **false**: the model picked
+that printing, the printed line did not, and the sheet must keep saying so
+(the guessing-versus-claiming rule above).
 
 So when the edition was never pinned, the frame is offered to the cloud read —
 not as a rescue (the card is already identified) but as **precision**. What the

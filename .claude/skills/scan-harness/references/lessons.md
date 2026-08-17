@@ -717,3 +717,203 @@ result seems absurd, check this list before writing code.
     the ones that mattered had not (lesson 69). Diff the CELLS, not the
     summary: 43/90 to 43/90 hid one regression and one silently skipped code
     path, and either alone would have been read as noise.
+73. **Grade the printing on the NUMBER alone; adding a `setCode` equality check
+    manufactures failures out of catalog aliases.** The grader compares printed
+    numbers and it is tempting to tighten it by demanding the set codes agree
+    too. Measured over the 118 cells currently graded `printing: 'ok'`, exactly
+    2 disagree on set code and BOTH are aliases rather than errors:
+    `pokemon/rayquaza-vmax` truth `SWSH7` against answer `EVS` (both Evolving
+    Skies) and `pokemon/pikachu-modern` truth `SV08` against answer `SSP` (both
+    Surging Sparks). Zero true positives, two false positives — lesson 71's
+    trap in a new place, a veto that produces the exact failure it was added to
+    catch. The asymmetry is structural, not a data-entry slip: the fixture
+    manifest's `setCode` comes from the catalog that FETCHED the image, the
+    outcome's from whichever catalog ANSWERED the scan, and TCGdex and
+    pokemontcg.io do not share a set vocabulary. Two names for one set is
+    normal; two numbers for one printing is not.
+74. **The collector-line READ RATE decides the printing; the selection logic is
+    downstream of it.** Per-cell over the four fixtures that lose printings the
+    correlation is essentially perfect — a line that yields a number gives the
+    right printing, a line that yields nothing gives the wrong one.
+    `charizard-base` reads `4/102` on 3 of 12 cells and is right on exactly
+    those 3, answering Celebrations `SWSH11.5TG TG03` on the other 9;
+    `rayquaza-vmax` reads `70/203` on 1 of 12 and is right on exactly that one;
+    `riftbound/short-name-1` reads nothing on all 8 and is wrong on all 8. The
+    rule that generalises: **a printing resolver has nothing to rank when
+    `number` and `total` are both null**, and 39 of the 51 wrong-printing cells
+    are in that state. Before designing scoring for a candidate list, check how
+    often there is any evidence to score it with — otherwise the clever part
+    runs on a quarter of the cases and the other three quarters keep answering
+    whatever the catalog listed first (lesson 70). The one fixture that breaks
+    the correlation names the second mechanism rather than refuting the first:
+    `mtg/borderless-any` reads `PRM 2` on 5 of 12 and is still wrong on all 12,
+    because `matchMtg`'s fuzzy fallback answers a failed exact lookup with the
+    base printing.
+75. **A guard whose gate asks a different question from the flag it sets fires
+    on the wrong cells, and both halves look correct in isolation.** The
+    printing tie-break was called under `!refined?.read.number` — "was a number
+    read?" — while the meta it exists to repair is `pinned =
+    linePinnedPrinting(refined)`, "did that number agree with the card
+    returned?". A line that reads and then resolves to nothing sits in the gap,
+    which is precisely the case `linePinnedPrinting`'s own docstring names: on
+    `borderless-any` the line reads `PRM 2` on 5 of 12 cells, the exact lookup
+    fails, `matchMtg`'s fuzzy fallback returns the base printing, and the old
+    gate counted that as pinned. The scan therefore told the user its edition
+    was unconfirmed and simultaneously refused the one mechanism that could
+    confirm it. It now gates on `!pinned`, the same expression that reaches the
+    UI. When a guard exists to repair a state, gate it on the state's own
+    predicate — never on a proxy that is usually equal to it, because "usually
+    equal" is a description of the cells where the bug is not.
+
+76. **Asking the model to CHOOSE from the catalog's printings measured worse
+    than asking it to describe the frame, and the reason generalises.** The
+    open rescue prompt asks for a transcription plus `treatment`; the closed
+    one hands over the exact-name printing list and asks which number it is.
+    Closed sounds strictly safer — a pick outside the list is discarded, so the
+    wrong-card class becomes unreachable rather than merely unlikely — and on
+    one fixture it is: `counterspell-retro` went wrong → ok on the clean cells,
+    which the treatment path had never got. But the full matrix came back
+    **179/223 against 180/223, MTG 33/47 against 34/47**, and the printing gate
+    failed it at `mtg 72% → 70%`. It trades cells rather than adding them, at a
+    larger prompt.
+    Two mechanisms, both worth knowing before trying this again.
+    **The cap must protect the ANSWER, not the favourite.** Ordering the
+    shortlist by the believed set is what a first cut does, and it is exactly
+    backwards: the believed set is the one the fuzzy match got WRONG, so twenty
+    slots filled with MSC printings of Lightning Bolt while the borderless
+    PW26 #5 — the reason the tie-break ran at all — never made the list. The
+    model answered `unsure`, correctly, and four cells that had been right went
+    wrong. Taking one printing per distinct treatment first recovered them.
+    **A prompt that asks a new question stops answering the old one.** With the
+    choose prompt in place, `tiebreak-read` came back `treatment: null` on every
+    call, so the frame path that was doing the real work went silent — the
+    closed question did not beat treatment, it REPLACED it. Asking for both
+    explicitly ("answer `treatment` even when you set `unsure`") recovered the
+    clean cells but not the glare ones, where the model declines and describes
+    nothing. If this is revisited, the shape to try is the open prompt WITH a
+    candidate list appended, so `pick` can only ever add to `treatment`.
+77. **The art region can rank same-name printings with the hash the pipeline
+    already owns — but only through a shift-search, and the live-app half
+    still hangs on a CORS header nobody here can read.** Spiked for the case
+    nothing else reaches (Island #290 answered as #289: identical name, frame
+    and treatment, only the artwork differs — `printingTiebreak` exits at
+    `treatments.size < 2` and its non-regular rule would block a re-pick
+    anyway). `frameHash` (vision.ts, 128-bit mean+gradient 8×8) over an
+    approximate art rect, on the fixtures' two real same-name pairs (Lightning
+    Bolt MSC 806 vs borderless PW26 5; Tauros GX SM1 100 vs full-art 156):
+    aligned, same-art-degraded distances sit ≤30 while different-art sits
+    46–77 — but a 2% rect shift already costs 15–34 bits and by 4% the bands
+    OVERLAP (26–51 vs 46), so a single-rect comparison is dead on arrival;
+    detector jitter is the common case, not the corner case. A ±4% shift-search
+    on the capture side (25 hashes, each a 9×8 downsample — negligible)
+    restores it: capture degraded AND misaligned 3%/scale 1.03 ranked the true
+    printing argmin in 4/4 trials at margins 14v47, 22v36, 19v57, 17v47.
+    Design consequences if built: rank among exact-name candidates only (the
+    tie-break's own candidate rule), never an absolute threshold — the
+    borderless margin (22v36) is too thin for one; and the harness can develop
+    all of it taint-free (vite serves fixture images same-origin). The live-app
+    half — whether catalog CDNs let a canvas read pixels back, or taint it —
+    could not be asked from the sandbox (its egress policy 403s every card
+    host; verified against the proxy's own status, policy denials rather than
+    outages), so `fetch-fixtures.mjs` records each image host's
+    `access-control-allow-origin` into `manifest.corsProbe`, asked with the
+    app's gh-pages origin, and the CI fixture run ANSWERED it:
+    `cards.scryfall.io` `*`, `assets.tcgdex.net` `*`,
+    `tcgplayer-cdn.tcgplayer.com` `*`, `images.ygoprodeck.com` **no header**.
+    So the approach is live for MTG (the motivating basic-lands case),
+    Pokémon and every TCGplayer-served game, and dead for Yu-Gi-Oh's catalog
+    images — an acceptable loss, since Yu-Gi-Oh identifies by passcode and
+    its printing column is excluded (lesson 63) — unless YGOPRODeck changes
+    headers; no client-side cleverness revives a tainting host, by design.
+    Remember `crossOrigin='anonymous'` on the img/fetch: without it the
+    browser never sends Origin and the canvas taints even on a `*` host.
+78. **"No collector evidence" measures the PARSER, not the OCR — read the
+    raws before spending anything on read rate.** Lesson 74 counted
+    `riftbound/short-name-1` among the cells with `number: null, total:
+    null`, and the read-rate framing filed it under "the line doesn't
+    read." The trace raws said otherwise: the line read `VEN « R04 « EN`,
+    clean, on cell after cell — Riftbound RUNES print set · letter-number ·
+    language and no fraction at all, and `parseCornerInfo`'s riftbound
+    branch knew only fractions, so a perfect read parsed to nothing and the
+    `refine` event reported null evidence. One strictly-additive parser row
+    (anchored on all three tokens in order, language tail last, set slot
+    refusing language marks; runs only when no fraction parsed) moved
+    printing 118/169 → 125/169 and riftbound 42/50 → 49/50, identical over
+    two runs, no other cell moving. Validated lesson-29 style before the
+    matrix: over every captured OCR text, ten fires, all on the rune
+    fixture, all yielding exactly the printed set and number. The
+    transferable rule: a null in the refine event is the END of a pipeline
+    — attribute it to the read only after the raws show no line, because a
+    vocabulary gap in the parser produces the same null at zero OCR cost to
+    fix. matchCatalog needed no change: +0.2 digits / +0.1 set already
+    ranked the right printing first once evidence existed.
+79. **When the rect that contains the line reads garbage, suspect the rect's
+    GEOMETRY before its treatment — and probe both before touching the
+    pipeline.** Rayquaza VMAX's "218/203" sat inside the deep tier's raw
+    bottom band on eleven wrong cells and came back garbage at 5× under
+    normal, binary AND binary-flip — the polarity hypothesis (white type
+    over dark art wants a flipped threshold) probed clean-negative in two
+    minutes, which is the whole point of probing first: two matrix runs
+    were NOT spent measuring it. Geometry was the lever. The wide bands'
+    top edge (y 0.90) clips the line and their 0.55 width spends
+    `readRegionText`'s 1600px cap on rules text beside it; a 0.35-wide
+    sliver at y 0.885 leaves the cap to the line's own glyphs and parses
+    218/203 outright. `RAW_LINE_SLIVER` now runs FIRST in the deep tier's
+    raw-band list: printing 125 → 128 (pokemon 35/55 → 38/55), identical
+    over two runs, and a hit costs one pass while skipping both wide bands.
+    Two boundaries measured at the same time, both worth keeping: charizard-
+    base's degraded cells are a genuine READ limit — no rect or variant
+    resolves "4/102" under soft-focus/lowlight/worst — and the counterspell
+    glare auto cell flipped fail after the change on both runs, which the
+    reproduce-twice rule says to treat as caused; its traces settled it the
+    other way — byte-identical OCR text and candidates, only the lookup
+    LATENCIES differ, so the cell is decided by wall-clock deadlines under
+    CPU load, not by any code path (the sliver is unreachable from an MTG
+    auto cell). When a cell flips the same way twice, diff its TRACES, not
+    its verdicts, before accepting blame — same-direction flips can still
+    be timing, and the trace is what says so.
+80. **The MTG deep tier is measured-negative — do not extend
+    `PRINTING_RIDES_ON_THE_LINE` to MTG for these fixtures.** The obvious
+    next move after the Pokémon deep tier recovered rayquaza was the same
+    ladder for MTG's worst printing column, and the probe refused it on all
+    three counts before a matrix run was spent. `counterspell-retro`'s
+    collector block resolves under NO treatment — every rect × variant ×
+    5-6× zoom returns fragments — and the one fragment that parses ("Rt 6
+    2" → number 6, truth 5) would sail through the refine's `collectorEq`
+    against a catalog with that many Counterspell printings and pin a wrong
+    edition as claimed-read: the deep tier there would not merely read
+    nothing, it would manufacture the one class the gate forbids growing.
+    And `borderless-any`, where the line DOES read at the narrow-sliver
+    treatment ("P 0002 Promo / PRM · EN"), is resolve-blocked rather than
+    read-blocked — printed promo numbering against Scryfall's set
+    vocabulary — which reading harder cannot fix and the cloud tie-break
+    already covers. The general rule the pair teaches: before extending a
+    read ladder to a new game, probe BOTH that its target parses under some
+    treatment AND that a parse would resolve — a ladder pointed at type
+    below its resolution floor spends latency to mint confident wrong
+    answers, which is strictly worse than the fuzzy default it replaces.
+81. **The art hash shipped, and the spike's numbers held in the real
+    pipeline.** `arthash.ts` + the `!pinned && mtg` wiring ahead of the cloud
+    tie-break: printing 128/169 → 135/169 (mtg 23/46 → 30/46), identical
+    over two runs, zero cells moving anywhere else. Every one of the seven
+    swaps landed the truth printing at distances 15–26 and margins 11–24 —
+    inside the spike's predicted bands (lesson 77: true-art ≤26, wrong-art
+    ≥36) — and every decline landed on a hash-hostile degradation
+    (soft-focus, glare, perspective, worst), which is the guards refusing
+    rather than guessing: zero wrong swaps. Three things to know before
+    extending it. The measurement needed the SNAPSHOT to carry candidate
+    images (`images/prints/`, served by the stub at the captured URL shape;
+    `illustration_id` kept in the trim because `artGroups` keys on it) — an
+    art hash without stub-served candidates measures as a no-op and looks
+    like a fix that does not work, lesson 55's trap in new clothes. The
+    counterspell-retro asymmetry (small-offset swapped, clean declined)
+    is art-BOX geometry: the 1997 frame's art sits differently than the 2015
+    rect models, so `MTG_ART_RECT` samples frame furniture on retro cards
+    and the margin thins — a per-frame-era art rect is the obvious next
+    refinement, worth a probe before believing it. And the CI round that
+    builds the snapshot taught its own lessons the hard way: a finished
+    node script that never calls `process.exit` waits on whatever half-open
+    sockets upstream servers left behind (two hour-long silent stalls —
+    cancel unconsumed error bodies, exit explicitly), and Scryfall's CDN
+    throttles per connection (~12.7s/image sequential; a pool of six is a
+    browser's politeness and divides the wait).

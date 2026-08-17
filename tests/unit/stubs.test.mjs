@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createStubs } from '../harness/stub-apis.mjs'
@@ -8,7 +9,9 @@ import { createStubs } from '../harness/stub-apis.mjs'
 /**
  * The harness's stub card-APIs must honor each service's query semantics —
  * a stub that answers wrong would grade the scan pipeline against fiction.
- * Runs only when the fixtures snapshot is present (harness-fixtures branch).
+ * Most tests run only when the fixtures snapshot is present (harness-fixtures
+ * branch); the cards.scryfall.io image-mapping test builds its own scratch
+ * store so the URL→file contract holds with or without a snapshot.
  */
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'harness', 'fixtures')
@@ -16,6 +19,41 @@ const present = existsSync(join(FIXTURES, 'manifest.json'))
 
 test('fixture snapshot present (informational)', (t) => {
   if (!present) t.skip('no fixtures — pull the harness-fixtures branch to run stub tests')
+})
+
+test('scryfall imagery: small-front URLs map onto the print image store', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cardstash-print-stub-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const id = '7673784e-db4b-43a1-8d55-1bb9fc1e284f'
+  const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
+  mkdirSync(join(dir, 'images', 'prints'), { recursive: true })
+  writeFileSync(join(dir, 'images', 'prints', `${id}.jpg`), bytes)
+  const stubs = createStubs(dir)
+
+  // The real URL shape, cache-buster included: answered with the stored bytes.
+  const hit = stubs.handle(`https://cards.scryfall.io/small/front/7/6/${id}.jpg?1783903008`)
+  assert.equal(hit.status, 200)
+  assert.equal(hit.contentType, 'image/jpeg')
+  assert.ok(Buffer.isBuffer(hit.body) && hit.body.equals(bytes), 'serves the stored bytes')
+  assert.equal(stubs.handle(`https://cards.scryfall.io/small/front/7/6/${id}.jpg`).status, 200, 'no cache-buster')
+
+  // An id in the right shape but not in the store: a clean 404 Response,
+  // never a throw — the pipeline reads any failed image as "decline, keep
+  // the current answer", and the harness must exercise that path honestly.
+  const miss = stubs.handle('https://cards.scryfall.io/small/front/0/0/00000000-0000-4000-8000-000000000000.jpg?1')
+  assert.equal(miss.status, 404)
+
+  // Other sizes and faces are NOT served from the small file: they fall
+  // through to the abort path like any unstubbed traffic, and are recorded
+  // so a pipeline drifting onto uncaptured URLs fails loudly.
+  for (const other of [
+    `https://cards.scryfall.io/normal/front/7/6/${id}.jpg?1783903008`,
+    `https://cards.scryfall.io/large/front/7/6/${id}.jpg`,
+    `https://cards.scryfall.io/small/back/7/6/${id}.jpg`,
+  ]) {
+    assert.equal(stubs.handle(other), null, `${other} is not stubbed`)
+  }
+  assert.ok(stubs.stats.unknown.some((u) => u.includes('/normal/front/')), 'drift lands in stats.unknown')
 })
 
 if (present) {
@@ -71,6 +109,23 @@ if (present) {
     assert.ok(res.body.data.length >= 10)
     // Real data includes double-faced prints ("… // Lightning Bolt").
     assert.ok(res.body.data.every((p) => p.name.includes('Lightning Bolt')))
+  })
+
+  test('scryfall imagery: captured print URLs round-trip once the snapshot carries them', (t) => {
+    const printsPath = join(FIXTURES, 'api', 'scryfall-prints.json')
+    if (!existsSync(printsPath)) return t.skip('no scryfall prints in this snapshot')
+    const prints = Object.values(JSON.parse(readFileSync(printsPath, 'utf8')))
+      .flat()
+      .filter((p) => p.image_uris?.small)
+    const served = prints.filter((p) => existsSync(join(FIXTURES, 'images', 'prints', `${p.id}.jpg`)))
+    // A pre-art-hash snapshot carries no print images; the mapping is still
+    // covered by the scratch-store test above. Re-pull harness-fixtures after
+    // CI regenerates to exercise the real captured URLs end to end.
+    if (!served.length) return t.skip('snapshot predates print images — re-pull harness-fixtures')
+    for (const p of served.slice(0, 5)) {
+      const hit = stubs.handle(p.image_uris.small)
+      assert.ok(hit && hit.status === 200 && hit.contentType === 'image/jpeg', p.image_uris.small)
+    }
   })
 
   test('pokemontcg.io: phrase + number queries filter captured rows', () => {

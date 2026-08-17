@@ -33,8 +33,23 @@ async function fetchRetry(url, { as = 'json', tries = 3, headers = {} } = {}) {
   let lastErr
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': UA, ...headers } })
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+      // The timeout is load-bearing: node fetch never times out on its own,
+      // so one stalled socket — a CDN throttling CI's shared egress IPs by
+      // trickling bytes — hangs the whole sequential fetcher. Measured: the
+      // first print-image run sat "in progress" near an hour on exactly
+      // that. 15s is generous for a 15KB image or a JSON page; a resource
+      // slower than that is better recorded as a failure and retried.
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, ...headers },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!res.ok) {
+        // Release the socket: an error body left unconsumed keeps the
+        // connection — and with it the process — alive. Eleven 500s times
+        // three tries held the event loop open for 76 silent minutes once.
+        res.body?.cancel().catch(() => {})
+        throw new Error(`HTTP ${res.status} for ${url}`)
+      }
       return as === 'json' ? await res.json() : Buffer.from(await res.arrayBuffer())
     } catch (err) {
       lastErr = err
@@ -57,11 +72,25 @@ const IMAGE_MAGIC = [
   [0x52, 0x49], // webp (RIFF)
 ]
 
+/**
+ * One representative image URL per CDN host, for the CORS probe below. The
+ * art-hash work (comparing a captured art region against candidate printings'
+ * imageSmall) lives or dies on whether these hosts answer a cross-origin
+ * request with Access-Control-Allow-Origin — without it the canvas taints and
+ * getImageData throws in the app. Browsers enforce that; node does not, so CI
+ * (the only place with egress to these hosts) records what each would say.
+ */
+const corsProbeUrls = new Map()
+
 async function saveImage(rel, url) {
   const buf = await fetchRetry(url, { as: 'buffer' })
   if (buf.length < 8_000 || !IMAGE_MAGIC.some(([a, b]) => buf[0] === a && buf[1] === b)) {
     throw new Error(`Not a plausible image (${buf.length}B) from ${url}`)
   }
+  try {
+    const host = new URL(url).host
+    if (!corsProbeUrls.has(host)) corsProbeUrls.set(host, url)
+  } catch { /* relative or odd URL: nothing to probe */ }
   await save(rel, buf)
   return { rel, bytes: buf.length }
 }
@@ -652,11 +681,48 @@ async function mtg() {
     cardNames: await save('api/scryfall-card-names.json', { data: names?.data ?? [] }),
   }
   console.log(`  card-names catalog: ${names?.data?.length ?? 0} names`)
+
+  // Candidate-print imagery for the art-hash printing re-pick: when nothing
+  // printed pinned the edition, the pipeline fetches candidates'
+  // `image_uris.small` (grouped by illustration_id — kept in the trim below
+  // for exactly that) and compares art regions. The matrix sandbox has no
+  // egress, so the snapshot must CARRY those images; stub-apis.mjs serves
+  // them back from images/prints/<scryfall-id>.jpg. Sequential on purpose —
+  // ~180 files of ~15KB is not worth a fetch storm at the CDN. A miss is
+  // recorded but must never fail the mtg STEP: the workflow refuses to
+  // publish on whole-game failure, and one absent art image is not that — at
+  // run time the stub answers 404 for it and the pipeline declines, the
+  // honest replay of the same miss live. A dead CDN is bounded the same way:
+  // after 8 straight misses the loop records one summary failure and stops
+  // instead of retrying its way through every remaining print.
+  // Concurrency is load-bearing, not impatience: the CDN rate-limits the
+  // runner PER CONNECTION — measured at ~12.7s per image, which put the
+  // first sequential run at 38 silent minutes for ~180 files and would tax
+  // every future fixture round the same. Six parallel connections is what a
+  // browser opens against one host; the per-connection drip divides by it.
+  const allPrints = dedupeBy(Object.values(printsByName).flat(), (p) => p.id)
+  const wanted = allPrints.filter((p) => p.image_uris?.small) // double-faced layouts carry imagery per face
+  let printImages = 0
+  let printMisses = 0
+  await pool(wanted, 6, async (p) => {
+    // A dead CDN is bounded: a dozen misses with not one success means every
+    // remaining request would fail the same way — stop scheduling work.
+    if (printMisses >= 12 && printImages === 0) return
+    try {
+      await saveImage(`images/prints/${p.id}.jpg`, p.image_uris.small)
+      printImages++
+    } catch (err) {
+      printMisses++
+      fail(`mtg-print-image/${p.id}`, err)
+    }
+  })
+  manifest.datasets.mtg.printImages = printImages
+  console.log(`  print images: ${printImages}/${wanted.length}`)
 }
 
 function trimScryfall(raw) {
-  const pick = ({ id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
-    id, name, flavor_name, set, set_name, collector_number, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
+  const pick = ({ id, name, flavor_name, set, set_name, collector_number, illustration_id, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital }) => ({
+    id, name, flavor_name, set, set_name, collector_number, illustration_id, rarity, released_at, finishes, image_uris, type_line, oracle_text, mana_cost, cmc, colors, color_identity, prices, purchase_uris, scryfall_uri, frame, frame_effects, border_color, full_art, digital,
   })
   const out = pick(raw)
   if (Array.isArray(raw.card_faces)) {
@@ -827,6 +893,22 @@ for (const [name, step] of steps) {
   }
 }
 
+// The deployed app's origin, so the probe asks the question the app would.
+// The header comes back the same for any origin when the CDN answers `*`,
+// which is the answer that matters; an echo or an absence is recorded as-is.
+manifest.corsProbe = {}
+for (const [host, url] of corsProbeUrls) {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Origin: 'https://corruptfun.github.io' } })
+    manifest.corsProbe[host] = { status: res.status, allowOrigin: res.headers.get('access-control-allow-origin') }
+    res.body?.cancel().catch(() => {})
+  } catch (err) {
+    manifest.corsProbe[host] = { error: String(err?.message ?? err) }
+  }
+}
+console.log('\nCORS probe (allowOrigin per image host):')
+for (const [host, info] of Object.entries(manifest.corsProbe)) console.log(`  ${host}: ${JSON.stringify(info)}`)
+
 await save('manifest.json', manifest)
 console.log(`\n${manifest.fixtures.length} fixtures, ${failures.length} failures.`)
 console.log(failures.length ? failures.map((f) => ` - ${f.scope}: ${f.error}`).join('\n') : 'All clean.')
@@ -841,3 +923,9 @@ if (manifest.fixtures.length < FIXTURE_FLOOR || wholeGameFailures.length) {
   )
   process.exit(1)
 }
+// Exit EXPLICITLY. The work is done and everything is on disk; letting the
+// process wait for the event loop to drain leaves the job's fate to whatever
+// sockets upstream servers feel like holding half-open tonight — measured
+// twice as a finished fetcher sitting silent for over an hour, snapshot
+// built and never published.
+process.exit(0)

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bundleImport } from './bundle.mjs'
 
-const { parseCornerInfo, parsePasscode, sameYgoCode } = await bundleImport('src/lib/corner.ts')
+const { parseCornerInfo, parsePasscode, sameYgoCode, looksLikeCollectorLine } = await bundleImport('src/lib/corner.ts')
 
 test('pokemon: SV-era collector line with set code', () => {
   const read = parseCornerInfo('pokemon', 'SVI EN 123/198\n© 2023 Pokémon')
@@ -76,6 +76,32 @@ test('riftbound: bare fraction pins the collector number', () => {
   const read = parseCornerInfo('riftbound', 'noise 045/298 λ')
   assert.equal(read.number, '45')
   assert.equal(read.total, '298')
+})
+
+test('riftbound: the rune line pins set and number without any fraction', () => {
+  // Verbatim from harness traces — '«' is OCR's reading of the printed dot.
+  const read = parseCornerInfo('riftbound', 'h— -w\nVEN « R04 « EN »7 Greg Ghielmett')
+  assert.equal(read.setCode, 'VEN')
+  assert.equal(read.number, 'R04')
+  // An alternate-art rune keeps its letter suffix ("R04a").
+  assert.equal(parseCornerInfo('riftbound', 'VEN · R04a · EN ©2026').number, 'R04A')
+})
+
+test('riftbound: a printed fraction still outranks the rune shape', () => {
+  const read = parseCornerInfo('riftbound', '045/298 « OGN « EN')
+  assert.equal(read.number, '45')
+  assert.equal(read.total, '298')
+})
+
+test('riftbound: the rune shape stays silent without its anchors', () => {
+  // No language tail: not a collector line.
+  assert.equal(parseCornerInfo('riftbound', 'VEN « R04').number, undefined)
+  // Ability text with a stray letter-digit token.
+  assert.equal(parseCornerInfo('riftbound', 'RUNE R04 COST 2').number, undefined)
+  // A language mark cannot serve as the set.
+  assert.equal(parseCornerInfo('riftbound', 'EN « R04 « EN').setCode, undefined)
+  // Other games never grow this vocabulary.
+  assert.equal(parseCornerInfo('starwars', 'VEN « R04 « EN').number, undefined)
 })
 
 test('lorcana: fraction plus language-adjacent set digit', () => {
@@ -166,4 +192,69 @@ test('other code games do not acquire a passcode', () => {
   // Only Yu-Gi-Oh prints one; an 8-digit run on a One Piece card is something
   // else and must not be handed to an id lookup.
   assert.equal(parseCornerInfo('onepiece', 'OP01-016 12345678').passcode, undefined)
+})
+
+/*
+ * The modern MTG line, from real photographs of Marvel's Super Heroes (MSH) and
+ * Super Heroes Commander (MSC) — held sideways, which is how the bug showed up.
+ *
+ * `looksLikeCollectorLine` decides which way up a turned card is. Every other
+ * shape it knows is a NUMBER, and a modern Magic card prints none of them: no
+ * fraction, no set-dash code, no passcode. So it answered false for every
+ * modern MTG card, orientation fell through to a word-count guess, and a wrong
+ * guess maps the collector region onto the card's top edge where there is
+ * nothing to read — no number, no pinned printing, and a fuzzy name match
+ * answers with Scryfall's default. The wrong-variant report is an orientation
+ * bug wearing a matching bug's clothes.
+ */
+test('mtg: the modern collector line reads as one, set code beside language', () => {
+  for (const line of [
+    'M 0233\nMSH\u2605EN', // Thanos, the Mad Titan
+    'L 0268\nMSH\u2605EN', // Hell's Kitchen
+    'C 0340\nMSH\u2605EN', // Blazing Crescendo
+    'U 0734\nMSC\u2605EN', // Tippy-Toe, Terrific Partner
+    'R 0673\nMSC\u2605EN', // Viper, Cruel Conspirator
+    '266 NEO\u00b7EN', // an ordinary modern printing
+    '0269 M MH3 \u2022 EN', // the dot separator
+  ]) {
+    assert.equal(looksLikeCollectorLine(line), true, line)
+  }
+})
+
+test('mtg: the parser still pins set and number off that line', () => {
+  for (const [line, setCode, number] of [
+    ['M 0233\nMSH\u2605EN', 'MSH', '233'],
+    ['U 0734\nMSC\u2605EN', 'MSC', '734'],
+    // OCR routinely fuses the two printed rows into one.
+    ['R 0673 MSC\u2605EN', 'MSC', '673'],
+  ]) {
+    const read = parseCornerInfo('mtg', line)
+    assert.equal(read.setCode, setCode, line)
+    assert.equal(read.number, number, line)
+  }
+})
+
+/*
+ * The half that matters: widening what counts as a collector line is exactly
+ * the move that manufactures wrong cards if it over-fires (invariant 1), and
+ * here a false positive would settle a turned card UPSIDE DOWN. Text taken off
+ * the same photographs, from every other region of the card.
+ */
+test('mtg: card text is never mistaken for a collector line', () => {
+  for (const line of [
+    'THANOS, THE MAD TITAN',
+    'LEGENDARY CREATURE \u2014 ETERNAL VILLAIN',
+    'DEATHTOUCH, LIFELINK',
+    '4/4',
+    '2/2',
+    '\u00a9 MARVEL 2026 WIZARDS OF THE COAST',
+    'I SHALL RESTORE THE COSMIC BALANCE',
+    'PUT TWO +1/+1 COUNTERS ON THANOS. CHOOSE ODD OR EVEN.',
+    'TARGET CREATURE GETS +3/+1 UNTIL END OF TURN',
+    'THIS LAND ENTERS TAPPED.',
+    'ADD R OR B',
+    'BI\u00d6RN BARENDS',
+  ]) {
+    assert.equal(looksLikeCollectorLine(line), false, line)
+  }
 })

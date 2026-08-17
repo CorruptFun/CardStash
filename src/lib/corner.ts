@@ -229,7 +229,19 @@ export function parseCornerInfo(game: Game, text: string): CornerRead {
     return {}
   }
   // Riftbound / Star Wars: Unlimited and friends — the number alone helps.
-  return frac ? { number: frac[1], total: frac[2], fused } : {}
+  if (frac) return { number: frac[1], total: frac[2], fused }
+  // Riftbound RUNES print no fraction at all: the line reads "VEN • R04 •
+  // EN" — set, letter-prefixed number, language, in that order. Anchored on
+  // all three tokens with tight separators, language tail last, so a stray
+  // "R04" in card text cannot fire. Measured over every captured OCR text in
+  // the matrix: fires only on the one rune fixture, yielding exactly its
+  // printed set and number. The set slot must not itself be a language mark
+  // ("EN « R04 « EN" declares nothing).
+  if (game === 'riftbound') {
+    const rune = upper.match(/\b([A-Z]{2,4})\b[^A-Z0-9\n]{1,4}([A-Z]\d{2}[A-Z]?)\b[^A-Z0-9\n]{1,4}(?:EN|FR|DE|IT|ES|PT)\b/)
+    if (rune && !LANGS.has(rune[1])) return { setCode: rune[1], number: rune[2] }
+  }
+  return {}
 }
 
 /**
@@ -352,6 +364,27 @@ export function looksLikeCollectorLine(text: string): boolean {
   if (/\b[A-Z]{1,4}\d{0,3}\s*-\s*[A-Z]{0,2}\s?\d{2,4}\b/.test(upper)) return true
   // The Yu-Gi-Oh passcode.
   if (/(?:^|\D)\d{8}(?!\d)/.test(upper)) return true
+  // "MSH★EN", "NEO·EN", "MH3 • EN" — the modern MTG line's second row: a set
+  // code beside a language token.
+  //
+  // Every other shape here is a NUMBER, and a modern Magic card prints none of
+  // them: no fraction since the 2010s, no set-dash code, no passcode. So this
+  // function answered false for every modern MTG card ever put in front of it,
+  // and a sideways Magic card could never settle which way was up from its own
+  // printed line — it fell through to the word-count heuristic, and a wrong
+  // guess puts the collector region on the card's TOP edge, where there is
+  // nothing to read. No number read means no printing pinned, which means the
+  // fuzzy name match answers with Scryfall's one default printing. That is the
+  // wrong-variant report, arriving from an orientation bug.
+  //
+  // Deliberately the code-beside-language shape and not the number: it is the
+  // same evidence `parseCornerInfo` already trusts for `setCode`, it is
+  // strongly positional (bottom edge, under the rules box), and it cannot be
+  // tripped by the digits that live all over a card's top half — mana values,
+  // power/toughness, a year in the copyright line. `LANGS` excludes the code
+  // slot so "EN EN" cannot self-match.
+  const nearLang = upper.match(/\b([A-Z][A-Z0-9]{2,4})\b[^A-Z0-9\n]{0,4}(EN|DE|FR|IT|ES|PT|JA|JP|KO|RU|ZH)\b/)
+  if (nearLang && !LANGS.has(nearLang[1])) return true
   return false
 }
 
@@ -391,6 +424,10 @@ const POKEMON_VARIANT_RULES: readonly (readonly [RegExp, string])[] = [
   [/v\s*star\s*(rule|power)/, 'VSTAR'],
   [/pokemon\s*g\s*x/, 'GX'],
   [/g\s*x\s*rule/, 'GX'],
+  // The 2026 Mega header declares ex by itself — "Mega Evolution ex rule" —
+  // and its body ("When your Mega Evolution ex is Knocked Out…") never says
+  // "Pokémon ex", so without this row a Mega frame declares nothing.
+  [/mega\s*evolution\s*ex/, 'ex'],
   [/pokemon\s*ex(\s|$)/, 'ex'],
   [/pokemon\s*v(\s|$)/, 'V'],
 ]
@@ -422,4 +459,38 @@ export function parsePokemonVariant(text: string): string | null {
   const flat = flattenText(text)
   for (const [pattern, suffix] of POKEMON_VARIANT_RULES) if (pattern.test(flat)) return suffix
   return null
+}
+
+/**
+ * Mega rule-box phrasings. Anchored the way the variant rules are: on the
+ * words printed beside the marker, so a trainer whose effect mentions "Mega
+ * Evolution Pokémon" (Mega Turbo) is not read as a declaration. The 2026
+ * frame prints "Mega Evolution ex rule"; the XY-era M cards print "Mega
+ * Evolution Rule". Nothing else on a card prints either phrase.
+ */
+const POKEMON_MEGA_RULES: readonly RegExp[] = [/mega\s*evolution\s*ex/, /mega\s*evolution\s*rule/]
+
+/**
+ * Does the rules box declare the card a MEGA?
+ *
+ * The 2026 Mega mechanic makes the suffix parser's answer incomplete rather
+ * than wrong: "Darkrai", "Darkrai ex" and "Mega Darkrai ex" are three cards
+ * at three prices, and a rules box reading "Mega Evolution ex rule" declares
+ * the third while `parsePokemonVariant` alone can only name the second. Same
+ * contract as the variant parser — strictly evidence, only ever says the card
+ * carries something the matched name lacks, never loosens a match.
+ */
+export function parsePokemonMega(text: string): boolean {
+  const flat = flattenText(text)
+  return POKEMON_MEGA_RULES.some((pattern) => pattern.test(flat))
+}
+
+/**
+ * Does the card NAME already say Mega? Modern names lead with the word
+ * ("Mega Darkrai ex"); the XY-era catalog abbreviates it ("M Charizard-EX").
+ * First word only: "Meganium" flattens to one word and never matches.
+ */
+export function pokemonNameMega(name: string): boolean {
+  const first = flattenText(name).split(' ')[0]
+  return first === 'mega' || first === 'm'
 }
