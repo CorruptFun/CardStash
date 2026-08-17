@@ -211,12 +211,61 @@ export async function ygoBySetCode(code: string, signal?: AbortSignal): Promise<
 }
 
 /**
+ * A print code reduced to the identity of ONE printing: set, region infix,
+ * unpadded number, variant letter.
+ *
+ * Case and whitespace are noise, and so is zero padding — "BLMR-EN85" is how a
+ * collector types "BLMR-EN085", and the two name the same row. The REGION
+ * INFIX is not noise. YGOPRODeck lists PSV-089 (Short Print), PSV-E089 (Short
+ * Print), PSV-EN089 (Common) and PSV-EN089 (Short Print) as four separate rows
+ * with their own rarity and their own price, so a key that folded the region
+ * away could not tell the first three apart.
+ *
+ * A spelling this cannot parse compares as itself. Parsed keys carry
+ * separators no printed code contains, so an unparsed one can only ever match
+ * a byte-identical partner — never a parsed key by accident.
+ */
+function exactCodeKey(value: string | undefined): string | null {
+  const raw = (value ?? '').toUpperCase().replace(/\s+/g, '')
+  if (!raw) return null
+  const m = raw.match(/^([A-Z0-9]+)-([A-Z]*?)0*(\d+)([A-Z]*)$/)
+  return m ? `${m[1]}|${m[2]}|${m[3]}|${m[4]}` : raw
+}
+
+/** The same printing as printed, region infix included — see `exactCodeKey`. */
+function sameExactYgoCode(a: string | undefined, b: string | undefined): boolean {
+  const key = exactCodeKey(a)
+  return key != null && key === exactCodeKey(b)
+}
+
+/**
  * The card as the asked-for printing: rarity and set price move Yu-Gi-Oh
  * values by orders of magnitude, so answering a code with the card's FIRST
  * printing would put a common's price on a secret rare.
+ *
+ * Selection is two-pass, and the order is the whole of the fix. `sameYgoCode`
+ * folds the region infix away on purpose — LOB-EN001 ≡ LOB-001 — because a
+ * scan reads Latin digits off a card in any language and has to find it. That
+ * rule is right for COMPARING and wrong for CHOOSING: asked first, it lets a
+ * query for "IOC-EN017" answer the "IOC-017" row, which is the right card
+ * wearing another region's rarity and another region's price. So an exactly
+ * spelled row wins when the card has one, and the cross-language set is only
+ * what we fall back to when it has none — a real regional print ("MRD-EN087"
+ * against a catalog listing just "MRD-087") still answers, exactly as before.
+ *
+ * Every exact key is also a `sameYgoCode` match, so the first pass can only
+ * narrow the second: it never answers a printing the old rule would have
+ * refused. What it cannot resolve is a card listing the SAME code twice at
+ * different rarities (PSV-EN089 is both Common and Short Print) — nothing in
+ * the printed code chooses between those, so feed order does, deterministically.
  */
 function printingByCode(card: Card, code: string): Card {
-  return ygoPrintingVariants(card).find((variant) => sameYgoCode(variant.number, code)) ?? card
+  const variants = ygoPrintingVariants(card)
+  return (
+    variants.find((variant) => sameExactYgoCode(variant.number, code)) ??
+    variants.find((variant) => sameYgoCode(variant.number, code)) ??
+    card
+  )
 }
 
 export async function ygoById(id: string): Promise<Card | null> {
